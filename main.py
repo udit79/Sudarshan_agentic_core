@@ -1,7 +1,7 @@
 from injestion import ingest_file, to_knowledge_unit
 
 # Test with any image path (.png, .jpg, .jpeg, .tiff, etc.)
-image_path = "sample_data/sample_ocr.png"
+image_path = "sample_data/screens.png"
 
 doc = ingest_file(image_path, user_id="udit", case_id="sih-demo-case-1")
 unit = to_knowledge_unit(doc)
