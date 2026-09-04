@@ -1,0 +1,27 @@
+## 1. SCRIPT (Scene-by-Scene)
+
+**SCENE 1 — OPENING HOOK (0:00 - 0:15)**
+*Visual: Dark screen. Slow pulse of red light. Government seal fades in.*
+**NARRATION:** "In the last 72 hours, a sophisticated cyber campaign has targeted the highest levels of government. This is not a drill."
+
+**SCENE 2 — THE THREAT (0:15 - 0:45)**
+*Visual: Animated network diagram. Nodes lighting up in sequence.*
+**NARRATION:** "APT29, also known as Cozy Bear, has launched a spear-phishing operation specifically designed to compromise senior officials across multiple ministries. The campaign uses spoofed domains that mirror official government portals with near-perfect accuracy."
+
+**SCENE 3 — THE METHOD (0:45 - 1:20)**
+*Visual: Split screen — legitimate email vs. malicious email. Highlight differences.*
+**NARRATION:** "Attackers embed malicious PDF attachments exploiting a zero-day vulnerability. Once opened, these documents establish persistent backdoors, enabling long-term access to classified communications and internal networks."
+
+**SCENE 4 — IMPACT (1:20 - 1:50)**
+*Visual: Map showing affected ministries. Red indicators pulse.*
+**NARRATION:** "The Ministry of Defence and Ministry of External Affairs have been specifically targeted. Compromise of these accounts could expose strategic plans, diplomatic communications, and operational timelines."
+
+**SCENE 5 — WHAT YOU MUST DO (1:50 - 2:30)**
+*Visual: Checklist animation. Clean, authoritative graphics.*
+**NARRATION:** "Immediate actions required. One: Do not open unexpected attachments, even from known contacts. Two: Verify all login portals independently before entering credentials. Three: Report any suspicious communication to your security officer within 15 minutes. Four: Await further technical guidance from the National Technical Research Organisation."
+
+**SCENE 6 — CLOSING (2:30 - 2:45)**
+*Visual: NTRO logo. Secure lock icon. Calm blue background.*
+**NARRATION:** "Vigilance is our first line of defence. The NTRO is actively monitoring this threat. Stay alert. Stay secure."
+
+---
