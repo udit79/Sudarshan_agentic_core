@@ -1,0 +1,21 @@
+## 4. NARRATION TEXT (Full Voiceover Script)
+
+[Scene 1]
+"In the last 72 hours, a sophisticated cyber campaign has targeted the highest levels of government. This is not a drill."
+
+[Scene 2]
+"APT29, also known as Cozy Bear, has launched a spear-phishing operation specifically designed to compromise senior officials across multiple ministries. The campaign uses spoofed domains that mirror official government portals with near-perfect accuracy."
+
+[Scene 3]
+"Attackers embed malicious PDF attachments exploiting a zero-day vulnerability. Once opened, these documents establish persistent backdoors, enabling long-term access to classified communications and internal networks."
+
+[Scene 4]
+"The Ministry of Defence and Ministry of External Affairs have been specifically targeted. Compromise of these accounts could expose strategic plans, diplomatic communications, and operational timelines."
+
+[Scene 5]
+"Immediate actions required. One: Do not open unexpected attachments, even from known contacts. Two: Verify all login portals independently before entering credentials. Three: Report any suspicious communication to your security officer within 15 minutes. Four: Await further technical guidance from the National Technical Research Organisation."
+
+[Scene 6]
+"Vigilance is our first line of defence. The NTRO is actively monitoring this threat. Stay alert. Stay secure."
+
+---
