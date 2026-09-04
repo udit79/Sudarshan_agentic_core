@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from injestion import ingest_file, to_access_context, to_knowledge_unit, IngestedDocument
 from memory.model import KnowledgeUnit, ScopeType, SourceType
 from memory.memory_manager import MemoryManager
@@ -40,6 +41,17 @@ def test_adapter_unknown_doc_type_falls_back_to_other():
     doc = IngestedDocument.create(source_path="data.custom", raw_text="Valid content", doc_type="custom_unknown")
     unit = to_knowledge_unit(doc)
     assert unit.source.source_type is SourceType.OTHER
+
+
+def test_ingest_image_with_ocr():
+    with patch("pytesseract.image_to_string", return_value="SECURITY CAMERA LOG: SECTOR 7"):
+        doc = ingest_file("sample_data/sample_ocr.png", user_id="user1", case_id="case1")
+        assert doc.doc_type == "image"
+        assert "SECURITY CAMERA LOG" in doc.raw_text
+
+        unit = to_knowledge_unit(doc)
+        assert unit.source.source_type is SourceType.IMAGE
+        assert unit.source.source_reference == "sample_data/sample_ocr.png"
 
 
 def test_ingestion_to_memory_manager_end_to_end():
