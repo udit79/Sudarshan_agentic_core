@@ -1,6 +1,19 @@
-from injestion.ingest import ingest_file
-from injestion.adapter import to_knowledge_unit
-doc = ingest_file("sample_data/dsaqueue.pdf", user_id="udit", case_id="sih-demo-case-1")
+from injestion import ingest_file, to_knowledge_unit
+
+# Test with any image path (.png, .jpg, .jpeg, .tiff, etc.)
+image_path = "sample_data/sample_ocr.png"
+
+doc = ingest_file(image_path, user_id="udit", case_id="sih-demo-case-1")
 unit = to_knowledge_unit(doc)
-print(unit)
+
+print("=== [1] INGESTED DOCUMENT OBJECT ===")
 print(doc)
+
+print("\n=== [2] KNOWLEDGE UNIT (MEMORY COMPATIBLE) ===")
+print(unit)
+
+print("\n=== [3] VERIFICATION SUMMARY ===")
+print(f"Doc Type         : {doc.doc_type}")
+print(f"Source Type      : {unit.source.source_type}")
+print(f"Extracted Text   : {doc.raw_text.strip()!r}")
+print(f"Source Reference : {unit.source.source_reference}")
