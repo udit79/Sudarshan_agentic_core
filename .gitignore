@@ -18,3 +18,8 @@ env/
 # IDE
 .vscode/
 .idea/
+
+# Secrets and local Cognee configuration
+.env
+.env.*
+!.env.example
