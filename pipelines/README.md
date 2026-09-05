@@ -12,7 +12,9 @@ procedure.
 ## Ownership boundary
 
 ```text
-RequestUnderstandingAgent -> MemoryManager.recall()
+MemoryManager.recall(User/Case bounded context)
+             -> RequestUnderstandingAgent
+             -> MemoryManager.recall(User/Case/Task context)
              -> PromptCrafterAgent -> CrewAI specialist crew
              -> Pydantic output + QualityReview
              -> optional artifact renderer
@@ -38,10 +40,11 @@ For the central LangGraph router, backend/frontend event contract, approval
 resume flow, and Harness boundary, see
 [`docs/internal/pipeline-orchestration.md`](../docs/internal/pipeline-orchestration.md).
 
-When the central router is used, memory is recalled once before the selected
-flow and the resulting `PromptPlan` is passed into its CrewAI tasks. Calling a
-flow directly remains supported for compatibility; in that mode the flow
-performs its own scoped recall.
+When the central router is used, a small User/Case memory context is recalled
+before request understanding. Once a pipeline is selected, a second recall
+uses the permitted User/Case/Task scopes and the bounded result is passed into
+the selected flow's CrewAI tasks. Calling a flow directly remains supported
+for compatibility; in that mode the flow performs its own scoped recall.
 
 CrewAI agents receive a scoped recall tool and injected bounded context. They
 do not receive Cognee credentials or a Cognee client. Task lifecycle output is

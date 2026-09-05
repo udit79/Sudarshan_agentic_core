@@ -14,8 +14,9 @@ Request handler
   │ validates identity and creates task_id/run_id
   ▼
 LangGraph orchestrator
+  ├─ recall bounded User/Case memory for request understanding
   ├─ understand request and select one registered pipeline
-  ├─ recall task-oriented User/Case/Task memory once
+  ├─ recall task-oriented User/Case/Task memory after routing
   ├─ craft a validated, pipeline-specific prompt plan
   ├─ invoke one registered pipeline adapter
   ├─ pause/resume external approval when an adapter supports it
@@ -45,13 +46,14 @@ flowchart LR
 
     subgraph RUN[Central LangGraph run]
         REQ[User request + identity + task_id]
+        REQREC[Bounded User/Case recall\nrequest context only]
         UNDER[RequestUnderstandingAgent\nroute, audience, constraints]
         DEC{Sufficient information?}
         ASK[clarification.required\nquestions]
         REC[MemoryManager.recall\nUser + Case + Task scopes]
         PLAN[PromptCrafterAgent\nvalidated PromptPlan]
         ROUTE[Pipeline adapter router]
-        REQ --> UNDER --> DEC
+        REQ --> REQREC --> UNDER --> DEC
         DEC -- No --> ASK
         ASK --> FE
         FE -->|resume answer| UNDER
@@ -66,7 +68,8 @@ flowchart LR
         CREW --> QUALITY --> ART --> WRITE
     end
 
-    COG -. scoped recall .-> REC
+    COG -. User/Case recall .-> REQREC
+    COG -. scoped recall after routing .-> REC
     ROUTE --> CREW
     WRITE --> COG
 
@@ -76,6 +79,7 @@ flowchart LR
     end
 
     HARNESS --> REQ
+    REQREC -. stage events .-> FE
     UNDER -. stage events .-> FE
     REC -. stage events .-> FE
     PLAN -. stage events .-> FE
@@ -85,7 +89,7 @@ flowchart LR
     classDef memory fill:#e8f2ff,stroke:#3674b5,color:#102a43;
     classDef control fill:#fff3d6,stroke:#c88a00,color:#3d2b00;
     classDef pipeline fill:#eaf7ed,stroke:#3c8c52,color:#173b20;
-    class COG,REM,REC,WRITE memory;
+    class COG,REM,REQREC,REC,WRITE memory;
     class UNDER,PLAN,ROUTE,HARNESS control;
     class CREW,QUALITY,ART pipeline;
 ```
@@ -96,21 +100,27 @@ call `MemoryManager.recall()` through the central access context. CrewAI agents
 never receive a Cognee client, and the frontend receives progress metadata—not
 raw recalled memory or internal model reasoning.
 
-The router does not expose Cognee or credentials to agents. It calls
-`MemoryManager.recall()` once with the request's `AccessContext`, then injects
-the bounded result into the selected pipeline. The concrete pipeline owns
-validated output and `MemoryManager.remember()` write-back. CrewAI remains the
-collaboration layer inside a pipeline; LangGraph owns routing and run lifecycle.
+The router does not expose Cognee or credentials to agents. It first calls
+`MemoryManager.recall()` with a User/Case-only context and a small budget so the
+request-understanding stage never receives raw OCR or a full document. After a
+pipeline is selected, it performs a second task-oriented recall using the full
+permitted User/Case/Task context and injects that bounded result into the
+selected pipeline. The concrete pipeline owns validated output and
+`MemoryManager.remember()` write-back. CrewAI remains the collaboration layer
+inside a pipeline; LangGraph owns routing and run lifecycle.
 
 The pre-pipeline sequence is:
 
 ```text
 ingestion -> KnowledgeUnit -> MemoryManager.remember() -> Cognee
-user request -> RequestUnderstandingAgent -> MemoryManager.recall()
-             -> PromptCrafterAgent -> selected CrewAI pipeline
+user request -> bounded User/Case recall -> RequestUnderstandingAgent
+             -> task-oriented User/Case/Task recall -> PromptCrafterAgent
+             -> selected CrewAI pipeline
 ```
 
-`RequestUnderstandingAgent` is deterministic by default. It resolves the
+`RequestUnderstandingAgent` is deterministic by default. It receives bounded
+User/Case context for terminology and case orientation, but memory cannot
+override the explicit request or select a pipeline by itself. It resolves the
 pipeline, audience, classification, distribution, explicit image policy, and
 user constraints. `PromptCrafterAgent` creates a structured `PromptPlan` and
 delimits recalled memory as reference context. Neither component calls Cognee
@@ -192,8 +202,9 @@ answer to the same run's resume endpoint:
 }
 ```
 
-The graph appends the answer to the task request, reruns request understanding,
-and only then proceeds to memory recall and generation. A backend may also
+The graph appends the answer to the task request, refreshes the bounded
+User/Case recall, reruns request understanding, and only then proceeds to
+task-oriented memory recall and generation. A backend may also
 provide `metadata.requires_clarification=true`,
 `metadata.missing_information`, or `metadata.clarification_questions` when its
 request handler knows that additional information is required.
@@ -239,7 +250,7 @@ Recommended backend endpoints:
 | `GET /runs/{run_id}/events` | Stream ordered `ProgressEvent` values as SSE. |
 | `POST /runs/{run_id}/resume` | Submit a clarification answer or approval/revision decision. |
 
-Recommended stage values are `request_understanding`, `routing`,
+Recommended stage values are `request_memory_recall`, `request_understanding`, `routing`,
 `request_clarification`, `memory_recall`, `prompt_crafting`, `memory_and_generation`, `human_approval`,
 `pipeline_result`, `completed`, and `failed`. Progress percentages are stage
 estimates, not model-token percentages. The UI should primarily render

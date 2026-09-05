@@ -38,9 +38,13 @@ def test_system_ingestion_memory_routing_prompt_and_pipeline(
     assert result.status == "succeeded"
     assert result.response is not None
     assert result.response.output["validated"] is True
+    assert result.state["request_memory_records"][0]["scope_type"] == "case"
+    assert "INCIDENT REPORT" in result.state["request_memory_context"]
     stages = [event.stage for event in sink.events("run-system-success")]
     assert stages == [
         "queued",
+        "request_memory_recall",
+        "request_memory_recall",
         "request_understanding",
         "routing",
         "memory_recall",

@@ -17,6 +17,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from memory import AccessContext
 from pipelines.advisory.crew import AdvisoryFlow
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter
@@ -49,6 +50,8 @@ class OrchestratorState(TypedDict):
     clarification_required: bool
     clarification_questions: list[str]
     clarification_response: dict[str, Any] | None
+    request_memory_context: str
+    request_memory_records: list[dict[str, Any]]
     memory_context: str
     memory_records: list[dict[str, Any]]
     prompt_plan: dict[str, Any]
@@ -102,6 +105,22 @@ def _clarification_text(response: Mapping[str, Any]) -> str:
             if items:
                 return "\n".join(items)
     return ""
+
+
+def _memory_records(recalled: Any) -> list[dict[str, Any]]:
+    """Serialize recalled records without leaking backend-specific objects."""
+
+    records: list[dict[str, Any]] = []
+    for result in getattr(recalled, "results", ()):
+        scope_type = getattr(result, "scope_type", None)
+        records.append({
+            "content": str(getattr(result, "content", "")),
+            "scope_type": scope_type.value if scope_type else None,
+            "scope_id": getattr(result, "scope_id", None),
+            "source_reference": getattr(result, "source_reference", None),
+            "score": getattr(result, "score", None),
+        })
+    return records
 
 
 def build_default_pipeline_registry(
@@ -259,6 +278,7 @@ class PipelineOrchestrator:
     def _build_graph(self) -> Any:
         builder = StateGraph(OrchestratorState)
         builder.add_node("understand_request", self._understand_request)
+        builder.add_node("recall_request_context", self._recall_request_context)
         builder.add_node("await_clarification", self._await_clarification)
         builder.add_node("apply_clarification", self._apply_clarification)
         builder.add_node("recall_memory", self._recall_memory)
@@ -268,14 +288,15 @@ class PipelineOrchestrator:
         builder.add_node("resume_pipeline", self._resume_pipeline)
         builder.add_node("finish", self._finish)
         builder.add_node("fail", self._fail)
-        builder.add_edge(START, "understand_request")
+        builder.add_edge(START, "recall_request_context")
+        builder.add_edge("recall_request_context", "understand_request")
         builder.add_conditional_edges(
             "understand_request",
             self._route_after_understanding,
             {"clarification": "await_clarification", "continue": "recall_memory", "fail": "fail"},
         )
         builder.add_edge("await_clarification", "apply_clarification")
-        builder.add_edge("apply_clarification", "understand_request")
+        builder.add_edge("apply_clarification", "recall_request_context")
         builder.add_edge("recall_memory", "craft_prompt")
         builder.add_edge("craft_prompt", "run_pipeline")
         builder.add_conditional_edges(
@@ -312,6 +333,8 @@ class PipelineOrchestrator:
             "clarification_required": False,
             "clarification_questions": [],
             "clarification_response": None,
+            "request_memory_context": "",
+            "request_memory_records": [],
             "memory_context": "",
             "memory_records": [],
             "prompt_plan": {},
@@ -374,7 +397,10 @@ class PipelineOrchestrator:
                        message="Understanding the requested operation")
         try:
             request = _request_from_dict(state["request"])
-            understanding = self.request_understander.run(request)
+            understanding = self.request_understander.run(
+                request,
+                memory_context=str(state.get("request_memory_context", "")),
+            )
             pipeline = understanding.requested_pipeline
             if not understanding.clarification_required and pipeline not in self.registry:
                 raise ValueError(f"Pipeline '{pipeline}' is not registered")
@@ -382,6 +408,8 @@ class PipelineOrchestrator:
             request_data["metadata"] = {
                 **dict(request.metadata),
                 "request_understanding": understanding.model_dump(mode="json"),
+                "request_memory_context": state.get("request_memory_context", ""),
+                "request_memory_records": state.get("request_memory_records", []),
             }
             if not understanding.clarification_required:
                 request_data["metadata"]["pipeline"] = pipeline
@@ -434,6 +462,64 @@ class PipelineOrchestrator:
         if state.get("error"):
             return "fail"
         return "clarification" if state.get("clarification_required") else "continue"
+
+    def _recall_request_context(self, state: OrchestratorState) -> dict[str, Any]:
+        """Load bounded User/Case context before request understanding.
+
+        The task scope is intentionally excluded here. Task memory is created
+        as the run proceeds and is recalled only after a pipeline is selected.
+        """
+
+        reporter = self._reporter(state)
+        reporter.emit(
+            stage="request_memory_recall",
+            status="running",
+            progress=5,
+            message="Loading bounded User and Case memory for request understanding",
+        )
+        try:
+            request = _request_from_dict(state["request"])
+            request_context = AccessContext(user_id=request.user_id, case_id=request.case_id)
+            recalled = self.memory_manager.recall(
+                query=(
+                    "Understand the user's requested operation using relevant user preferences, "
+                    f"terminology, and case summary. Request: {request.query}"
+                ),
+                context=request_context,
+                top_k=min(request.top_k, 8),
+                token_budget=min(request.token_budget, 1200),
+                session_id=state["run_id"],
+            )
+            records = _memory_records(recalled)
+            context_text = str(recalled.context.text or "")
+            reporter.emit(
+                stage="request_memory_recall",
+                status="succeeded",
+                progress=8,
+                message=f"Loaded {len(records)} bounded User/Case memory records",
+            )
+            self._write_orchestrator_task_memory(
+                state,
+                "request_memory_recall",
+                "succeeded",
+                f"Loaded {len(records)} bounded User/Case records before request understanding.",
+            )
+            return {
+                "request_memory_context": context_text,
+                "request_memory_records": records,
+                "stage": "request_memory_recall",
+                "status": "running",
+            }
+        except Exception as exc:
+            self._write_orchestrator_task_memory(state, "request_memory_recall", "failed", str(exc))
+            reporter.emit(
+                stage="request_memory_recall",
+                status="failed",
+                progress=100,
+                message="User/Case memory could not be loaded for request understanding",
+                error_code="REQUEST_MEMORY_RECALL_FAILED",
+            )
+            return {"error": str(exc), "stage": "request_memory_recall", "status": "failed"}
 
     def _await_clarification(self, state: OrchestratorState) -> dict[str, Any]:
         reporter = self._reporter(state)
@@ -532,16 +618,7 @@ class PipelineOrchestrator:
                 token_budget=request.token_budget,
                 session_id=state["run_id"],
             )
-            records = [
-                {
-                    "content": result.content,
-                    "scope_type": result.scope_type.value if result.scope_type else None,
-                    "scope_id": result.scope_id,
-                    "source_reference": result.source_reference,
-                    "score": result.score,
-                }
-                for result in recalled.results
-            ]
+            records = _memory_records(recalled)
             reporter.emit(
                 stage="memory_recall",
                 status="succeeded",

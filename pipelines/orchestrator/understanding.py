@@ -129,7 +129,19 @@ class RequestUnderstandingAgent:
     def __init__(self, intent_resolver: IntentResolver = default_intent_resolver) -> None:
         self.intent_resolver = intent_resolver
 
-    def run(self, request: AdvisoryRequest) -> RequestUnderstanding:
+    def run(self, request: AdvisoryRequest, *, memory_context: str = "") -> RequestUnderstanding:
+        """Interpret a request with bounded User/Case context available.
+
+        The default resolver keeps routing deterministic: recalled memory may
+        provide terminology, preferences, and case orientation, but it cannot
+        override the explicit request or choose a pipeline by itself. A future
+        provider-backed implementation can use the same bounded context while
+        returning this validated schema.
+        """
+
+        # Keep the interface memory-aware without allowing an unexpectedly large
+        # provider payload if a custom caller bypasses the graph boundary.
+        del memory_context
         try:
             pipeline = self.intent_resolver(request)
         except ValueError:
