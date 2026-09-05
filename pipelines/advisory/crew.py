@@ -9,17 +9,16 @@ from uuid import uuid4
 from crewai import Crew, Process
 from crewai.flow.flow import Flow, listen, or_, router, start
 from crewai.flow.human_feedback import HumanFeedbackResult, human_feedback
-from crewai.flow.persistence import persist
 
-from memory import KnowledgeUnit, MemoryManager, MemoryType, ScopeType, Source, SourceType
+from memory import KnowledgeUnit, MemoryType, ScopeType, Source, SourceType
 
 from pipelines.advisory.agents import build_agents
 from pipelines.advisory.artifact import AdvisoryArtifactWriter
 from pipelines.advisory.schemas import AdvisoryOutput, QualityReview
 from pipelines.advisory.tasks import build_tasks
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
-from pipelines.common.flow_persistence import flow_persistence
-from pipelines.common.memory_tools import MemoryRuntime, TaskMemoryWriter, memory_tools
+from pipelines.common.flow_persistence import flow_persistence, typed_persist
+from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter, memory_tools
 from pipelines.common.task_state import TaskState
 
 
@@ -35,7 +34,7 @@ class AdvisoryCrew:
 
     def __init__(
         self,
-        memory_manager: MemoryManager,
+        memory_manager: MemoryManagerLike,
         state: TaskState,
         *,
         llm: Any = None,
@@ -83,13 +82,13 @@ class AdvisoryCrew:
         return CrewRun(advisory=advisory, quality=quality)
 
 
-@persist(flow_persistence())
+@typed_persist(flow_persistence())
 class AdvisoryFlow(Flow[TaskState]):
     """Deterministic memory -> crew -> validation -> write-back workflow."""
 
     pipeline_name = "ntro_advisory"
 
-    def __init__(self, memory_manager: MemoryManager, *, max_attempts: int = 2,
+    def __init__(self, memory_manager: MemoryManagerLike, *, max_attempts: int = 2,
                  llm: Any = None, artifact_dir: str = "artifacts/advisories",
                  progress_callback: Callable[[str, str], None] | None = None) -> None:
         super().__init__()

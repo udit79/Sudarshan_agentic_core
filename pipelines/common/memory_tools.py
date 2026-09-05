@@ -10,18 +10,33 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Protocol
 
 from crewai import TaskOutput
 from crewai.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
-from memory import AccessContext, KnowledgeUnit, MemoryManager, MemoryType, ScopeType, Source, SourceType
+from memory import AccessContext, KnowledgeUnit, MemoryType, ScopeType, Source, SourceType
 
 
 _ACTIVE_TASK_WRITER: ContextVar["TaskMemoryWriter | None"] = ContextVar(
     "active_task_writer", default=None
 )
+
+
+class MemoryManagerLike(Protocol):
+    """Narrow memory boundary required by orchestration and pipeline code.
+
+    The concrete :class:`memory.MemoryManager` implements this protocol. Keeping
+    the pipeline boundary structural also lets component tests provide a small,
+    deterministic memory double without pretending it is a Cognee-backed manager.
+    """
+
+    def recall(self, *args: Any, **kwargs: Any) -> Any:
+        ...
+
+    def remember(self, *args: Any, **kwargs: Any) -> Any:
+        ...
 
 
 class RecallMemoryInput(BaseModel):
@@ -32,7 +47,7 @@ class RecallMemoryInput(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class MemoryRuntime:
-    manager: MemoryManager
+    manager: MemoryManagerLike
     context: AccessContext
     task_id: str
     case_id: str

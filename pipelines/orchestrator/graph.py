@@ -17,10 +17,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from memory import MemoryManager
 from pipelines.advisory.crew import AdvisoryFlow
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
-from pipelines.common.memory_tools import MemoryRuntime, TaskMemoryWriter
+from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter
 from pipelines.executive_summary.crew import ExecutiveSummaryFlow
 from pipelines.infographic.crew import InfographicFlow
 from pipelines.linkedin.crew import LinkedInPostFlow
@@ -47,6 +46,9 @@ class OrchestratorState(TypedDict):
     task_id: str
     pipeline: str
     understanding: dict[str, Any]
+    clarification_required: bool
+    clarification_questions: list[str]
+    clarification_response: dict[str, Any] | None
     memory_context: str
     memory_records: list[dict[str, Any]]
     prompt_plan: dict[str, Any]
@@ -88,8 +90,22 @@ def _request_to_dict(request: AdvisoryRequest) -> dict[str, Any]:
     }
 
 
+def _clarification_text(response: Mapping[str, Any]) -> str:
+    """Extract a bounded user answer from common frontend payload shapes."""
+
+    for key in ("answer", "answers", "message", "query"):
+        value = response.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, (list, tuple)):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            if items:
+                return "\n".join(items)
+    return ""
+
+
 def build_default_pipeline_registry(
-    memory_manager: MemoryManager,
+    memory_manager: MemoryManagerLike,
     *,
     llm: Any = None,
     image_generator: Callable[[str], str] | None = None,
@@ -179,7 +195,7 @@ class PipelineOrchestrator:
 
     def __init__(
         self,
-        memory_manager: MemoryManager,
+        memory_manager: MemoryManagerLike,
         *,
         registry: Mapping[str, PipelineAdapter] | None = None,
         progress_sink: ProgressSink | None = None,
@@ -243,6 +259,8 @@ class PipelineOrchestrator:
     def _build_graph(self) -> Any:
         builder = StateGraph(OrchestratorState)
         builder.add_node("understand_request", self._understand_request)
+        builder.add_node("await_clarification", self._await_clarification)
+        builder.add_node("apply_clarification", self._apply_clarification)
         builder.add_node("recall_memory", self._recall_memory)
         builder.add_node("craft_prompt", self._craft_prompt)
         builder.add_node("run_pipeline", self._run_pipeline)
@@ -251,7 +269,13 @@ class PipelineOrchestrator:
         builder.add_node("finish", self._finish)
         builder.add_node("fail", self._fail)
         builder.add_edge(START, "understand_request")
-        builder.add_edge("understand_request", "recall_memory")
+        builder.add_conditional_edges(
+            "understand_request",
+            self._route_after_understanding,
+            {"clarification": "await_clarification", "continue": "recall_memory", "fail": "fail"},
+        )
+        builder.add_edge("await_clarification", "apply_clarification")
+        builder.add_edge("apply_clarification", "understand_request")
         builder.add_edge("recall_memory", "craft_prompt")
         builder.add_edge("craft_prompt", "run_pipeline")
         builder.add_conditional_edges(
@@ -285,6 +309,9 @@ class PipelineOrchestrator:
             "task_id": request.task_id,
             "pipeline": "",
             "understanding": {},
+            "clarification_required": False,
+            "clarification_questions": [],
+            "clarification_response": None,
             "memory_context": "",
             "memory_records": [],
             "prompt_plan": {},
@@ -349,14 +376,37 @@ class PipelineOrchestrator:
             request = _request_from_dict(state["request"])
             understanding = self.request_understander.run(request)
             pipeline = understanding.requested_pipeline
-            if pipeline not in self.registry:
+            if not understanding.clarification_required and pipeline not in self.registry:
                 raise ValueError(f"Pipeline '{pipeline}' is not registered")
             request_data = dict(state["request"])
             request_data["metadata"] = {
                 **dict(request.metadata),
-                "pipeline": pipeline,
                 "request_understanding": understanding.model_dump(mode="json"),
             }
+            if not understanding.clarification_required:
+                request_data["metadata"]["pipeline"] = pipeline
+            if understanding.clarification_required:
+                reporter.emit(
+                    stage="request_understanding",
+                    status="succeeded",
+                    progress=15,
+                    message="More information is required before selecting a pipeline",
+                )
+                self._write_orchestrator_task_memory(
+                    {**state, "request": request_data},
+                    "request_understanding",
+                    "succeeded",
+                    "Clarification required before pipeline routing.",
+                )
+                return {
+                    "request": request_data,
+                    "pipeline": "",
+                    "understanding": understanding.model_dump(mode="json"),
+                    "clarification_required": True,
+                    "clarification_questions": understanding.clarification_questions,
+                    "stage": "request_clarification",
+                    "status": "waiting_for_input",
+                }
             reporter.emit(stage="routing", status="succeeded", progress=20,
                           message=f"Routed request to {pipeline}", pipeline=pipeline)
             self._write_orchestrator_task_memory(
@@ -378,6 +428,84 @@ class PipelineOrchestrator:
             reporter.emit(stage="routing", status="failed", progress=100,
                           message="The request could not be routed", error_code="ROUTING_FAILED")
             return {"error": str(exc), "stage": "routing", "status": "failed"}
+
+    @staticmethod
+    def _route_after_understanding(state: OrchestratorState) -> str:
+        if state.get("error"):
+            return "fail"
+        return "clarification" if state.get("clarification_required") else "continue"
+
+    def _await_clarification(self, state: OrchestratorState) -> dict[str, Any]:
+        reporter = self._reporter(state)
+        reporter.emit(
+            stage="request_clarification",
+            status="waiting_for_input",
+            progress=15,
+            message="Waiting for the user to clarify the requested operation",
+            requires_action=True,
+        )
+        answer = interrupt({
+            "type": "clarification.required",
+            "run_id": state["run_id"],
+            "task_id": state["task_id"],
+            "questions": state.get("clarification_questions", []),
+            "message": "Please provide the missing information before generation starts.",
+        })
+        return {
+            "clarification_response": dict(answer)
+            if isinstance(answer, Mapping)
+            else {"answer": str(answer)},
+        }
+
+    def _apply_clarification(self, state: OrchestratorState) -> dict[str, Any]:
+        response = state.get("clarification_response") or {}
+        answer = _clarification_text(response)
+        if not answer:
+            return {
+                "error": "Clarification response must include a non-empty answer",
+                "stage": "request_clarification",
+                "status": "failed",
+            }
+        request = _request_from_dict(state["request"])
+        metadata = {
+            **dict(request.metadata),
+            "clarification_response": response,
+        }
+        for key in ("requires_clarification", "missing_information", "clarification_questions"):
+            metadata.pop(key, None)
+        selected_pipeline = response.get("pipeline")
+        if isinstance(selected_pipeline, str) and selected_pipeline.strip():
+            metadata["pipeline"] = selected_pipeline.strip().lower()
+        request_data = _request_to_dict(
+            AdvisoryRequest(
+                query=f"{request.query}\nUser clarification: {answer[:4000]}",
+                user_id=request.user_id,
+                case_id=request.case_id,
+                task_id=request.task_id,
+                classification_level=request.classification_level,
+                distribution=request.distribution,
+                top_k=request.top_k,
+                token_budget=request.token_budget,
+                metadata=metadata,
+            )
+        )
+        self._write_orchestrator_task_memory(
+            {**state, "request": request_data},
+            "request_clarification",
+            "succeeded",
+            "User clarification received; request understanding will run again.",
+        )
+        return {
+            "request": request_data,
+            "clarification_required": False,
+            "clarification_questions": [],
+            "clarification_response": response,
+            "pipeline": "",
+            "understanding": {},
+            "error": None,
+            "stage": "request_clarification",
+            "status": "running",
+        }
 
     def _recall_memory(self, state: OrchestratorState) -> dict[str, Any]:
         if state.get("error"):

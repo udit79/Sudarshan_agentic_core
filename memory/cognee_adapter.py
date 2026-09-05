@@ -155,7 +155,12 @@ class CogneeHttpAdapter:
                     delay = None
         if delay is None:
             delay = self.config.retry_backoff_seconds * (2 ** attempt)
-        time.sleep(delay)
+        # The branch above guarantees a value, but make that invariant explicit
+        # to static type checkers as well as to future maintainers.
+        delay_seconds = delay
+        if delay_seconds is None:
+            raise AssertionError("retry delay must be resolved before sleeping")
+        time.sleep(delay_seconds)
 
     @staticmethod
     def _multipart(fields: Mapping[str, str], file_name: str, file_content: str,

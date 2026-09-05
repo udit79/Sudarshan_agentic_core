@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pipelines import ExecutiveSummaryFlow, LinkedInPostFlow
+from pipelines.advisory.schemas import EvidenceItem
 from pipelines.executive_summary.schemas import ExecutiveSummaryOutput
 from pipelines.linkedin.openai_images import OpenAIImageGenerator
 from pipelines.linkedin.schemas import LinkedInImageSpec, LinkedInPostOutput
@@ -43,13 +44,13 @@ def test_executive_summary_forbids_unresolved_placeholders() -> None:
             key_findings=["Finding"],
             implications=["Implication"],
             recommended_actions=["Action"],
-            evidence=[{
-                "evidence_id": "E-1",
-                "claim": "Claim",
-                "source_reference": "case://1",
-                "evidence_summary": "Summary",
-                "confidence": 0.7,
-            }],
+            evidence=[EvidenceItem(
+                evidence_id="E-1",
+                claim="Claim",
+                source_reference="case://1",
+                evidence_summary="Summary",
+                confidence=0.7,
+            )],
             confidence_statement="Moderate confidence.",
         )
     except ValueError:
@@ -124,7 +125,7 @@ def test_linkedin_image_policy_defaults_to_internal_auto_decision() -> None:
 def test_openai_image_adapter_writes_generated_base64_asset(tmp_path: Path) -> None:
     class FakeImages:
         def __init__(self) -> None:
-            self.kwargs = None
+            self.kwargs: dict[str, object] | None = None
 
         def generate(self, **kwargs: object) -> object:
             self.kwargs = kwargs
@@ -136,5 +137,9 @@ def test_openai_image_adapter_writes_generated_base64_asset(tmp_path: Path) -> N
 
     assert asset_path.exists()
     assert asset_path.read_bytes() == b"png-data"
-    assert images.kwargs["model"] == "gpt-image-1"
-    assert "not be flashy" in images.kwargs["prompt"]
+    kwargs = images.kwargs
+    assert kwargs is not None
+    assert kwargs["model"] == "gpt-image-1"
+    prompt = kwargs["prompt"]
+    assert isinstance(prompt, str)
+    assert "not be flashy" in prompt

@@ -1,6 +1,6 @@
 from pipelines.advisory.artifact import render_advisory
 from pipelines.advisory.crew import AdvisoryFlow
-from pipelines.advisory.schemas import AdvisoryOutput
+from pipelines.advisory.schemas import ActionItem, AdvisoryOutput, EvidenceItem, Recommendation
 from pipelines.common.contracts import AdvisoryRequest
 
 
@@ -18,28 +18,28 @@ def sample_advisory() -> AdvisoryOutput:
         assessment="The assessment is bounded by the available evidence.",
         impact_analysis="Potential impact requires validation against additional information.",
         observed_patterns=["A recurring pattern is present in the supplied material."],
-        recommendations=[{
-            "priority": "P2",
-            "action": "Validate the reported information with the responsible team.",
-            "responsible_party": "Case owner",
-            "timeline": "Within the current review cycle",
-            "rationale": "Validation reduces uncertainty before further action.",
-            "evidence_ids": ["E-1"],
-        }],
-        action_items=[{
-            "priority": "P2",
-            "action": "Record the validation result in the case file.",
-            "responsible_party": "Case owner",
-            "timeline": "After validation",
-            "completion_signal": "Validation result recorded",
-        }],
-        evidence=[{
-            "evidence_id": "E-1",
-            "claim": "The situation was reported by the person in the case.",
-            "source_reference": "case://test/report",
-            "evidence_summary": "Source statement supplied with the case.",
-            "confidence": 0.8,
-        }],
+        recommendations=[Recommendation(
+            priority="P2",
+            action="Validate the reported information with the responsible team.",
+            responsible_party="Case owner",
+            timeline="Within the current review cycle",
+            rationale="Validation reduces uncertainty before further action.",
+            evidence_ids=["E-1"],
+        )],
+        action_items=[ActionItem(
+            priority="P2",
+            action="Record the validation result in the case file.",
+            responsible_party="Case owner",
+            timeline="After validation",
+            completion_signal="Validation result recorded",
+        )],
+        evidence=[EvidenceItem(
+            evidence_id="E-1",
+            claim="The situation was reported by the person in the case.",
+            source_reference="case://test/report",
+            evidence_summary="Source statement supplied with the case.",
+            confidence=0.8,
+        )],
         references=["case://test/report"],
         handling_instructions=["Distribute only to authorized recipients."],
         confidence_statement="Moderate confidence based on the supplied case material.",

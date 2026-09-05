@@ -1,5 +1,6 @@
 from pipelines.infographic.crew import InfographicFlow
 from pipelines.infographic.schemas import InfographicOutput
+from pipelines.advisory.schemas import EvidenceItem
 
 
 def test_infographic_flow_has_render_and_case_delivery_routes() -> None:
@@ -23,13 +24,13 @@ def test_infographic_output_requires_antv_directive() -> None:
             "      desc Start"
         ),
         alt_text="A process showing the first case step.",
-        evidence=[{
-            "evidence_id": "E-1",
-            "claim": "The case contains one documented step.",
-            "source_reference": "case://1",
-            "evidence_summary": "Supplied case information.",
-            "confidence": 0.8,
-        }],
+        evidence=[EvidenceItem(
+            evidence_id="E-1",
+            claim="The case contains one documented step.",
+            source_reference="case://1",
+            evidence_summary="Supplied case information.",
+            confidence=0.8,
+        )],
         confidence_statement="Moderate confidence based on supplied information.",
     )
 

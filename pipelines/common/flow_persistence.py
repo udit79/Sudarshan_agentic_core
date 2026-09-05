@@ -4,8 +4,29 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
-from crewai.flow.persistence import SQLiteFlowPersistence
+from crewai.flow.persistence import FlowPersistence, SQLiteFlowPersistence, persist
+
+
+_FlowTarget = TypeVar("_FlowTarget")
+
+if TYPE_CHECKING:
+    def typed_persist(
+        persistence: FlowPersistence | None = None,
+        verbose: bool = False,
+    ) -> Callable[[_FlowTarget], _FlowTarget]:
+        """Typing shim for CrewAI's class-or-method decorator overload."""
+
+        raise NotImplementedError
+else:
+    def typed_persist(
+        persistence: FlowPersistence | None = None,
+        verbose: bool = False,
+    ) -> Callable[..., Any]:
+        """Runtime wrapper preserving CrewAI's persistence behavior."""
+
+        return persist(persistence, verbose)
 
 
 def flow_persistence() -> SQLiteFlowPersistence:

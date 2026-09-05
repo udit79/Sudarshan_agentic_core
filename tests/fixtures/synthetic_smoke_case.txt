@@ -1,0 +1,9 @@
+SYNTHETIC TEST CASE — NOT REAL INFORMATION
+
+Case reference: SYN-2026-001
+Subject: Fictional telemetry synchronization delay
+Summary: A fictional monitoring service reported a 17-minute delay while synchronizing non-sensitive demo telemetry.
+Preliminary assessment: The delay may have been caused by a simulated retry timeout in the demo workflow.
+Current status: The fictional service recovered automatically and the demo dataset remained complete.
+Decision need: Prepare a concise executive summary describing the reported event, current status, uncertainty, and suggested validation actions.
+Handling: This fixture contains synthetic content created only to test the Sudarshan pipeline.

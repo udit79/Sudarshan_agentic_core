@@ -34,6 +34,8 @@ class RequestUnderstanding(BaseModel):
     image_requested: bool | None = None
     user_constraints: list[str] = Field(default_factory=list, max_length=30)
     missing_information: list[str] = Field(default_factory=list, max_length=30)
+    clarification_required: bool = False
+    clarification_questions: list[str] = Field(default_factory=list, max_length=10)
     confidence: float = Field(ge=0.0, le=1.0)
 
 
@@ -91,6 +93,13 @@ def _as_constraints(value: Any) -> list[str]:
     return [str(item).strip()[:500] for item in value if str(item).strip()][:30]
 
 
+def _clarification_questions(metadata: Mapping[str, Any], missing: list[str]) -> list[str]:
+    provided = _as_constraints(metadata.get("clarification_questions"))
+    if provided:
+        return provided[:10]
+    return [f"Please provide {item}." for item in missing[:10]]
+
+
 def _image_request(request: AdvisoryRequest, pipeline: str) -> bool | None:
     explicit = request.metadata.get("image_requested")
     if isinstance(explicit, bool):
@@ -121,7 +130,27 @@ class RequestUnderstandingAgent:
         self.intent_resolver = intent_resolver
 
     def run(self, request: AdvisoryRequest) -> RequestUnderstanding:
-        pipeline = self.intent_resolver(request)
+        try:
+            pipeline = self.intent_resolver(request)
+        except ValueError:
+            if self.intent_resolver is not default_intent_resolver:
+                raise
+            questions = [
+                "Which output do you need: advisory, LinkedIn post, executive summary, or infographic?",
+                "What is the case objective or decision this output should support?",
+            ]
+            return RequestUnderstanding(
+                intent="Clarify the requested operation before selecting a pipeline",
+                requested_pipeline="unknown",
+                audience=request.distribution,
+                classification_level=request.classification_level,
+                distribution=request.distribution,
+                user_constraints=_as_constraints(request.metadata.get("user_constraints")),
+                missing_information=["a supported pipeline selection", "the case objective"],
+                clarification_required=True,
+                clarification_questions=questions,
+                confidence=0.0,
+            )
         if pipeline not in SUPPORTED_PIPELINES:
             raise ValueError(f"Unsupported pipeline '{pipeline}'")
 
@@ -134,6 +163,8 @@ class RequestUnderstandingAgent:
             constraints.append(f"distribution: {request.distribution}")
 
         missing = _as_constraints(metadata.get("missing_information"))
+        questions = _clarification_questions(metadata, missing)
+        requires_clarification = bool(metadata.get("requires_clarification")) or bool(missing)
         return RequestUnderstanding(
             intent=f"Generate a {pipeline.replace('_', ' ')} for the supplied case operation",
             requested_pipeline=pipeline,
@@ -143,6 +174,8 @@ class RequestUnderstandingAgent:
             image_requested=_image_request(request, pipeline),
             user_constraints=constraints,
             missing_information=missing,
+            clarification_required=requires_clarification,
+            clarification_questions=questions if requires_clarification else [],
             confidence=1.0 if isinstance(metadata.get("pipeline"), str) else 0.85,
         )
 

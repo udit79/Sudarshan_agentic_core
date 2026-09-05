@@ -8,14 +8,13 @@ from uuid import uuid4
 
 from crewai import Agent, Crew, Process, Task
 from crewai.flow.flow import Flow, listen, or_, router, start
-from crewai.flow.persistence import persist
 from pydantic import BaseModel
 
-from memory import KnowledgeUnit, MemoryManager, MemoryType, ScopeType, Source, SourceType
+from memory import KnowledgeUnit, MemoryType, ScopeType, Source, SourceType
 
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
-from pipelines.common.flow_persistence import flow_persistence
-from pipelines.common.memory_tools import MemoryRuntime, TaskMemoryWriter, memory_tools
+from pipelines.common.flow_persistence import flow_persistence, typed_persist
+from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter, memory_tools
 from pipelines.common.task_state import TaskState
 
 
@@ -30,7 +29,7 @@ class TextCrewRun:
     error: str | None = None
 
 
-@persist(flow_persistence())
+@typed_persist(flow_persistence())
 class TextTransformationFlow(Flow[TaskState]):
     """Run, validate, retry, and case-store an automatic text transformation.
 
@@ -48,7 +47,7 @@ class TextTransformationFlow(Flow[TaskState]):
 
     def __init__(
         self,
-        memory_manager: MemoryManager,
+        memory_manager: MemoryManagerLike,
         *,
         max_attempts: int = 2,
         llm: Any = None,
