@@ -62,8 +62,11 @@ def test_human_approval_routes_are_registered() -> None:
     definition = AdvisoryFlow.flow_definition()
     approval = definition.methods["request_human_approval"]
 
-    assert approval.human_feedback is not None
-    assert list(approval.human_feedback.emit) == ["approved", "rejected", "needs_revision"]
+    human_feedback = approval.human_feedback
+    assert human_feedback is not None
+    emit = human_feedback.emit
+    assert emit is not None
+    assert list(emit) == ["approved", "rejected", "needs_revision"]
     assert definition.methods["persist_case_output"].listen == "approved"
 
 
