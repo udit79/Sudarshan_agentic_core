@@ -12,8 +12,8 @@ procedure.
 ## Ownership boundary
 
 ```text
-Pipeline Flow -> MemoryManager.recall()
-             -> CrewAI specialist crew
+RequestUnderstandingAgent -> MemoryManager.recall()
+             -> PromptCrafterAgent -> CrewAI specialist crew
              -> Pydantic output + QualityReview
              -> optional artifact renderer
              -> MemoryManager.remember() [case only after validation/approval]
@@ -33,6 +33,15 @@ The available flows are:
 - `InfographicFlow`: quality review, validated AntV syntax, SVG rendering, and
   Case-memory write-back. The frontend receives the SVG artifact path and may
   preview, edit, or upload it.
+
+For the central LangGraph router, backend/frontend event contract, approval
+resume flow, and Harness boundary, see
+[`docs/internal/pipeline-orchestration.md`](../docs/internal/pipeline-orchestration.md).
+
+When the central router is used, memory is recalled once before the selected
+flow and the resulting `PromptPlan` is passed into its CrewAI tasks. Calling a
+flow directly remains supported for compatibility; in that mode the flow
+performs its own scoped recall.
 
 CrewAI agents receive a scoped recall tool and injected bounded context. They
 do not receive Cognee credentials or a Cognee client. Task lifecycle output is

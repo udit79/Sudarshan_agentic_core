@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from crewai import Crew, Process
@@ -33,7 +33,14 @@ class CrewRun:
 class AdvisoryCrew:
     """Build one isolated CrewAI crew for one Flow attempt."""
 
-    def __init__(self, memory_manager: MemoryManager, state: TaskState, *, llm: Any = None) -> None:
+    def __init__(
+        self,
+        memory_manager: MemoryManager,
+        state: TaskState,
+        *,
+        llm: Any = None,
+        progress_callback: Callable[[str, str], None] | None = None,
+    ) -> None:
         self.state = state
         runtime = MemoryRuntime(
             manager=memory_manager,
@@ -53,7 +60,7 @@ class AdvisoryCrew:
             token_budget=state.token_budget,
             pipeline_name="ntro_advisory",
         )
-        self.writer = TaskMemoryWriter(runtime)
+        self.writer = TaskMemoryWriter(runtime, on_event=progress_callback)
         self.agents = build_agents(memory_tools(runtime), llm=llm)
         self.tasks = build_tasks(self.agents, self.writer)
 
@@ -83,13 +90,15 @@ class AdvisoryFlow(Flow[TaskState]):
     pipeline_name = "ntro_advisory"
 
     def __init__(self, memory_manager: MemoryManager, *, max_attempts: int = 2,
-                 llm: Any = None, artifact_dir: str = "artifacts/advisories") -> None:
+                 llm: Any = None, artifact_dir: str = "artifacts/advisories",
+                 progress_callback: Callable[[str, str], None] | None = None) -> None:
         super().__init__()
         if max_attempts < 1:
             raise ValueError("max_attempts must be positive")
         self.memory_manager = memory_manager
         self.max_attempts = max_attempts
         self.llm = llm
+        self.progress_callback = progress_callback
         self.artifact_writer = AdvisoryArtifactWriter(artifact_dir)
 
     def run(self, request: AdvisoryRequest) -> PipelineResponse:
@@ -104,7 +113,18 @@ class AdvisoryFlow(Flow[TaskState]):
         self.state.distribution = request.distribution
         self.state.top_k = request.top_k
         self.state.token_budget = request.token_budget
+        self.state.pipeline_options = {
+            "request_understanding": request.metadata.get("request_understanding", {}),
+            "prompt_plan": request.metadata.get("prompt_plan", {}),
+            "resolved_memory_context": request.metadata.get("resolved_memory_context"),
+            "resolved_memory_records": request.metadata.get("resolved_memory_records", []),
+        }
+        self.state.request_understanding = dict(request.metadata.get("request_understanding", {}))
+        self.state.prompt_plan = dict(request.metadata.get("prompt_plan", {}))
         self.state.max_attempts = self.max_attempts
+        requested_run_id = request.metadata.get("run_id")
+        if isinstance(requested_run_id, str) and requested_run_id.strip():
+            self.state.run_id = requested_run_id.strip()
         try:
             self.kickoff(inputs={
                 **request.as_inputs(),
@@ -137,9 +157,23 @@ class AdvisoryFlow(Flow[TaskState]):
     @start()
     def prepare_context(self) -> str:
         self.state.status = "running"
-        self.state.run_id = str(getattr(self.state, "id", "") or uuid4())
+        self.state.run_id = str(self.state.run_id or getattr(self.state, "id", "") or uuid4())
         self.state.max_attempts = self.state.max_attempts or self.max_attempts
         self.state.record("memory_recall", "started", summary="Resolving user, case, and task memory")
+        precomputed_context = self.state.pipeline_options.get("resolved_memory_context")
+        precomputed_records = self.state.pipeline_options.get("resolved_memory_records", [])
+        if isinstance(precomputed_context, str):
+            self.state.memory_context = precomputed_context
+            if isinstance(precomputed_records, list):
+                self.state.memory_records = [
+                    dict(item) for item in precomputed_records if isinstance(item, Mapping)
+                ]
+            self.state.record(
+                "memory_recall",
+                "succeeded",
+                summary=f"Reused {len(self.state.memory_records)} centrally resolved memory records",
+            )
+            return self.state.memory_context
         request = AdvisoryRequest(
             query=self.state.query,
             user_id=self.state.user_id,
@@ -173,15 +207,22 @@ class AdvisoryFlow(Flow[TaskState]):
         self.state.attempt += 1
         self.state.record("advisory_crew", "started", summary="Starting sequential specialist crew")
         try:
-            runner = AdvisoryCrew(self.memory_manager, self.state, llm=self.llm)
+            runner = AdvisoryCrew(
+                self.memory_manager,
+                self.state,
+                llm=self.llm,
+                progress_callback=self.progress_callback,
+            )
             result = runner.kickoff({
                 "query": self.state.query,
                 "memory_context": self.state.memory_context,
-            "task_id": self.state.task_id,
-            "case_id": self.state.case_id,
-            "classification_level": self.state.classification_level,
-            "distribution": self.state.distribution,
-            "run_id": self.state.run_id,
+                "task_id": self.state.task_id,
+                "case_id": self.state.case_id,
+                "classification_level": self.state.classification_level,
+                "distribution": self.state.distribution,
+                "run_id": self.state.run_id,
+                "prompt_plan": self.state.prompt_plan,
+                "request_understanding": self.state.request_understanding,
             })
             self.state.record("advisory_crew", "succeeded", summary="Specialist crew completed")
             return result

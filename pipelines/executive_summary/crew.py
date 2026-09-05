@@ -30,5 +30,17 @@ class ExecutiveSummaryFlow(TextTransformationFlow):
     persist_output = TextTransformationFlow.persist_output
     persist_failure = TextTransformationFlow.persist_failure
 
-    def __init__(self, memory_manager: Any, *, max_attempts: int = 2, llm: Any = None) -> None:
-        super().__init__(memory_manager, max_attempts=max_attempts, llm=llm)
+    def __init__(
+        self,
+        memory_manager: Any,
+        *,
+        max_attempts: int = 2,
+        llm: Any = None,
+        progress_callback: Any = None,
+    ) -> None:
+        super().__init__(
+            memory_manager,
+            max_attempts=max_attempts,
+            llm=llm,
+            progress_callback=progress_callback,
+        )

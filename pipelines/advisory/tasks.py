@@ -18,7 +18,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "Analyze the NTRO case-advisory operation {query}. Use only the injected permitted memory context "
             "and the recall_sudarshan_memory tool. Return confirmed facts, explicitly labeled assessments, "
             "entities, evidence items with source references/confidence, and intelligence gaps. "
-            "Permitted memory context:\n{memory_context}"
+            "Permitted memory context:\n{memory_context}\n"
+            "Central request understanding and prompt plan:\n{prompt_plan}"
         ),
         expected_output="A validated IntelligenceBrief JSON object.",
         agent=agents["intelligence_analyst"],
@@ -46,7 +47,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "references, handling instructions, confidence, gaps, and caveats. Keep fact/assessment boundaries "
             "explicit, link evidence to claims, make recommendations actionable, and never invent NTRO policy "
             "or response authority. Write like an official advisory: direct, neutral, precise, and free of "
-            "AI self-reference, meta-commentary, filler, or conversational language."
+            "AI self-reference, meta-commentary, filler, or conversational language. "
+            "Follow the central prompt plan where compatible with these provenance rules:\n{prompt_plan}"
         ),
         expected_output="A complete validated AdvisoryOutput JSON object.",
         agent=agents["advisory_writer"],

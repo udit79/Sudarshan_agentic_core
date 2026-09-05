@@ -37,8 +37,14 @@ class InfographicFlow(TextTransformationFlow):
         max_attempts: int = 2,
         llm: Any = None,
         renderer: AntVInfographicRenderer | None = None,
+        progress_callback: Any = None,
     ) -> None:
-        super().__init__(memory_manager, max_attempts=max_attempts, llm=llm)
+        super().__init__(
+            memory_manager,
+            max_attempts=max_attempts,
+            llm=llm,
+            progress_callback=progress_callback,
+        )
         self.renderer = renderer or AntVInfographicRenderer()
 
     def enrich_output(self, output: Any) -> InfographicOutput:

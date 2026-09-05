@@ -72,10 +72,16 @@ class RecallSudarshanMemoryTool(BaseTool):
 class TaskMemoryWriter:
     """Write auditable task events through MemoryManager, never through Cognee."""
 
-    def __init__(self, runtime: MemoryRuntime, on_error: Callable[[str], None] | None = None) -> None:
+    def __init__(
+        self,
+        runtime: MemoryRuntime,
+        on_error: Callable[[str], None] | None = None,
+        on_event: Callable[[str, str], None] | None = None,
+    ) -> None:
         self.runtime = runtime
         self._sequence = 0
         self._on_error = on_error
+        self._on_event = on_event
 
     def write(self, step: str, status: str, content: str, *, metadata: dict[str, Any] | None = None) -> None:
         self._sequence += 1
@@ -103,6 +109,13 @@ class TaskMemoryWriter:
             if self._on_error:
                 self._on_error(message)
             raise
+        if self._on_event:
+            try:
+                self._on_event(step, status)
+            except Exception:
+                # Progress delivery must never turn a successful agent step
+                # into a failed pipeline run.
+                return
 
     def callback(self, step: str) -> Callable[[TaskOutput], TaskOutput]:
         """Return a module-level callback so CrewAI can checkpoint task config."""

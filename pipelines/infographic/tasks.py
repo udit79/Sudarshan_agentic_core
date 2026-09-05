@@ -14,7 +14,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
         description=(
             "Analyze the operation {query} using only permitted memory context and the "
             "recall_sudarshan_memory tool. Identify verified facts, relationships, sequences, comparisons, "
-            "and gaps that a visual may communicate. Context:\n{memory_context}"
+            "and gaps that a visual may communicate. Context:\n{memory_context}\n"
+            "Central prompt plan:\n{prompt_plan}"
         ),
         expected_output="A validated IntelligenceBrief JSON object.",
         agent=agents["case_analyst"],
@@ -40,7 +41,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "hierarchy, flow, or another suitable layout. Keep the visual clear and restrained: no flashy "
             "gradients, sensational imagery, decorative clutter, invented logos, seals, statistics, or labels. "
             "Do not expose restricted information. Include accessible alt text, evidence, references, confidence, "
-            "and gaps. Do not mention agents, prompts, models, or workflow."
+            "and gaps. Do not mention agents, prompts, models, or workflow. "
+            "Follow the central prompt plan where compatible with these rules:\n{prompt_plan}"
         ),
         expected_output="A validated InfographicOutput JSON object containing renderable AntV syntax.",
         agent=agents["syntax_writer"],

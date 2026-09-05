@@ -15,7 +15,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "Analyze the operation {query} using only the permitted memory context and the "
             "recall_sudarshan_memory tool. Extract confirmed facts, evidence, source references, and gaps. "
             "Do not invent public claims. Context:\n{memory_context}\n"
-            "Pipeline options:\n{pipeline_options}"
+            "Pipeline options:\n{pipeline_options}\n"
+            "Central prompt plan:\n{prompt_plan}"
         ),
         expected_output="A validated IntelligenceBrief JSON object.",
         agent=agents["case_analyst"],
@@ -45,7 +46,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "choose the most suitable image type (photo, illustration, diagram, or infographic), include accurate "
             "alt text, and provide a concrete case-grounded generation prompt. The visual must be restrained and "
             "professional, with no flashy colors, sensational imagery, invented logos/seals, or decorative image "
-            "added merely to fill space."
+            "added merely to fill space. Follow the central prompt plan where compatible "
+            "with these rules:\n{prompt_plan}"
         ),
         expected_output="A validated LinkedInPostOutput JSON object.",
         agent=agents["post_writer"],

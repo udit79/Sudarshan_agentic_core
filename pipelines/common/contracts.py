@@ -61,6 +61,8 @@ class AdvisoryRequest:
             "task_id": self.task_id,
             "classification_level": self.classification_level,
             "distribution": self.distribution,
+            "request_understanding": self.metadata.get("request_understanding", {}),
+            "prompt_plan": self.metadata.get("prompt_plan", {}),
         }
 
 

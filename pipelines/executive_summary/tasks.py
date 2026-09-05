@@ -14,7 +14,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
         description=(
             "Analyze the operation {query} using only permitted memory context and the "
             "recall_sudarshan_memory tool. Identify confirmed facts, decision-relevant assessments, evidence, "
-            "sources, and gaps. Context:\n{memory_context}"
+            "sources, and gaps. Context:\n{memory_context}\n"
+            "Central prompt plan:\n{prompt_plan}"
         ),
         expected_output="A validated IntelligenceBrief JSON object.",
         agent=agents["case_analyst"],
@@ -37,7 +38,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "Write an executive summary for the case from the intelligence brief and evidence review. Include "
             "the most important findings, implications, recommended actions, evidence references, confidence, "
             "and intelligence gaps. Keep it concise, neutral, case-specific, and free of AI self-reference, "
-            "workflow commentary, unsupported authority, or invented facts."
+            "workflow commentary, unsupported authority, or invented facts. "
+            "Follow the central prompt plan where compatible with these rules:\n{prompt_plan}"
         ),
         expected_output="A validated ExecutiveSummaryOutput JSON object.",
         agent=agents["summary_writer"],

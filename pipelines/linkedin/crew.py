@@ -38,8 +38,14 @@ class LinkedInPostFlow(TextTransformationFlow):
         max_attempts: int = 2,
         llm: Any = None,
         image_generator: Callable[[str], str] | None = None,
+        progress_callback: Callable[[str, str], None] | None = None,
     ) -> None:
-        super().__init__(memory_manager, max_attempts=max_attempts, llm=llm)
+        super().__init__(
+            memory_manager,
+            max_attempts=max_attempts,
+            llm=llm,
+            progress_callback=progress_callback,
+        )
         self.image_generator = image_generator
 
     def pipeline_options(self, request: Any) -> dict[str, Any]:

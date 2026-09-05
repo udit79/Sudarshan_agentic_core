@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from crewai import Agent, Crew, Process, Task
@@ -52,6 +52,7 @@ class TextTransformationFlow(Flow[TaskState]):
         *,
         max_attempts: int = 2,
         llm: Any = None,
+        progress_callback: Callable[[str, str], None] | None = None,
     ) -> None:
         super().__init__()
         if max_attempts < 1:
@@ -66,12 +67,19 @@ class TextTransformationFlow(Flow[TaskState]):
         self.memory_manager = memory_manager
         self.max_attempts = max_attempts
         self.llm = llm
+        self.progress_callback = progress_callback
         self._result: PipelineResponse | None = None
 
     def run(self, request: AdvisoryRequest) -> PipelineResponse:
         self._result = None
         self.state.pipeline_name = self.pipeline_name
-        self.state.pipeline_options = self.pipeline_options(request)
+        self.state.pipeline_options = {
+            **self.pipeline_options(request),
+            "request_understanding": request.metadata.get("request_understanding", {}),
+            "prompt_plan": request.metadata.get("prompt_plan", {}),
+            "resolved_memory_context": request.metadata.get("resolved_memory_context"),
+            "resolved_memory_records": request.metadata.get("resolved_memory_records", []),
+        }
         self.state.query = request.query
         self.state.user_id = request.user_id
         self.state.case_id = request.case_id
@@ -80,7 +88,12 @@ class TextTransformationFlow(Flow[TaskState]):
         self.state.distribution = request.distribution
         self.state.top_k = request.top_k
         self.state.token_budget = request.token_budget
+        self.state.request_understanding = dict(request.metadata.get("request_understanding", {}))
+        self.state.prompt_plan = dict(request.metadata.get("prompt_plan", {}))
         self.state.max_attempts = self.max_attempts
+        requested_run_id = request.metadata.get("run_id")
+        if isinstance(requested_run_id, str) and requested_run_id.strip():
+            self.state.run_id = requested_run_id.strip()
         try:
             self.kickoff(inputs={
                 **request.as_inputs(),
@@ -144,8 +157,22 @@ class TextTransformationFlow(Flow[TaskState]):
     @start()
     def prepare_context(self) -> str:
         self.state.status = "running"
-        self.state.run_id = str(getattr(self.state, "id", "") or uuid4())
+        self.state.run_id = str(self.state.run_id or getattr(self.state, "id", "") or uuid4())
         self.state.record("memory_recall", "started", summary="Resolving user, case, and task memory")
+        precomputed_context = self.state.pipeline_options.get("resolved_memory_context")
+        precomputed_records = self.state.pipeline_options.get("resolved_memory_records")
+        if isinstance(precomputed_context, str):
+            self.state.memory_context = precomputed_context
+            if isinstance(precomputed_records, list):
+                self.state.memory_records = [
+                    dict(item) for item in precomputed_records if isinstance(item, Mapping)
+                ]
+            self.state.record(
+                "memory_recall",
+                "succeeded",
+                summary=f"Reused {len(self.state.memory_records)} centrally resolved memory records",
+            )
+            return self.state.memory_context
         request = self._request()
         response = self.memory_manager.recall(
             query=f"Prepare {self.pipeline_name} for the operation: {request.query}",
@@ -171,7 +198,7 @@ class TextTransformationFlow(Flow[TaskState]):
     def _run_crew(self) -> TextCrewRun:
         self.state.attempt += 1
         self.state.record(self.pipeline_name, "started", summary="Starting sequential text-generation crew")
-        writer = TaskMemoryWriter(self._runtime())
+        writer = TaskMemoryWriter(self._runtime(), on_event=self.progress_callback)
         try:
             agents = self.agent_factory(memory_tools(self._runtime()), llm=self.llm)  # type: ignore[misc]
             tasks = self.task_factory(agents, writer)  # type: ignore[misc]
@@ -191,6 +218,8 @@ class TextTransformationFlow(Flow[TaskState]):
                     "distribution": self.state.distribution,
                     "run_id": self.state.run_id,
                     "pipeline_options": self.state.pipeline_options,
+                    "prompt_plan": self.state.prompt_plan,
+                    "request_understanding": self.state.request_understanding,
                 })
             output = self.output_model.model_validate(getattr(tasks["output"].output, "pydantic", None))  # type: ignore[union-attr]
             quality = self.quality_model.model_validate(getattr(tasks["quality"].output, "pydantic", None))  # type: ignore[union-attr]

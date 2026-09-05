@@ -45,6 +45,8 @@ class TaskState(BaseModel):
     token_budget: int = Field(default=6000, ge=256)
     memory_context: str = ""
     memory_records: list[dict[str, Any]] = Field(default_factory=list)
+    request_understanding: dict[str, Any] = Field(default_factory=dict)
+    prompt_plan: dict[str, Any] = Field(default_factory=dict)
     events: list[TaskEvent] = Field(default_factory=list)
     attempt: int = Field(default=0, ge=0)
     max_attempts: int = Field(default=2, ge=1)
