@@ -19,6 +19,7 @@ ProgressStatus = Literal[
     "succeeded",
     "failed",
     "completed",
+    "cancelled",
 ]
 
 

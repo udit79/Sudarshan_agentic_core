@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from threading import Event, Lock
 from typing import Any, Callable, Mapping, TypedDict
 from uuid import uuid4
 
@@ -46,6 +48,7 @@ class OrchestratorState(TypedDict):
     run_id: str
     task_id: str
     pipeline: str
+    requested_pipelines: list[str]
     understanding: dict[str, Any]
     clarification_required: bool
     clarification_questions: list[str]
@@ -55,11 +58,17 @@ class OrchestratorState(TypedDict):
     memory_context: str
     memory_records: list[dict[str, Any]]
     prompt_plan: dict[str, Any]
+    prompt_plans: dict[str, Any]
     response: dict[str, Any] | None
+    responses: dict[str, dict[str, Any]]
     approval_decision: dict[str, Any] | None
     error: str | None
     stage: str
     status: str
+
+
+class RunCancelled(RuntimeError):
+    """Raised at a safe orchestration boundary after frontend cancellation."""
 
 
 IntentResolver = Callable[[AdvisoryRequest], str]
@@ -75,6 +84,12 @@ def _request_from_dict(data: Mapping[str, Any]) -> AdvisoryRequest:
         distribution=str(data.get("distribution", "Authorized NTRO personnel")),
         top_k=int(data.get("top_k", 12)),
         token_budget=int(data.get("token_budget", 6000)),
+        requested_pipelines=tuple(data.get("requested_pipelines", ())),
+        operation=str(data.get("operation", "create")),
+        parent_run_id=data.get("parent_run_id"),
+        parent_artifact_id=data.get("parent_artifact_id"),
+        revision_instruction=data.get("revision_instruction"),
+        revision_scope=tuple(data.get("revision_scope", ())),
         metadata=data.get("metadata", {}),
     )
 
@@ -89,6 +104,12 @@ def _request_to_dict(request: AdvisoryRequest) -> dict[str, Any]:
         "distribution": request.distribution,
         "top_k": request.top_k,
         "token_budget": request.token_budget,
+        "requested_pipelines": list(request.requested_pipelines),
+        "operation": request.operation,
+        "parent_run_id": request.parent_run_id,
+        "parent_artifact_id": request.parent_artifact_id,
+        "revision_instruction": request.revision_instruction,
+        "revision_scope": list(request.revision_scope),
         "metadata": dict(request.metadata),
     }
 
@@ -140,7 +161,8 @@ def build_default_pipeline_registry(
         run_id = str(request.metadata.get("run_id", ""))
         if not run_id:
             return None
-        reporter = ProgressReporter(progress_sink, run_id=run_id, task_id=request.task_id)
+        progress_run_id = str(request.metadata.get("progress_run_id", run_id))
+        reporter = ProgressReporter(progress_sink, run_id=progress_run_id, task_id=request.task_id)
 
         def report(step: str, status: str) -> None:
             reporter.emit(
@@ -239,6 +261,9 @@ class PipelineOrchestrator:
             progress_sink=self.progress_sink,
         ))
         self._checkpointer = checkpointer or InMemorySaver()
+        self._cancel_events: dict[str, Event] = {}
+        self._active_runs: set[str] = set()
+        self._run_lock = Lock()
         self.graph = self._build_graph()
 
     def _reporter(self, state: OrchestratorState) -> ProgressReporter:
@@ -247,6 +272,106 @@ class PipelineOrchestrator:
             run_id=state["run_id"],
             task_id=state["task_id"],
         )
+
+    def _check_cancelled(self, run_id: str) -> None:
+        with self._run_lock:
+            event = self._cancel_events.get(run_id)
+        if event is not None and event.is_set():
+            raise RunCancelled(f"Run {run_id} was cancelled by the frontend")
+
+    def _cancelled_result(
+        self,
+        state: Mapping[str, Any],
+        run_id: str,
+        task_id: str,
+    ) -> OrchestrationResult:
+        cancelled_state = {**dict(state), "status": "cancelled", "stage": "cancelled",
+                           "error": "Run cancelled by the frontend"}
+        self._write_orchestrator_task_memory(
+            {**cancelled_state, "request": dict(state.get("request", {}))},
+            "cancellation",
+            "cancelled",
+            "Run cancellation was observed at an orchestration safe point.",
+        )
+        ProgressReporter(self.progress_sink, run_id=run_id, task_id=task_id).emit(
+            stage="cancellation",
+            status="cancelled",
+            progress=100,
+            message="Run cancelled",
+            pipeline=state.get("pipeline") or None,
+            error_code="RUN_CANCELLED",
+        )
+        return OrchestrationResult(
+            status="cancelled",
+            run_id=run_id,
+            task_id=task_id,
+            pipeline=state.get("pipeline") or None,
+            responses={},
+            pipelines=tuple(state.get("requested_pipelines", ())),
+            state=cancelled_state,
+        )
+
+    def cancel(self, run_id: str, task_id: str) -> dict[str, str]:
+        """Request cooperative cancellation from a frontend/backend endpoint.
+
+        Active runs stop at the next graph boundary. If a provider call is
+        already running, its worker must return before LangGraph can observe
+        cancellation. Paused runs are marked cancelled in the checkpointer.
+        """
+
+        with self._run_lock:
+            active = run_id in self._active_runs
+            event = self._cancel_events.setdefault(run_id, Event())
+            event.set()
+        if active:
+            ProgressReporter(self.progress_sink, run_id=run_id, task_id=task_id).emit(
+                stage="cancellation",
+                status="running",
+                progress=0,
+                message="Cancellation requested",
+            )
+            return {"run_id": run_id, "task_id": task_id, "status": "requested"}
+
+        config = {"configurable": {"thread_id": run_id}}
+        try:
+            snapshot = self.graph.get_state(config)
+            values = dict(snapshot.values)
+        except Exception:
+            values = {}
+        current_status = values.get("status")
+        if not values:
+            with self._run_lock:
+                self._cancel_events.pop(run_id, None)
+            return {"run_id": run_id, "task_id": task_id, "status": "not_found"}
+        if current_status in {"completed", "succeeded", "failed", "cancelled"}:
+            with self._run_lock:
+                self._cancel_events.pop(run_id, None)
+            return {"run_id": run_id, "task_id": task_id, "status": "already_terminal"}
+
+        cancelled_state = {
+            "status": "cancelled",
+            "stage": "cancelled",
+            "error": "Run cancelled by the frontend",
+            "response": None,
+        }
+        self.graph.update_state(config, cancelled_state)
+        self._write_orchestrator_task_memory(
+            {**values, **cancelled_state, "request": dict(values.get("request", {}))},
+            "cancellation",
+            "cancelled",
+            "Run cancelled while waiting for input or approval.",
+        )
+        ProgressReporter(self.progress_sink, run_id=run_id, task_id=task_id).emit(
+            stage="cancellation",
+            status="cancelled",
+            progress=100,
+            message="Run cancelled",
+            pipeline=values.get("pipeline") or None,
+            error_code="RUN_CANCELLED",
+        )
+        with self._run_lock:
+            self._cancel_events.pop(run_id, None)
+        return {"run_id": run_id, "task_id": task_id, "status": "cancelled"}
 
     def _write_orchestrator_task_memory(
         self,
@@ -329,6 +454,7 @@ class PipelineOrchestrator:
             "run_id": resolved_run_id,
             "task_id": request.task_id,
             "pipeline": "",
+            "requested_pipelines": [],
             "understanding": {},
             "clarification_required": False,
             "clarification_questions": [],
@@ -338,13 +464,25 @@ class PipelineOrchestrator:
             "memory_context": "",
             "memory_records": [],
             "prompt_plan": {},
+            "prompt_plans": {},
             "response": None,
+            "responses": {},
             "approval_decision": None,
             "error": None,
             "status": "queued",
             "stage": "queued",
         }
-        return self._invoke(initial, resolved_run_id, request.task_id)
+        with self._run_lock:
+            self._cancel_events[resolved_run_id] = Event()
+            self._active_runs.add(resolved_run_id)
+        try:
+            return self._invoke(initial, resolved_run_id, request.task_id)
+        except RunCancelled:
+            return self._cancelled_result(initial, resolved_run_id, request.task_id)
+        finally:
+            with self._run_lock:
+                self._active_runs.discard(resolved_run_id)
+                self._cancel_events.pop(resolved_run_id, None)
 
     def resume(
         self,
@@ -354,6 +492,9 @@ class PipelineOrchestrator:
     ) -> OrchestrationResult:
         """Resume a paused graph with an approval/revision decision."""
 
+        snapshot = self.graph.get_state({"configurable": {"thread_id": run_id}})
+        if snapshot.values.get("status") == "cancelled":
+            return self._result_from_state(snapshot.values, run_id, task_id)
         result = self.graph.invoke(
             Command(resume=dict(decision)),
             config={"configurable": {"thread_id": run_id}},
@@ -378,20 +519,34 @@ class PipelineOrchestrator:
             if isinstance(value, Mapping):
                 interrupt_payload = dict(value)
         response = _response_from_dict(result.get("response"))
-        status = "pending" if interrupt_payload else (
-            response.status if response else ("failed" if result.get("error") else "pending")
+        response_data = result.get("responses") or {}
+        responses = {
+            str(name): parsed
+            for name, value in response_data.items()
+            if (parsed := _response_from_dict(value)) is not None
+        }
+        status = "cancelled" if result.get("status") == "cancelled" else (
+            "pending" if interrupt_payload else (
+                str(result.get("status")) if result.get("status") in {
+                    "succeeded", "failed", "partial", "pending"
+                } else (response.status if response else ("failed" if result.get("error") else "pending"))
+            )
         )
+        selected = result.get("requested_pipelines") or ([result.get("pipeline")] if result.get("pipeline") else [])
         return OrchestrationResult(
             status=status,  # type: ignore[arg-type]
             run_id=run_id,
             task_id=task_id,
             pipeline=result.get("pipeline"),
             response=response,
+            responses=responses,
+            pipelines=tuple(str(item) for item in selected if item),
             interrupt=interrupt_payload,
             state=dict(result),
         )
 
     def _understand_request(self, state: OrchestratorState) -> dict[str, Any]:
+        self._check_cancelled(state["run_id"])
         reporter = self._reporter(state)
         reporter.emit(stage="request_understanding", status="running", progress=10,
                        message="Understanding the requested operation")
@@ -401,9 +556,8 @@ class PipelineOrchestrator:
                 request,
                 memory_context=str(state.get("request_memory_context", "")),
             )
-            pipeline = understanding.requested_pipeline
-            if not understanding.clarification_required and pipeline not in self.registry:
-                raise ValueError(f"Pipeline '{pipeline}' is not registered")
+            pipelines = understanding.requested_pipelines or [understanding.requested_pipeline]
+            pipeline = pipelines[0]
             request_data = dict(state["request"])
             request_data["metadata"] = {
                 **dict(request.metadata),
@@ -413,6 +567,7 @@ class PipelineOrchestrator:
             }
             if not understanding.clarification_required:
                 request_data["metadata"]["pipeline"] = pipeline
+                request_data["metadata"]["pipelines"] = list(pipelines)
             if understanding.clarification_required:
                 reporter.emit(
                     stage="request_understanding",
@@ -429,6 +584,7 @@ class PipelineOrchestrator:
                 return {
                     "request": request_data,
                     "pipeline": "",
+                    "requested_pipelines": [],
                     "understanding": understanding.model_dump(mode="json"),
                     "clarification_required": True,
                     "clarification_questions": understanding.clarification_questions,
@@ -436,7 +592,10 @@ class PipelineOrchestrator:
                     "status": "waiting_for_input",
                 }
             reporter.emit(stage="routing", status="succeeded", progress=20,
-                          message=f"Routed request to {pipeline}", pipeline=pipeline)
+                          message=(f"Routed request to {pipeline}"
+                                   if len(pipelines) == 1
+                                   else f"Routed request to {len(pipelines)} pipelines"),
+                          pipeline=pipeline)
             self._write_orchestrator_task_memory(
                 {**state, "request": request_data, "pipeline": pipeline},
                 "request_understanding",
@@ -447,10 +606,13 @@ class PipelineOrchestrator:
             return {
                 "request": request_data,
                 "pipeline": pipeline,
+                "requested_pipelines": pipelines,
                 "understanding": understanding.model_dump(mode="json"),
                 "stage": "routing",
                 "status": "running",
             }
+        except RunCancelled:
+            raise
         except Exception as exc:
             self._write_orchestrator_task_memory(state, "request_understanding", "failed", str(exc))
             reporter.emit(stage="routing", status="failed", progress=100,
@@ -470,6 +632,7 @@ class PipelineOrchestrator:
         as the run proceeds and is recalled only after a pipeline is selected.
         """
 
+        self._check_cancelled(state["run_id"])
         reporter = self._reporter(state)
         reporter.emit(
             stage="request_memory_recall",
@@ -480,10 +643,16 @@ class PipelineOrchestrator:
         try:
             request = _request_from_dict(state["request"])
             request_context = AccessContext(user_id=request.user_id, case_id=request.case_id)
+            revision_hint = ""
+            if request.operation == "revise":
+                revision_hint = (
+                    f" Revision target artifact={request.parent_artifact_id or 'by parent run'}, "
+                    f"instruction={request.revision_instruction or ''}."
+                )
             recalled = self.memory_manager.recall(
                 query=(
                     "Understand the user's requested operation using relevant user preferences, "
-                    f"terminology, and case summary. Request: {request.query}"
+                    f"terminology, and case summary. Request: {request.query}.{revision_hint}"
                 ),
                 context=request_context,
                 top_k=min(request.top_k, 8),
@@ -510,6 +679,8 @@ class PipelineOrchestrator:
                 "stage": "request_memory_recall",
                 "status": "running",
             }
+        except RunCancelled:
+            raise
         except Exception as exc:
             self._write_orchestrator_task_memory(state, "request_memory_recall", "failed", str(exc))
             reporter.emit(
@@ -522,6 +693,7 @@ class PipelineOrchestrator:
             return {"error": str(exc), "stage": "request_memory_recall", "status": "failed"}
 
     def _await_clarification(self, state: OrchestratorState) -> dict[str, Any]:
+        self._check_cancelled(state["run_id"])
         reporter = self._reporter(state)
         reporter.emit(
             stage="request_clarification",
@@ -544,6 +716,7 @@ class PipelineOrchestrator:
         }
 
     def _apply_clarification(self, state: OrchestratorState) -> dict[str, Any]:
+        self._check_cancelled(state["run_id"])
         response = state.get("clarification_response") or {}
         answer = _clarification_text(response)
         if not answer:
@@ -572,6 +745,16 @@ class PipelineOrchestrator:
                 distribution=request.distribution,
                 top_k=request.top_k,
                 token_budget=request.token_budget,
+                requested_pipelines=tuple(
+                    [str(response["pipeline"]).strip().lower()]
+                    if isinstance(response.get("pipeline"), str) and response.get("pipeline")
+                    else request.requested_pipelines
+                ),
+                operation=request.operation,
+                parent_run_id=request.parent_run_id,
+                parent_artifact_id=request.parent_artifact_id,
+                revision_instruction=request.revision_instruction,
+                revision_scope=request.revision_scope,
                 metadata=metadata,
             )
         )
@@ -587,6 +770,7 @@ class PipelineOrchestrator:
             "clarification_questions": [],
             "clarification_response": response,
             "pipeline": "",
+            "requested_pipelines": [],
             "understanding": {},
             "error": None,
             "stage": "request_clarification",
@@ -596,6 +780,7 @@ class PipelineOrchestrator:
     def _recall_memory(self, state: OrchestratorState) -> dict[str, Any]:
         if state.get("error"):
             return {}
+        self._check_cancelled(state["run_id"])
         reporter = self._reporter(state)
         reporter.emit(
             stage="memory_recall",
@@ -611,6 +796,11 @@ class PipelineOrchestrator:
                 f"Prepare {state['pipeline']} for the operation: {request.query}. "
                 f"Intent: {understanding.get('intent', 'case-grounded generation')}"
             )
+            if request.operation == "revise":
+                query += (
+                    f" Retrieve the parent artifact {request.parent_artifact_id or request.parent_run_id} "
+                    f"and apply this revision instruction: {request.revision_instruction}."
+                )
             recalled = self.memory_manager.recall(
                 query=query,
                 context=request.access_context,
@@ -638,6 +828,8 @@ class PipelineOrchestrator:
                 "stage": "memory_recall",
                 "status": "running",
             }
+        except RunCancelled:
+            raise
         except Exception as exc:
             self._write_orchestrator_task_memory(state, "memory_recall", "failed", str(exc))
             reporter.emit(
@@ -653,6 +845,7 @@ class PipelineOrchestrator:
     def _craft_prompt(self, state: OrchestratorState) -> dict[str, Any]:
         if state.get("error"):
             return {}
+        self._check_cancelled(state["run_id"])
         reporter = self._reporter(state)
         reporter.emit(
             stage="prompt_crafting",
@@ -666,11 +859,23 @@ class PipelineOrchestrator:
             from pipelines.orchestrator.understanding import RequestUnderstanding
 
             understanding = RequestUnderstanding.model_validate(state["understanding"])
-            plan = self.prompt_crafter.run(
-                request,
-                understanding,
-                str(state.get("memory_context", "")),
-            )
+            pipelines = state.get("requested_pipelines") or [state.get("pipeline", "")]
+            plans: dict[str, dict[str, Any]] = {}
+            for selected in pipelines:
+                selected_understanding = understanding.model_copy(update={
+                    "requested_pipeline": selected,
+                    "requested_pipelines": pipelines,
+                    "image_requested": (
+                        understanding.image_requested if selected == "linkedin_post" else None
+                    ),
+                })
+                plan = self.prompt_crafter.run(
+                    request,
+                    selected_understanding,
+                    str(state.get("memory_context", "")),
+                )
+                plans[selected] = plan.model_dump(mode="json")
+            primary_plan = plans[pipelines[0]]
             reporter.emit(
                 stage="prompt_crafting",
                 status="succeeded",
@@ -682,13 +887,16 @@ class PipelineOrchestrator:
                 state,
                 "prompt_crafting",
                 "succeeded",
-                f"Built a validated prompt plan for {plan.pipeline}.",
+                f"Built validated prompt plans for {', '.join(pipelines)}.",
             )
             return {
-                "prompt_plan": plan.model_dump(mode="json"),
+                "prompt_plan": primary_plan,
+                "prompt_plans": plans,
                 "stage": "prompt_crafting",
                 "status": "running",
             }
+        except RunCancelled:
+            raise
         except Exception as exc:
             self._write_orchestrator_task_memory(state, "prompt_crafting", "failed", str(exc))
             reporter.emit(
@@ -704,40 +912,146 @@ class PipelineOrchestrator:
     def _run_pipeline(self, state: OrchestratorState) -> dict[str, Any]:
         if state.get("error"):
             return {}
+        self._check_cancelled(state["run_id"])
         pipeline = state["pipeline"]
         reporter = self._reporter(state)
+        pipelines = state.get("requested_pipelines") or [pipeline]
         reporter.emit(stage="memory_and_generation", status="running", progress=55,
-                      message="Running the selected pipeline with resolved memory", pipeline=pipeline)
+                      message=("Running the selected pipeline with resolved memory"
+                               if len(pipelines) == 1
+                               else f"Running {len(pipelines)} pipelines in parallel with resolved memory"),
+                      pipeline=pipeline)
         try:
             request = _request_from_dict(state["request"])
-            request_data = _request_to_dict(request)
-            request_data["metadata"] = {
-                **dict(request.metadata),
-                "run_id": state["run_id"],
-                "pipeline": pipeline,
-                "request_understanding": state.get("understanding", {}),
-                "resolved_memory_context": state.get("memory_context", ""),
-                "resolved_memory_records": state.get("memory_records", []),
-                "prompt_plan": state.get("prompt_plan", {}),
+            if len(pipelines) == 1:
+                if pipeline not in self.registry:
+                    raise ValueError(f"Pipeline '{pipeline}' is not registered")
+                payload = self._run_one_pipeline(state, request, pipeline, state.get("prompt_plans", {}).get(pipeline, state.get("prompt_plan", {})))
+                response = _response_from_dict(payload)
+                if response is None:
+                    raise ValueError(f"Pipeline '{pipeline}' returned an invalid response")
+                if response.status == "pending":
+                    reporter.emit(stage="human_approval", status="waiting_for_approval", progress=75,
+                                  message="Waiting for an authorized approval decision", pipeline=pipeline,
+                                  requires_action=True)
+                elif response.status == "succeeded":
+                    reporter.emit(stage="pipeline_result", status="succeeded", progress=90,
+                                  message="Pipeline produced a validated result", pipeline=pipeline)
+                else:
+                    reporter.emit(stage="pipeline_result", status="failed", progress=100,
+                                  message="Pipeline failed", pipeline=pipeline, error_code="PIPELINE_FAILED")
+                return {"response": payload, "responses": {pipeline: payload}, "stage": "pipeline_result", "status": response.status}
+
+            payloads: dict[str, dict[str, Any]] = {}
+            with ThreadPoolExecutor(max_workers=min(len(pipelines), 8), thread_name_prefix="sudarshan-pipeline") as executor:
+                futures = {
+                    executor.submit(
+                        self._run_one_pipeline,
+                        state,
+                        request,
+                        selected,
+                        state.get("prompt_plans", {}).get(selected, {}),
+                    ): selected
+                    for selected in pipelines
+                }
+                for future in as_completed(futures):
+                    selected = futures[future]
+                    try:
+                        payloads[selected] = future.result()
+                    except RunCancelled:
+                        raise
+                    except Exception as exc:
+                        payloads[selected] = response_to_dict(PipelineResponse(
+                            status="failed",
+                            pipeline=selected,
+                            task_id=f"{state['task_id']}-{selected}",
+                            run_id=f"{state['run_id']}-{selected}",
+                            failure=str(exc),
+                            metadata={
+                                "parent_orchestration_run_id": state["run_id"],
+                                "parent_task_id": state["task_id"],
+                            },
+                        )) or {}
+                    child = _response_from_dict(payloads[selected])
+                    if child is not None:
+                        reporter.emit(
+                            stage="pipeline_result",
+                            status="succeeded" if child.status == "succeeded" else "failed",
+                            progress=90 if child.status == "succeeded" else 100,
+                            message=f"{selected} pipeline completed with status {child.status}",
+                            pipeline=selected,
+                            error_code="PIPELINE_FAILED" if child.status == "failed" else None,
+                        )
+            self._check_cancelled(state["run_id"])
+            aggregate = _aggregate_pipeline_status(payloads)
+            primary_name = next((name for name in pipelines if payloads.get(name, {}).get("status") == "succeeded"), pipelines[0])
+            return {
+                "response": payloads.get(primary_name),
+                "responses": payloads,
+                "stage": "pipeline_result",
+                "status": aggregate,
             }
-            response = self.registry[pipeline].run(_request_from_dict(request_data))
-            payload = response_to_dict(response)
-            if response.status == "pending":
-                reporter.emit(stage="human_approval", status="waiting_for_approval", progress=75,
-                              message="Waiting for an authorized approval decision", pipeline=pipeline,
-                              requires_action=True)
-            elif response.status == "succeeded":
-                reporter.emit(stage="pipeline_result", status="succeeded", progress=90,
-                              message="Pipeline produced a validated result", pipeline=pipeline)
-            else:
-                reporter.emit(stage="pipeline_result", status="failed", progress=100,
-                              message="Pipeline failed", pipeline=pipeline, error_code="PIPELINE_FAILED")
-            return {"response": payload, "stage": "pipeline_result", "status": response.status}
+        except RunCancelled:
+            raise
         except Exception as exc:
             reporter.emit(stage="pipeline_result", status="failed", progress=100,
                           message="Pipeline execution failed", pipeline=pipeline,
                           error_code="PIPELINE_EXCEPTION")
             return {"error": str(exc), "stage": "pipeline_result", "status": "failed"}
+
+    def _run_one_pipeline(
+        self,
+        state: OrchestratorState,
+        request: AdvisoryRequest,
+        pipeline: str,
+        prompt_plan: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Run one isolated child execution inside a fan-out parent run."""
+
+        self._check_cancelled(state["run_id"])
+        child_task_id = f"{state['task_id']}-{pipeline}"
+        child_run_id = state["run_id"] if len(state.get("requested_pipelines", ())) <= 1 else f"{state['run_id']}-{pipeline}"
+        if pipeline not in self.registry:
+            return response_to_dict(PipelineResponse(
+                status="failed",
+                pipeline=pipeline,
+                task_id=child_task_id,
+                run_id=child_run_id,
+                failure=f"Pipeline '{pipeline}' is not registered",
+                metadata={"parent_run_id": state["run_id"], "parent_task_id": state["task_id"]},
+            )) or {}
+        request_data = _request_to_dict(request)
+        request_data["task_id"] = child_task_id
+        request_data["metadata"] = {
+            **dict(request.metadata),
+            "run_id": child_run_id,
+            "progress_run_id": state["run_id"],
+            "parent_orchestration_run_id": state["run_id"],
+            "parent_task_id": state["task_id"],
+            "child_run_id": child_run_id,
+            "child_task_id": child_task_id,
+            "pipeline": pipeline,
+            "request_understanding": state.get("understanding", {}),
+            "resolved_memory_context": state.get("memory_context", ""),
+            "resolved_memory_records": state.get("memory_records", []),
+            "prompt_plan": dict(prompt_plan),
+        }
+        response = self.registry[pipeline].run(_request_from_dict(request_data))
+        self._check_cancelled(state["run_id"])
+        payload = response_to_dict(response) or {}
+        response_metadata = dict(payload.get("metadata") or {})
+        response_metadata.update({
+            "operation": request.operation,
+            "parent_run_id": request.parent_run_id,
+            "parent_artifact_id": request.parent_artifact_id,
+            "revision_scope": list(request.revision_scope),
+            "parent_orchestration_run_id": state["run_id"],
+            "parent_task_id": state["task_id"],
+            "child_run_id": child_run_id,
+            "child_task_id": child_task_id,
+        })
+        payload["metadata"] = response_metadata
+        return payload
 
     @staticmethod
     def _route_after_run(state: OrchestratorState) -> str:
@@ -749,6 +1063,7 @@ class PipelineOrchestrator:
         return "finish" if response.get("status") == "succeeded" else "fail"
 
     def _await_approval(self, state: OrchestratorState) -> dict[str, Any]:
+        self._check_cancelled(state["run_id"])
         pipeline = state["pipeline"]
         adapter = self.registry[pipeline]
         if adapter.resume is None:
@@ -765,12 +1080,16 @@ class PipelineOrchestrator:
         return {"approval_decision": dict(decision) if isinstance(decision, Mapping) else {"decision": decision}}
 
     def _resume_pipeline(self, state: OrchestratorState) -> dict[str, Any]:
+        self._check_cancelled(state["run_id"])
         pipeline = state["pipeline"]
         adapter = self.registry[pipeline]
         decision = state.get("approval_decision") or {}
         reporter = self._reporter(state)
         try:
             response = adapter.resume(_request_from_dict(state["request"]), decision)  # type: ignore[misc]
+            payload = response_to_dict(response)
+            updated_responses = dict(state.get("responses") or {})
+            updated_responses[pipeline] = payload or {}
             if response.status == "succeeded":
                 reporter.emit(stage="pipeline_result", status="succeeded", progress=90,
                               message="Approved pipeline result is ready", pipeline=pipeline)
@@ -778,7 +1097,13 @@ class PipelineOrchestrator:
                 reporter.emit(stage="pipeline_result", status="failed", progress=100,
                               message="Approval decision did not release a result", pipeline=pipeline,
                               error_code="APPROVAL_NOT_RELEASED")
-            return {"response": response_to_dict(response), "status": response.status}
+            return {
+                "response": payload,
+                "responses": updated_responses,
+                "status": response.status,
+            }
+        except RunCancelled:
+            raise
         except Exception as exc:
             reporter.emit(stage="pipeline_result", status="failed", progress=100,
                           message="Pipeline could not resume after approval", pipeline=pipeline,
@@ -790,11 +1115,17 @@ class PipelineOrchestrator:
         return "finish" if (state.get("response") or {}).get("status") == "succeeded" else "fail"
 
     def _finish(self, state: OrchestratorState) -> dict[str, Any]:
+        self._check_cancelled(state["run_id"])
         reporter = self._reporter(state)
         response = state.get("response") or {}
+        responses = state.get("responses") or {}
+        status = _aggregate_pipeline_status(responses) if responses else response.get("status", "succeeded")
         reporter.emit(stage="completed", status="completed", progress=100,
-                      message="The requested pipeline completed", pipeline=state.get("pipeline"))
-        return {"status": response.get("status", "succeeded"), "stage": "completed"}
+                      message=("The requested pipeline completed"
+                               if len(responses) <= 1
+                               else f"Completed {len(responses)} requested pipelines"),
+                      pipeline=state.get("pipeline"))
+        return {"status": status, "stage": "completed"}
 
     def _fail(self, state: OrchestratorState) -> dict[str, Any]:
         reporter = self._reporter(state)
@@ -818,3 +1149,18 @@ def _response_from_dict(data: Any) -> PipelineResponse | None:
         attempts=int(data.get("attempts", 0)),
         metadata=data.get("metadata", {}),
     )
+
+
+def _aggregate_pipeline_status(payloads: Mapping[str, Any]) -> str:
+    """Return the parent status while retaining every child result."""
+
+    statuses = [str(value.get("status")) for value in payloads.values() if isinstance(value, Mapping)]
+    if not statuses:
+        return "failed"
+    if all(status == "succeeded" for status in statuses):
+        return "succeeded"
+    if all(status == "failed" for status in statuses):
+        return "failed"
+    if any(status == "pending" for status in statuses):
+        return "pending"
+    return "partial"

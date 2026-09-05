@@ -36,15 +36,33 @@ The available flows are:
   Case-memory write-back. The frontend receives the SVG artifact path and may
   preview, edit, or upload it.
 
+Updates to an existing output are modeled as revisions. The frontend creates a
+new task with `operation="revise"`, a `parent_artifact_id` or `parent_run_id`,
+the user's `revision_instruction`, and an optional `revision_scope`. The old
+artifact is never overwritten; the new result goes through the same validation
+and approval policy.
+
 For the central LangGraph router, backend/frontend event contract, approval
 resume flow, and Harness boundary, see
 [`docs/internal/pipeline-orchestration.md`](../docs/internal/pipeline-orchestration.md).
 
 When the central router is used, a small User/Case memory context is recalled
-before request understanding. Once a pipeline is selected, a second recall
-uses the permitted User/Case/Task scopes and the bounded result is passed into
-the selected flow's CrewAI tasks. Calling a flow directly remains supported
+before request understanding. Once one or more pipelines are selected, a
+second recall uses the permitted User/Case/Task scopes and the bounded result
+is passed into each child flow's CrewAI tasks. Calling a flow directly remains supported
 for compatibility; in that mode the flow performs its own scoped recall.
+
+The frontend can stop a run through the orchestrator's cancellation endpoint.
+Cancellation is cooperative: active graph boundaries observe it, record a
+Task-memory cancellation event, and return status `cancelled`. A provider call
+already executing may finish before the worker observes the cancellation.
+
+The router supports fan-out requests such as `Create outputs A and B`. It runs
+registered adapters concurrently, gives every child its own task/run identity,
+and returns `result.responses` keyed by pipeline. A later revision should send
+only the selected pipeline and its `parent_artifact_id`; sibling artifacts are
+not re-run or overwritten. Any new output adapter can be registered through
+the central plugin contract.
 
 CrewAI agents receive a scoped recall tool and injected bounded context. They
 do not receive Cognee credentials or a Cognee client. Task lifecycle output is

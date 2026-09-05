@@ -112,6 +112,11 @@ class AdvisoryFlow(Flow[TaskState]):
         self.state.distribution = request.distribution
         self.state.top_k = request.top_k
         self.state.token_budget = request.token_budget
+        self.state.operation = request.operation
+        self.state.parent_run_id = request.parent_run_id
+        self.state.parent_artifact_id = request.parent_artifact_id
+        self.state.revision_instruction = request.revision_instruction
+        self.state.revision_scope = list(request.revision_scope)
         self.state.pipeline_options = {
             "request_understanding": request.metadata.get("request_understanding", {}),
             "prompt_plan": request.metadata.get("prompt_plan", {}),
@@ -180,6 +185,11 @@ class AdvisoryFlow(Flow[TaskState]):
             task_id=self.state.task_id,
             classification_level=self.state.classification_level,
             distribution=self.state.distribution,
+            operation=self.state.operation,
+            parent_run_id=self.state.parent_run_id,
+            parent_artifact_id=self.state.parent_artifact_id,
+            revision_instruction=self.state.revision_instruction,
+            revision_scope=tuple(self.state.revision_scope),
         )
         response = self.memory_manager.recall(
             query=f"Prepare NTRO case advisory for the operation: {request.query}",
@@ -220,6 +230,9 @@ class AdvisoryFlow(Flow[TaskState]):
                 "classification_level": self.state.classification_level,
                 "distribution": self.state.distribution,
                 "run_id": self.state.run_id,
+                "operation": self.state.operation,
+                "parent_artifact_id": self.state.parent_artifact_id,
+                "revision_scope": self.state.revision_scope,
                 "prompt_plan": self.state.prompt_plan,
                 "request_understanding": self.state.request_understanding,
             })
@@ -244,6 +257,11 @@ class AdvisoryFlow(Flow[TaskState]):
                     task_id=self.state.task_id,
                     classification_level=self.state.classification_level,
                     distribution=self.state.distribution,
+                    operation=self.state.operation,
+                    parent_run_id=self.state.parent_run_id,
+                    parent_artifact_id=self.state.parent_artifact_id,
+                    revision_instruction=self.state.revision_instruction,
+                    revision_scope=tuple(self.state.revision_scope),
                 ).access_context,
                 task_id=self.state.task_id,
                 case_id=self.state.case_id,
@@ -340,6 +358,10 @@ class AdvisoryFlow(Flow[TaskState]):
                     "pipeline": self.pipeline_name,
                     "classification_level": advisory.classification_level,
                     "artifact_path": artifact.path,
+                    "operation": self.state.operation,
+                    "parent_run_id": self.state.parent_run_id,
+                    "parent_artifact_id": self.state.parent_artifact_id,
+                    "revision_scope": self.state.revision_scope,
                     "advisory": advisory.model_dump(mode="json"),
                 },
                 provenance={
@@ -349,6 +371,9 @@ class AdvisoryFlow(Flow[TaskState]):
                     "memory_policy": "case_output_after_quality_gate",
                     "human_approval": "approved",
                     "approval_feedback": feedback,
+                    "operation": self.state.operation,
+                    "parent_run_id": self.state.parent_run_id,
+                    "parent_artifact_id": self.state.parent_artifact_id,
                 },
             )
             self.memory_manager.remember(
@@ -360,6 +385,11 @@ class AdvisoryFlow(Flow[TaskState]):
                     task_id=self.state.task_id,
                     classification_level=self.state.classification_level,
                     distribution=self.state.distribution,
+                    operation=self.state.operation,
+                    parent_run_id=self.state.parent_run_id,
+                    parent_artifact_id=self.state.parent_artifact_id,
+                    revision_instruction=self.state.revision_instruction,
+                    revision_scope=tuple(self.state.revision_scope),
                 ).access_context,
                 scope_type=ScopeType.CASE,
                 memory_type=MemoryType.SUMMARY,

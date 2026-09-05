@@ -14,6 +14,9 @@ from pipelines.orchestrator.types import (
     OrchestrationResult,
     PipelineAdapter,
     PipelineName,
+    PipelineRegistry,
+    load_pipeline_plugins,
+    orchestration_result_to_dict,
 )
 from pipelines.orchestrator.understanding import (
     PromptCrafterAgent,
@@ -21,13 +24,17 @@ from pipelines.orchestrator.understanding import (
     RequestUnderstanding,
     RequestUnderstandingAgent,
     default_intent_resolver,
+    resolve_requested_pipelines,
 )
 
 __all__ = [
     "InMemoryProgressSink",
     "OrchestrationResult",
+    "orchestration_result_to_dict",
     "PipelineAdapter",
     "PipelineName",
+    "PipelineRegistry",
+    "load_pipeline_plugins",
     "PipelineOrchestrator",
     "PromptCrafterAgent",
     "PromptPlan",
@@ -38,4 +45,5 @@ __all__ = [
     "build_default_pipeline_registry",
     "create_sqlite_checkpointer",
     "default_intent_resolver",
+    "resolve_requested_pipelines",
 ]

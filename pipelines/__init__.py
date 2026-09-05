@@ -8,8 +8,11 @@ from pipelines.linkedin.crew import LinkedInPostFlow
 from pipelines.orchestrator import (
     InMemoryProgressSink,
     OrchestrationResult,
+    orchestration_result_to_dict,
     PipelineAdapter,
     PipelineOrchestrator,
+    PipelineRegistry,
+    load_pipeline_plugins,
     PromptCrafterAgent,
     PromptPlan,
     ProgressEvent,
@@ -19,6 +22,7 @@ from pipelines.orchestrator import (
     build_default_pipeline_registry,
     create_sqlite_checkpointer,
     default_intent_resolver,
+    resolve_requested_pipelines,
 )
 
 __all__ = [
@@ -30,7 +34,10 @@ __all__ = [
     "PipelineResponse",
     "InMemoryProgressSink",
     "OrchestrationResult",
+    "orchestration_result_to_dict",
     "PipelineAdapter",
+    "PipelineRegistry",
+    "load_pipeline_plugins",
     "PipelineOrchestrator",
     "PromptCrafterAgent",
     "PromptPlan",
@@ -41,4 +48,5 @@ __all__ = [
     "build_default_pipeline_registry",
     "create_sqlite_checkpointer",
     "default_intent_resolver",
+    "resolve_requested_pipelines",
 ]

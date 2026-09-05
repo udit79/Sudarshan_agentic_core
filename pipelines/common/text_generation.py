@@ -87,6 +87,11 @@ class TextTransformationFlow(Flow[TaskState]):
         self.state.distribution = request.distribution
         self.state.top_k = request.top_k
         self.state.token_budget = request.token_budget
+        self.state.operation = request.operation
+        self.state.parent_run_id = request.parent_run_id
+        self.state.parent_artifact_id = request.parent_artifact_id
+        self.state.revision_instruction = request.revision_instruction
+        self.state.revision_scope = list(request.revision_scope)
         self.state.request_understanding = dict(request.metadata.get("request_understanding", {}))
         self.state.prompt_plan = dict(request.metadata.get("prompt_plan", {}))
         self.state.max_attempts = self.max_attempts
@@ -127,6 +132,11 @@ class TextTransformationFlow(Flow[TaskState]):
             distribution=self.state.distribution,
             top_k=self.state.top_k,
             token_budget=self.state.token_budget,
+            operation=self.state.operation,
+            parent_run_id=self.state.parent_run_id,
+            parent_artifact_id=self.state.parent_artifact_id,
+            revision_instruction=self.state.revision_instruction,
+            revision_scope=tuple(self.state.revision_scope),
         )
 
     def pipeline_options(self, request: AdvisoryRequest) -> dict[str, Any]:
@@ -294,6 +304,10 @@ class TextTransformationFlow(Flow[TaskState]):
                     "classification_level": self.state.classification_level,
                     "delivery_owner": "frontend",
                     "human_approval_required": False,
+                    "operation": self.state.operation,
+                    "parent_run_id": self.state.parent_run_id,
+                    "parent_artifact_id": self.state.parent_artifact_id,
+                    "revision_scope": self.state.revision_scope,
                     "output": output.model_dump(mode="json"),
                 },
                 provenance={
@@ -301,6 +315,9 @@ class TextTransformationFlow(Flow[TaskState]):
                     "case_id": self.state.case_id,
                     "run_id": self.state.run_id,
                     "memory_policy": "validated_output_case_write_back",
+                    "operation": self.state.operation,
+                    "parent_run_id": self.state.parent_run_id,
+                    "parent_artifact_id": self.state.parent_artifact_id,
                 },
             )
             self.memory_manager.remember(

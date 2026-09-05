@@ -43,6 +43,11 @@ class TaskState(BaseModel):
     distribution: str = "Authorized NTRO personnel"
     top_k: int = Field(default=12, ge=1)
     token_budget: int = Field(default=6000, ge=256)
+    operation: Literal["create", "revise"] = "create"
+    parent_run_id: str | None = None
+    parent_artifact_id: str | None = None
+    revision_instruction: str | None = None
+    revision_scope: list[str] = Field(default_factory=list)
     memory_context: str = ""
     memory_records: list[dict[str, Any]] = Field(default_factory=list)
     request_understanding: dict[str, Any] = Field(default_factory=dict)

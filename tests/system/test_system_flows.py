@@ -129,3 +129,21 @@ def test_system_external_approval_round_trip() -> None:
     assert approval_interrupt["type"] == "approval.required"
     assert completed.status == "succeeded"
     assert decisions == [{"decision": "approved", "reviewer_id": "reviewer-1"}]
+
+
+def test_system_frontend_cancellation_stops_at_next_safe_boundary() -> None:
+    orchestrator: PipelineOrchestrator
+
+    def run_and_request_cancel(request):
+        cancellation = orchestrator.cancel("run-system-cancel", request.task_id)
+        assert cancellation["status"] == "requested"
+        return successful_response(request, "advisory")
+
+    orchestrator = PipelineOrchestrator(
+        FakeRecallManager(),
+        registry={"advisory": PipelineAdapter("advisory", run_and_request_cancel)},
+    )
+    result = orchestrator.run(make_request("advisory"), run_id="run-system-cancel")
+
+    assert result.status == "cancelled"
+    assert result.response is None
