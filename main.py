@@ -1,7 +1,7 @@
 from ingestion_pipelines import ingest_file, to_knowledge_unit
 
 # Test with any image path (.png, .jpg, .jpeg, .tiff, etc.)
-image_path = "sample_data/screens.png"
+image_path = "sample_data/test_dum.jpg"
 
 doc = ingest_file(image_path, user_id="udit", case_id="sih-demo-case-1")
 unit = to_knowledge_unit(doc)
