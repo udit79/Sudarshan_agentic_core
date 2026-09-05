@@ -10,6 +10,8 @@ import mimetypes
 import os
 from pathlib import Path
 
+from ingestion_pipelines.config import load_env
+
 
 # Supported image types and their MIME type overrides where Python's mimetypes
 # module may guess incorrectly (e.g. .jpg -> image/jpeg, not image/jpg).
@@ -53,6 +55,8 @@ def extract_text_from_image_gemini(file_path: str) -> str:
             "google-genai is not installed. "
             "Run: python -m pip install google-genai"
         ) from err
+
+    load_env()
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
