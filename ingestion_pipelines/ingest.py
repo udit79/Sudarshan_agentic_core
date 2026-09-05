@@ -1,5 +1,5 @@
-from injestion.models import IngestedDocument
-from injestion.extract import extract_text
+from ingestion_pipelines.models import IngestedDocument
+from ingestion_pipelines.extract import extract_text
 
 def ingest_file(
     file_path: str,

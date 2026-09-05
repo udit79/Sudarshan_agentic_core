@@ -1,9 +1,9 @@
 """Sudarshan Ingestion Layer."""
 
-from injestion.adapter import to_access_context, to_knowledge_unit
-from injestion.extract import extract_text
-from injestion.ingest import ingest_file
-from injestion.models import IngestedDocument
+from ingestion_pipelines.adapter import to_access_context, to_knowledge_unit
+from ingestion_pipelines.extract import extract_text
+from ingestion_pipelines.ingest import ingest_file
+from ingestion_pipelines.models import IngestedDocument
 
 __all__ = [
     "IngestedDocument",

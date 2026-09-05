@@ -1,5 +1,5 @@
 from unittest.mock import patch
-from injestion import ingest_file, to_access_context, to_knowledge_unit, IngestedDocument
+from ingestion_pipelines import ingest_file, to_access_context, to_knowledge_unit, IngestedDocument
 from memory.model import KnowledgeUnit, ScopeType, SourceType
 from memory.memory_manager import MemoryManager
 from memory.tests.test_memory_manager import FakeBackend

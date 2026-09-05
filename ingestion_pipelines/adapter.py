@@ -5,7 +5,7 @@ This is the ONLY place ingestion needs to know memory.model exists.
 
 from datetime import datetime
 
-from injestion.models import IngestedDocument
+from ingestion_pipelines.models import IngestedDocument
 from memory.model import KnowledgeUnit, Source, SourceType
 from memory.scope_policy import AccessContext
 

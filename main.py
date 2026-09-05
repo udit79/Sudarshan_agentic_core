@@ -1,4 +1,4 @@
-from injestion import ingest_file, to_knowledge_unit
+from ingestion_pipelines import ingest_file, to_knowledge_unit
 
 # Test with any image path (.png, .jpg, .jpeg, .tiff, etc.)
 image_path = "sample_data/screens.png"
