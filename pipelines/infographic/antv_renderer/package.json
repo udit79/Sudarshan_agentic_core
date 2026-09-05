@@ -1,0 +1,8 @@
+{
+  "name": "sudarshan-antv-infographic-renderer",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@antv/infographic": "0.2.20"
+  }
+}

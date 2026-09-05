@@ -65,9 +65,27 @@ def coerce_knowledge_unit(value: KnowledgeUnit | Mapping[str, Any] | Any) -> Kno
         raise TypeError("KnowledgeUnit metadata and provenance must be mappings")
     if unit_id is None or content is None:
         raise TypeError("ingestion object must provide unit_id/id and content/text")
-    created_at = get("created_at", utc_now())
-    return KnowledgeUnit(str(unit_id), str(content), _source_from(get("source"), str(unit_id), provenance),
-                         metadata, provenance, created_at)
+    created_at_value = get("created_at", None)
+    if created_at_value is None:
+        created_at = utc_now()
+    elif isinstance(created_at_value, datetime):
+        created_at = created_at_value
+    elif isinstance(created_at_value, str):
+        try:
+            created_at = datetime.fromisoformat(created_at_value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise TypeError("created_at must be a datetime or ISO-8601 string") from exc
+    else:
+        raise TypeError("created_at must be a datetime or ISO-8601 string")
+
+    return KnowledgeUnit(
+        unit_id=str(unit_id),
+        content=str(content),
+        source=_source_from(get("source"), str(unit_id), provenance),
+        metadata=metadata,
+        provenance=provenance,
+        created_at=created_at,
+    )
 
 
 def _stable_memory_id(unit: KnowledgeUnit, scope_type: ScopeType, scope_id: str,

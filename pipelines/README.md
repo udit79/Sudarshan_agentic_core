@@ -1,0 +1,109 @@
+# Sudarshan pipelines
+
+These application-specific pipelines turn person-provided case information
+plus permitted memory into controlled outputs. The advisory pipeline produces
+a formal case advisory for authorized review. The LinkedIn and executive-
+summary pipelines return validated drafts; the frontend owns preview, editing,
+and upload. The infographic pipeline produces validated AntV syntax and an SVG
+artifact. None of these pipelines is a cybersecurity generator, and none
+claims to represent an official NTRO template or classified operating
+procedure.
+
+## Ownership boundary
+
+```text
+Pipeline Flow -> MemoryManager.recall()
+             -> CrewAI specialist crew
+             -> Pydantic output + QualityReview
+             -> optional artifact renderer
+             -> MemoryManager.remember() [case only after validation/approval]
+             -> DeepSeek harness/application handoff
+```
+
+The available flows are:
+
+- `AdvisoryFlow`: quality review, human approval, formal Markdown artifact,
+  then Case-memory write-back.
+- `LinkedInPostFlow`: quality review, validated post returned to the frontend;
+  no direct LinkedIn upload. It reads explicit image instructions from the
+  user query and otherwise lets the writer decide whether a visual improves
+  the post. OpenAI image generation is optional.
+- `ExecutiveSummaryFlow`: quality review, validated summary returned to the
+  frontend.
+- `InfographicFlow`: quality review, validated AntV syntax, SVG rendering, and
+  Case-memory write-back. The frontend receives the SVG artifact path and may
+  preview, edit, or upload it.
+
+CrewAI agents receive a scoped recall tool and injected bounded context. They
+do not receive Cognee credentials or a Cognee client. Task lifecycle output is
+written automatically as task-scoped memory by CrewAI task callbacks. Failed
+and incomplete runs remain visible in Task memory.
+
+## Required request fields
+
+Every run requires `user_id`, `case_id`, and `task_id`. The task ID is not
+optional because it is the audit boundary for agent execution.
+
+```python
+from pipelines import AdvisoryFlow, AdvisoryRequest
+from memory import MemoryManager
+
+request = AdvisoryRequest(
+    query="Assess the reported case information and recommend next actions",
+    user_id="operator-1",
+    case_id="case-1",
+    task_id="task-1",
+)
+result = AdvisoryFlow(MemoryManager.from_env()).run(request)
+```
+
+Configure the CrewAI provider/model through the environment expected by that
+provider and optionally set `CREWAI_MODEL`. Flow checkpoints are stored at
+`CREWAI_FLOW_DB_PATH` (default `artifacts/.state/flow_states.db`) so pending
+human approvals and retries are application-owned and durable. No API key is
+read or printed by the pipeline package. `CREWAI_DISABLE_TELEMETRY=true` is the
+safe default for case-sensitive deployments; enable CrewAI telemetry only if
+your deployment explicitly permits it.
+
+## Human approval and advisory artifact handoff
+
+The quality critic must approve the structured advisory before the Flow opens
+the human release gate. The gate can produce `approved`, `rejected`, or
+`needs_revision`:
+
+- `approved`: renders a formal Markdown advisory in `artifacts/advisories/` and
+  writes the approved artifact to Case memory.
+- `rejected`: produces no artifact and keeps the decision visible in Task
+  memory.
+- `needs_revision`: produces no artifact; the run remains incomplete with the
+  review feedback available for a controlled retry or application-side
+  revision flow.
+
+## LinkedIn image option
+
+The LinkedIn pipeline accepts `metadata={"linkedin_image": {"requested": True}}`
+to force an image or `requested=False` to disable one. If omitted, the user
+query is inspected: explicit image/visual language forces an image, explicit
+no-image language disables it, and otherwise the writer decides. The result
+includes image type, alt text, and a case-grounded generation prompt. An
+OpenAI image adapter can turn that prompt into an asset URI; without it, the
+frontend receives the prompt fallback.
+
+Set `OPENAI_API_KEY` and optionally `OPENAI_IMAGE_MODEL`. The adapter defaults
+to `gpt-image-1` and writes returned base64 image data to
+`artifacts/linkedin/images/`.
+
+## Infographic renderer setup
+
+The root setup command installs AntV Infographic as a deterministic
+syntax-to-SVG renderer. If setting up manually, install its pinned Node
+dependency from this directory:
+
+```bash
+cd pipelines/infographic/antv_renderer
+npm install
+```
+
+`InfographicFlow` owns memory recall, CrewAI syntax generation, validation, and
+provenance. The Node bridge owns only AntV SSR rendering. It does not receive
+Cognee credentials or raw unvalidated agent output.

@@ -19,6 +19,12 @@ env/
 .vscode/
 .idea/
 
+# AntV infographic renderer dependencies
+pipelines/infographic/antv_renderer/node_modules/
+
+# Runtime-generated pipeline artifacts
+artifacts/
+
 # Secrets and local Cognee configuration
 .env
 .env.*
