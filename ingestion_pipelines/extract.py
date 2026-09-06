@@ -5,8 +5,9 @@ from pathlib import Path
 TEXT_EXTENSIONS = {".txt"}
 PDF_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
+PPTX_EXTENSIONS = {".pptx"}
 
-SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | PDF_EXTENSIONS | IMAGE_EXTENSIONS
+SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | PDF_EXTENSIONS | IMAGE_EXTENSIONS | PPTX_EXTENSIONS
 
 
 def validate_source(file_path: str) -> str:
@@ -48,5 +49,8 @@ def extract_text(file_path: str) -> tuple[str, str]:
     if ext in IMAGE_EXTENSIONS:
         from ingestion_pipelines.extract_image import extract_text_from_image_gemini
         return extract_text_from_image_gemini(file_path), "image"
+    if ext in PPTX_EXTENSIONS:
+        from ingestion_pipelines.extract_pptx import extract_text_from_pptx
+        return extract_text_from_pptx(file_path), "pptx"
 
     raise ValueError(f"Unhandled file extension: {ext}")

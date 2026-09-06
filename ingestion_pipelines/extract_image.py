@@ -77,5 +77,10 @@ def extract_text_from_image_gemini(file_path: str) -> str:
             genai_types.Part.from_bytes(data=image_bytes, mime_type=mime),
             _TRANSCRIPTION_PROMPT,
         ],
+        # Newer google-genai releases warn on the default AFC path for
+        # one-shot generate_content calls; we never pass tools, so disable it.
+        config=genai_types.GenerateContentConfig(
+            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True)
+        ),
     )
     return response.text or ""
