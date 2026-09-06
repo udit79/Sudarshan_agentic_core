@@ -35,6 +35,7 @@ class SourceType(str, Enum):
     USER = "user"
     INFOGRAPHIC = "infographic"
     IMAGE = "image"
+    VIDEO = "video"
     OTHER = "other"
 
 

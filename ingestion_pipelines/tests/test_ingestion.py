@@ -37,6 +37,18 @@ def test_ingest_pdf_file():
     assert unit.source.source_reference == "sample_data/dsaqueue.pdf"
 
 
+def test_ingest_video_file():
+    doc = ingest_file("sample_data/sample_briefing.mp4", user_id="user1", case_id="case1", task_id="task1")
+    assert doc.doc_type == "video"
+    assert "VIDEO INTELLIGENCE TRANSCRIPT" in doc.raw_text
+    assert "[00:00]" in doc.raw_text
+
+    unit = to_knowledge_unit(doc)
+    assert unit.source.source_type is SourceType.VIDEO
+    assert unit.source.source_reference == "sample_data/sample_briefing.mp4"
+
+
+
 
 def test_adapter_to_knowledge_unit_and_context():
     doc = ingest_file("sample_data/sample_text.txt", user_id="user1", case_id="case1", task_id="task1")

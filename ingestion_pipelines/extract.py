@@ -6,8 +6,9 @@ TEXT_EXTENSIONS = {".txt"}
 PDF_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
 PPTX_EXTENSIONS = {".pptx"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
-SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | PDF_EXTENSIONS | IMAGE_EXTENSIONS | PPTX_EXTENSIONS
+SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | PDF_EXTENSIONS | IMAGE_EXTENSIONS | PPTX_EXTENSIONS | VIDEO_EXTENSIONS
 
 
 def validate_source(file_path: str) -> str:
@@ -47,5 +48,8 @@ def extract_text(file_path: str) -> tuple[str, str]:
     if ext in PPTX_EXTENSIONS:
         from ingestion_pipelines.extract_pptx import extract_text_from_pptx
         return extract_text_from_pptx(file_path), "pptx"
+    if ext in VIDEO_EXTENSIONS:
+        from ingestion_pipelines.extract_video import extract_text_from_video
+        return extract_text_from_video(file_path), "video"
 
     raise ValueError(f"Unhandled file extension: {ext}")
