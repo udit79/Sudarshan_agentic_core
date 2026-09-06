@@ -13,6 +13,11 @@ dependencies = [
     "pillow>=12.3.0",
     "pypdf>=6.17.0",
     "pytesseract>=0.3.13",
+    "python-pptx>=1.0.0",
+    "google-genai>=2.0.0",
+    "pymupdf>=1.24.0",
+    "opencv-python-headless>=4.10.0",
+    "imageio-ffmpeg>=0.5.0",
 ]
 
 [dependency-groups]

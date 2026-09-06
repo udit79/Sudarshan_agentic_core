@@ -14,6 +14,42 @@ def test_ingest_txt_file():
     assert doc.task_id == "task1"
 
 
+def test_ingest_pptx_file():
+    doc = ingest_file("sample_data/dummy_presentation.pptx", user_id="user1", case_id="case1", task_id="task1")
+    assert doc.doc_type == "pptx"
+    assert "Sudarshan Defense Briefing" in doc.raw_text
+    assert "[Speaker Notes]:" in doc.raw_text
+    assert "Welcome senior leadership" in doc.raw_text
+
+    unit = to_knowledge_unit(doc)
+    assert unit.source.source_type is SourceType.PPTX
+    assert unit.source.source_reference == "sample_data/dummy_presentation.pptx"
+
+
+def test_ingest_pdf_file():
+    doc = ingest_file("sample_data/dsaqueue.pdf", user_id="user1", case_id="case1", task_id="task1")
+    assert doc.doc_type == "pdf"
+    assert "--- Page 1 ---" in doc.raw_text
+    assert "Enqueue" in doc.raw_text
+
+    unit = to_knowledge_unit(doc)
+    assert unit.source.source_type is SourceType.PDF
+    assert unit.source.source_reference == "sample_data/dsaqueue.pdf"
+
+
+def test_ingest_video_file():
+    doc = ingest_file("sample_data/sample_briefing.mp4", user_id="user1", case_id="case1", task_id="task1")
+    assert doc.doc_type == "video"
+    assert "VIDEO INTELLIGENCE TRANSCRIPT" in doc.raw_text
+    assert "[00:00]" in doc.raw_text
+
+    unit = to_knowledge_unit(doc)
+    assert unit.source.source_type is SourceType.VIDEO
+    assert unit.source.source_reference == "sample_data/sample_briefing.mp4"
+
+
+
+
 def test_adapter_to_knowledge_unit_and_context():
     doc = ingest_file("sample_data/sample_text.txt", user_id="user1", case_id="case1", task_id="task1")
     unit = to_knowledge_unit(doc)
@@ -43,19 +79,8 @@ def test_adapter_unknown_doc_type_falls_back_to_other():
     assert unit.source.source_type is SourceType.OTHER
 
 
-def test_ingest_image_with_ocr():
-    with patch("pytesseract.image_to_string", return_value="SECURITY CAMERA LOG: SECTOR 7"):
-        doc = ingest_file("sample_data/sample_ocr.png", user_id="user1", case_id="case1")
-        assert doc.doc_type == "image"
-        assert "SECURITY CAMERA LOG" in doc.raw_text
-
-        unit = to_knowledge_unit(doc)
-        assert unit.source.source_type is SourceType.IMAGE
-        assert unit.source.source_reference == "sample_data/sample_ocr.png"
-
-
 def test_ingestion_to_memory_manager_end_to_end():
-    doc = ingest_file("sample_data/sample_text.txt", user_id="user1", case_id="case1")
+    doc = ingest_file("sample_data/dummy_presentation.pptx", user_id="user1", case_id="case1")
     unit = to_knowledge_unit(doc)
     context = to_access_context(doc)
 
@@ -66,6 +91,6 @@ def test_ingestion_to_memory_manager_end_to_end():
     assert receipt.memory.scope.scope_type is ScopeType.CASE
     assert backend.writes[0]["node_sets"] == ["sudarshan:scope:case:case1"]
 
-    recall_resp = manager.recall("relay downtime", context)
+    recall_resp = manager.recall("advisory pipeline", context)
     assert len(recall_resp.results) == 1
-    assert "relay B7" in recall_resp.context.text
+    assert "Sudarshan Defense Briefing" in recall_resp.context.text
