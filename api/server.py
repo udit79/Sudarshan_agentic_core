@@ -2,15 +2,19 @@
 
 import asyncio
 import os
+import tempfile
 from uuid import uuid4
+from pathlib import Path
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, File, Form, HTTPException, FastAPI, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 
 from api.middleware import NTROSecurityMiddleware, AuditMiddleware
 from integrations.deepseek_harness.application import get_application
 from api.sse import event_generator
+from ingestion_pipelines.extract import SUPPORTED_EXTENSIONS
+from pipelines.common.ntro_policy import validate_classification
 
 app = FastAPI(
     title="Sudarshan Agentic Core API",
@@ -35,6 +39,35 @@ app.add_middleware(NTROSecurityMiddleware)
 app.add_middleware(AuditMiddleware)
 
 
+async def _save_upload(upload: UploadFile, *, max_bytes: int) -> tuple[str, str]:
+    """Stream an upload to a private temporary file with a hard size limit."""
+
+    source_reference = Path(upload.filename or "upload").name
+    suffix = Path(source_reference).suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail=f"Unsupported file type: {suffix or '<none>'}")
+
+    handle = tempfile.NamedTemporaryFile(prefix="sudarshan-ingest-", suffix=suffix, delete=False)
+    temp_path = handle.name
+    total = 0
+    try:
+        with handle:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(status_code=413, detail="Uploaded file exceeds the configured size limit")
+                handle.write(chunk)
+    except Exception:
+        Path(temp_path).unlink(missing_ok=True)
+        raise
+    finally:
+        await upload.close()
+    return temp_path, source_reference
+
+
 @app.get("/health")
 async def health_check():
     """System health (Cognee, providers, pipelines)."""
@@ -45,6 +78,54 @@ async def health_check():
 async def list_pipelines():
     """Registered pipeline discovery."""
     return {"pipelines": get_application().list_pipelines()}
+
+
+@app.post("/ingest", status_code=201)
+async def ingest_source(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str | None = Form(None),
+    case_id: str | None = Form(None),
+    task_id: str | None = Form(None),
+    classification_level: str | None = Form(None),
+):
+    """Extract a real uploaded source and persist it into case memory."""
+
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    resolved_user_id = (user_id or operator_id).strip()
+    resolved_case_id = (case_id or request.headers.get("x-case-id", "")).strip()
+    if resolved_user_id != operator_id:
+        raise HTTPException(status_code=403, detail="user_id must match the authenticated operator")
+    if not resolved_case_id:
+        raise HTTPException(status_code=422, detail="case_id is required for NTRO ingestion")
+
+    resolved_task_id = (task_id or f"ingest-{uuid4()}").strip()
+    classification = validate_classification(
+        classification_level or request.headers.get("x-classification-level", "RESTRICTED")
+    )
+    max_bytes = int(os.getenv("SUDARSHAN_MAX_INGEST_BYTES", str(50 * 1024 * 1024)))
+    temp_path, source_reference = await _save_upload(file, max_bytes=max_bytes)
+    try:
+        try:
+            return await asyncio.to_thread(
+                get_application().ingest_path,
+                temp_path,
+                source_reference=source_reference,
+                operator_id=operator_id,
+                user_id=resolved_user_id,
+                case_id=resolved_case_id,
+                task_id=resolved_task_id,
+                classification_level=classification,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Source extraction or memory persistence failed",
+            ) from exc
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
 
 
 @app.post("/runs")

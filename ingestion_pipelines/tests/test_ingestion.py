@@ -95,3 +95,21 @@ def test_ingestion_to_memory_manager_end_to_end():
     recall_resp = manager.recall("advisory pipeline", context)
     assert len(recall_resp.results) == 1
     assert "Sudarshan Defense Briefing" in recall_resp.context.text
+
+
+def test_ingest_file_can_extract_and_persist_in_one_real_operation():
+    backend = FakeBackend()
+    manager = MemoryManager(backend)
+
+    doc = ingest_file(
+        "sample_data/sample_text.txt",
+        user_id="user1",
+        case_id="case1",
+        task_id="task1",
+        source_reference="incident-report.txt",
+        memory_manager=manager,
+    )
+
+    assert doc.source_path == "incident-report.txt"
+    assert len(backend.writes) == 1
+    assert backend.writes[0]["node_sets"] == ["sudarshan:scope:case:case1"]

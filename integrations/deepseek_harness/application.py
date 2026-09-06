@@ -110,6 +110,67 @@ class SudarshanApplication:
         )
         return str(recalled.context.text or "")
 
+    def ingest_path(
+        self,
+        file_path: str,
+        *,
+        source_reference: str,
+        operator_id: str,
+        user_id: str,
+        case_id: str,
+        task_id: str,
+        classification_level: str = "RESTRICTED",
+    ) -> dict[str, Any]:
+        """Perform real source extraction and persist it through MemoryManager."""
+
+        from ingestion_pipelines import ingest_file
+        from pipelines.common.audit_logger import get_audit_logger
+        from pipelines.common.ntro_policy import validate_classification
+
+        classification = validate_classification(classification_level)
+        audit = get_audit_logger()
+        try:
+            document = ingest_file(
+                file_path,
+                user_id=user_id,
+                case_id=case_id,
+                task_id=task_id,
+                memory_manager=self.orchestrator.memory_manager,
+                source_reference=source_reference,
+            )
+        except Exception as exc:
+            audit.log(
+                operator_id=operator_id,
+                action="ingestion",
+                status="failed",
+                case_id=case_id,
+                task_id=task_id,
+                classification=classification,
+                detail=f"source={source_reference}; error_type={type(exc).__name__}",
+            )
+            raise
+
+        audit.log_ingestion(
+            operator_id=operator_id,
+            case_id=case_id,
+            source_type=document.doc_type,
+            source_reference=source_reference,
+            classification=classification,
+        )
+        return {
+            "status": "succeeded",
+            "document_id": document.id,
+            "source_reference": source_reference,
+            "doc_type": document.doc_type,
+            "user_id": user_id,
+            "case_id": case_id,
+            "task_id": task_id,
+            "classification_level": classification,
+            "content_characters": len(document.raw_text),
+            "memory_persisted": True,
+            "ingested_at": document.ingested_at,
+        }
+
 
 _application: SudarshanApplication | None = None
 _application_lock = Lock()

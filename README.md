@@ -7,16 +7,18 @@ knowledge graph and semantic retrieval to Cognee. See
 
 ## One-command setup
 
-From PowerShell, run:
+From PowerShell, run the single bootstrap command:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-This installs the locked Python dependencies and the pinned AntV infographic
-renderer together. It requires `uv` and Node.js/npm. The setup script uses
-`npm install --ignore-scripts`; runtime rendering is performed by the checked-in
-AntV bridge under `pipelines/infographic/antv_renderer/`.
+This bootstraps `uv` through Python when it is missing, installs the locked
+Python dependencies, installs the pinned AntV infographic renderer, and
+installs the frozen DeepSeek Harness workspace. It requires Python 3.13+ and
+Node.js LTS/npm; pnpm is used when present or installed automatically.
+Runtime rendering is performed by the checked-in AntV bridge under
+`pipelines/infographic/antv_renderer/`.
 
 After setup, use the Python environment with `uv run ...`; no separate npm
 installation command is needed.
@@ -58,6 +60,12 @@ uv run python -m api.server
 
 The API will start at `http://localhost:8000`. It enforces `X-Operator-Id` headers on mutations and returns `X-Classification-Level` headers.
 
+Real source ingestion is available at `POST /ingest` as an authenticated
+`multipart/form-data` upload. It extracts the file, persists the resulting
+knowledge unit through Cognee-backed `MemoryManager`, writes the NTRO audit
+entry, and returns a frontend-safe ingestion receipt. `main.py` is only the
+production API entry point; it no longer runs sample-data demos.
+
 ## DeepSeek Harness integration
 
 The LangGraph orchestrator now provides the thin application boundary for
@@ -91,3 +99,66 @@ The application owns a durable LangGraph checkpoint store, so a resume or
 status request does not create a second orchestration instance. Raw Cognee
 context, provider credentials, and model reasoning are not serialized into
 the Harness response.
+
+## How the components interact
+
+```mermaid
+flowchart LR
+    UI[Frontend / Backend] --> API[FastAPI API]
+    H[DeepSeek Harness] --> MCP[MCP adapter]
+    API --> APP[SudarshanApplication]
+    MCP --> APP
+    APP --> G[LangGraph router]
+    G --> R[Bounded User/Case/Task recall]
+    R --> PLAN[Request understanding + prompt plan]
+    PLAN --> FAN[Pipeline fan-out]
+    FAN --> A[Advisory]
+    FAN --> L[LinkedIn]
+    FAN --> S[Executive summary]
+    FAN --> P[PPT]
+    FAN --> I[Infographic]
+    FAN --> V[Video]
+    A --> Q[Validation / quality gate]
+    L --> Q
+    S --> Q
+    P --> Q
+    I --> Q
+    V --> Q
+    Q --> ART[Artifact + frontend-safe result]
+    Q --> MEM[Case/Task memory write-back]
+    MEM <--> C[(Cognee)]
+    API -. SSE status/events .-> UI
+```
+
+The runtime sequence is:
+
+1. The frontend/backend submits a real source to `/ingest` or a generation
+   request to `/runs`. The Harness uses the same application boundary through
+   MCP tools.
+2. `SudarshanApplication` validates the request and delegates to the
+   LangGraph router.
+3. The router performs bounded, scope-aware memory recall, understands the
+   request, creates a validated prompt plan, and selects one or more pipeline
+   adapters.
+4. Selected pipelines run independently with their specialist CrewAI agents,
+   quality gates, and optional render/provider adapters.
+5. Results fan back into the parent run. Validated artifacts are written to
+   scoped memory, while the frontend receives only safe status, artifact, and
+   progress metadata.
+
+## Agentic system or workflow?
+
+Sudarshan is a hybrid agentic workflow platform. LangGraph is the deterministic
+control plane: it owns routing, state, retries, fan-out/fan-in, checkpoints,
+approval interrupts, cancellation boundaries, and delivery policy. Inside that
+controlled workflow, CrewAI specialist agents perform agentic analysis,
+evidence review, drafting, criticism, and pipeline-specific decisions. The
+Harness supplies sessions, tools, and runtime integration; Cognee supplies
+scoped long-term memory.
+
+Therefore it is more than a fixed workflow, but it is not an unrestricted
+autonomous agent. It is a governed agentic system designed for NTRO operations,
+where agent reasoning is bounded by typed contracts, memory access policy,
+quality gates, audit logging, and human approval where required. The full
+architecture and individual pipeline diagrams are in
+[`docs/internal/pipeline-orchestration.md`](docs/internal/pipeline-orchestration.md).

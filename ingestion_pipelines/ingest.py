@@ -11,10 +11,11 @@ def ingest_file(
     case_id: str | None = None,
     task_id: str | None = None,
     memory_manager: "MemoryManager | None" = None,
+    source_reference: str | None = None,
 ) -> IngestedDocument:
     raw_text, doc_type = extract_text(file_path)
     document = IngestedDocument.create(
-        source_path=file_path,
+        source_path=source_reference or file_path,
         raw_text=raw_text,
         doc_type=doc_type,
         user_id=user_id,
@@ -34,5 +35,6 @@ def ingest_file(
             context,
             scope_type=scope_type,
             memory_type=MemoryType.FACT,
+            run_in_background=False,
         )
     return document
