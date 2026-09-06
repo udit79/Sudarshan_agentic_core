@@ -49,6 +49,8 @@ Internal backend/frontend integration details are in
 [`docs/internal/pipeline-orchestration.md`](docs/internal/pipeline-orchestration.md).
 The backend handoff and HTTP/MCP contract are in
 [`docs/backend-integration.md`](docs/backend-integration.md).
+The frontend API, upload, polling/SSE, resume/cancel, TypeScript, and security
+guide is in [`docs/frontend-integration.md`](docs/frontend-integration.md).
 
 ## Running the API Server
 
