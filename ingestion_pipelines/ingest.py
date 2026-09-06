@@ -1,4 +1,8 @@
 from ingestion_pipelines.models import IngestedDocument
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from memory.memory_manager import MemoryManager
 from ingestion_pipelines.extract import extract_text
 
 def ingest_file(
@@ -6,9 +10,10 @@ def ingest_file(
     user_id: str | None = None,
     case_id: str | None = None,
     task_id: str | None = None,
+    memory_manager: "MemoryManager | None" = None,
 ) -> IngestedDocument:
     raw_text, doc_type = extract_text(file_path)
-    return IngestedDocument.create(
+    document = IngestedDocument.create(
         source_path=file_path,
         raw_text=raw_text,
         doc_type=doc_type,
@@ -16,3 +21,18 @@ def ingest_file(
         case_id=case_id,
         task_id=task_id,
     )
+    if memory_manager is not None:
+        from ingestion_pipelines.adapter import to_access_context, to_knowledge_unit
+        from memory import MemoryType, ScopeType
+
+        context = to_access_context(document)
+        scope_type = ScopeType.CASE if context.case_id else (
+            ScopeType.USER if context.user_id else ScopeType.SYSTEM
+        )
+        memory_manager.remember(
+            to_knowledge_unit(document),
+            context,
+            scope_type=scope_type,
+            memory_type=MemoryType.FACT,
+        )
+    return document

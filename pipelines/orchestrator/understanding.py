@@ -286,6 +286,7 @@ class PromptCrafterAgent:
             "Keep facts, assessments, assumptions, and information gaps explicitly separated.",
             "Preserve classification and distribution handling requirements.",
             "Do not invent NTRO policy, authority, statistics, sources, contacts, or official marks.",
+            "Ensure that no internal AI terminology or prompt references appear in the final output.",
         ]
         if request.operation == "revise":
             task_instructions.extend([
@@ -296,10 +297,12 @@ class PromptCrafterAgent:
         output_requirements = [
             "Return the pipeline's structured output schema.",
             "Keep the result case-specific, concise, professional, and usable by the frontend.",
+            "Any Hindi terminology in the source context must be preserved appropriately.",
         ]
         quality_constraints = [
             "Every material claim must be traceable to permitted memory or clearly labeled as an assessment.",
             "Remove AI self-reference, prompt commentary, workflow commentary, and unresolved placeholders.",
+            "Strictly adhere to the stated classification and distribution limits.",
         ]
         delivery_constraints = [
             f"Classification: {understanding.classification_level}",

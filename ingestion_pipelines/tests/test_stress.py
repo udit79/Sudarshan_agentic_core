@@ -17,18 +17,12 @@ Validates:
 
 import os
 from pathlib import Path
-import sys
-
-# Ensure repository root is on sys.path
-repo_root = str(Path(__file__).resolve().parent.parent.parent)
-if repo_root not in sys.path:
-    sys.path.insert(0, repo_root)
 
 import pytest
 
 from ingestion_pipelines import ingest_file, to_access_context, to_knowledge_unit, IngestedDocument
 from memory.memory_manager import MemoryManager
-from memory.model import KnowledgeUnit, ScopeType, SourceType
+from memory.model import ScopeType, SourceType
 from memory.tests.test_memory_manager import FakeBackend
 
 TEST_MODALITIES = [
@@ -40,6 +34,14 @@ TEST_MODALITIES = [
 ]
 
 
+@pytest.mark.skipif(
+    os.environ.get("RUN_LIVE_PROVIDER_TESTS", "").lower() not in {"1", "true", "yes"}
+    or not (
+        os.environ.get("OPENAI_API_KEY", "").strip()
+        and not os.environ.get("OPENAI_API_KEY", "").startswith("replace-")
+    ),
+    reason="live provider tests are opt-in; set RUN_LIVE_PROVIDER_TESTS=1 with OPENAI_API_KEY",
+)
 def test_stress_all_modalities_contracts():
     backend = FakeBackend()
     manager = MemoryManager(backend)

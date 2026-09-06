@@ -4,7 +4,7 @@ from threading import Barrier, Lock
 
 import pytest
 
-from pipelines.common.contracts import AdvisoryRequest
+from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines import InMemoryProgressSink, PipelineAdapter, PipelineOrchestrator
 
 from tests.conftest import FakeRecallManager, make_request, successful_response
@@ -44,6 +44,29 @@ def test_pipeline_contract_rejects_unregistered_route() -> None:
 
     assert result.status == "failed"
     assert result.response is None
+
+
+def test_pending_provider_job_is_not_treated_as_human_approval() -> None:
+    def run(request: AdvisoryRequest):
+        return PipelineResponse(
+            status="pending",
+            pipeline="video",
+            task_id=request.task_id,
+            run_id=str(request.metadata.get("run_id", "test-run")),
+            artifact={"provider_task_id": "mpt-1"},
+            metadata={"human_approval_required": False},
+        )
+
+    orchestrator = PipelineOrchestrator(
+        FakeRecallManager(),
+        registry={"video": PipelineAdapter("video", run)},
+    )
+    result = orchestrator.run(make_request("video"), run_id="run-video-pending")
+
+    assert result.status == "pending"
+    assert result.interrupt is None
+    assert result.response is not None
+    assert result.response.metadata["human_approval_required"] is False
 
 
 def test_revision_request_links_new_result_to_parent_artifact() -> None:

@@ -9,6 +9,8 @@ from pipelines.orchestrator.progress import (
     InMemoryProgressSink,
     ProgressEvent,
     ProgressSink,
+    SQLiteProgressSink,
+    event_dict,
 )
 from pipelines.orchestrator.types import (
     OrchestrationResult,
@@ -40,6 +42,8 @@ __all__ = [
     "PromptPlan",
     "ProgressEvent",
     "ProgressSink",
+    "SQLiteProgressSink",
+    "event_dict",
     "RequestUnderstanding",
     "RequestUnderstandingAgent",
     "build_default_pipeline_registry",

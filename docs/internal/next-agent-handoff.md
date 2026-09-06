@@ -43,25 +43,56 @@ The current implementation lives in `pipelines/` and includes:
   Provider calls already in progress cannot be force-stopped by LangGraph.
 - `PipelineAdapter` is the stable plugin contract. `PipelineRegistry` gives
   explicit registration, and `load_pipeline_plugins()` loads approved Python
-  entry points from the `sudarshan.pipelines` group.
+  entry points from the `sudarshan.pipelines` group when
+  `SUDARSHAN_LOAD_PLUGINS=true`.
 - `orchestration_result_to_dict()` serializes the parent plus every child for
   an HTTP response.
+- The default registry includes `presentation` (with the legacy `ppt` alias),
+  `video`, `advisory`, `linkedin_post`, `executive_summary`, and
+  `infographic`. A custom empty registry remains empty; this is important for
+  contract tests and for deployments that intentionally allow-list plugins.
+- `VideoPipeline` calls MoneyPrinterTurbo only through
+  `integrations/providers/moneyprinterturbo/client.py` (the old
+  `pipelines/video/client.py` path is a compatibility re-export). It submits
+  `POST /api/v1/videos`, polls
+  `GET /api/v1/tasks/{task_id}`, and returns a pending provider job without
+  routing it into the human-approval interrupt. The Harness never calls the
+  MoneyPrinter API directly.
 
 ## Important current limitation
 
-The default Python registry contains the pipelines implemented in this repo.
-PPT/video or any partner-owned pipeline must be registered by the backend; the
-central router does not invent an implementation. A new plugin can be selected
-explicitly with `requested_pipelines=("plugin_name",)` or
-`metadata={"pipelines": ["plugin_name"]}`. Automatic natural-language aliases
-for third-party names are not yet discovered from plugin metadata.
+The default Python registry contains the in-repo presentation pipeline and a
+video adapter with a native default plus an optional MoneyPrinterTurbo worker
+mode when `MONEYPRINTERTURBO_BASE_URL` is configured. PPT Master is integrated
+at the optional ingestion-enrichment boundary because its upstream project is
+a file-based agent skill, not an importable rendering library. A new plugin can be selected explicitly with
+`requested_pipelines=("plugin_name",)` or `metadata={"pipelines": ["plugin_name"]}`.
 
 ## Recommended Harness integration
 
-Expose one Harness-facing application tool or SDK method such as:
+Expose the application boundary as the following Harness-facing tools or
+equivalent authenticated SDK methods:
 
 ```text
 run_sudarshan(request) -> orchestration_result_to_dict(result)
+resume_sudarshan(run_id, task_id, decision) -> orchestration_result_to_dict(result)
+cancel_sudarshan(run_id, task_id) -> cancellation_status
+get_sudarshan_status(run_id) -> frontend_safe_status_and_events
+```
+
+The repository includes both a local JSONL bridge at
+`integrations/deepseek_harness/runner.py` and an MCP stdio application tool at
+`integrations/deepseek_harness/mcp_server.py`. Register
+`integrations/deepseek_harness/sudarshan.cordis.yml` with the local Harness,
+or expose the same `run_one()` contract through an authenticated backend
+HTTP/SDK boundary in deployment. The call chain is:
+
+```text
+DeepSeek Harness session/tool
+  -> run_sudarshan MCP tool or authenticated backend adapter
+  -> PipelineOrchestrator (LangGraph)
+  -> selected pipeline adapter
+  -> provider boundary (for example MoneyPrinterTurbo HTTP)
 ```
 
 The Harness adapter should:
@@ -125,27 +156,33 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 uv run pytest -q
 ```
 
-## Verification already completed
+## Verification baseline and current handoff
 
-The Sudarshan suite passed with 46 tests. Coverage includes component,
-pipeline, and system-level tests, including parallel child isolation and
-selected-artifact revision routing. `git diff --check` passes; line-ending
-warnings are normal for this Windows checkout.
+The current deterministic suite passes with 56 tests and one intentionally
+skipped live-provider test. The normal suite remains offline: provider
+contract tests use an injected transport seam, while real provider smoke tests
+require synthetic input and explicit service configuration. `git diff --check`
+should be run before handoff; LF/CRLF warnings are normal for this Windows
+checkout.
 
 ## Next recommended work
 
-1. Add the backend HTTP/SDK adapter around `PipelineOrchestrator`; it is not
-   present in this repository yet.
-2. Register the partner's concrete pipelines through `PipelineRegistry` and
-   add their output schemas/artifact references.
-3. Add per-plugin alias metadata if natural-language routing should discover
+1. Deploy the MCP overlay or equivalent authenticated HTTP/SDK adapter and
+   validate user/case authorization at that boundary. The local MCP tools,
+   durable checkpoint wiring, and durable frontend-safe progress events are
+   present.
+2. Choose native video mode or configure and health-check the external
+   MoneyPrinterTurbo worker; its Python/MoviePy/FFmpeg runtime remains a
+   separate service when selected.
+3. Register any partner-owned pipelines through `PipelineRegistry` and add
+   their output schemas/artifact references.
+4. Add per-plugin alias metadata if natural-language routing should discover
    third-party names automatically.
-4. Replace the in-process thread fan-out with durable worker jobs for
+5. Replace the in-process thread fan-out with durable worker jobs for
    production multi-instance execution; retain the same parent/child result
    contract.
-5. Add batch approval/resume semantics if multiple human-approval pipelines
+6. Add batch approval/resume semantics if multiple human-approval pipelines
    will be allowed in one parent run. Current automatic fan-out is intended
    for pipelines that can complete without a shared approval gate.
-6. Add integration tests against real configured services only after keys and
+7. Add integration tests against real configured services only after keys and
    deployment endpoints are intentionally supplied. Never commit keys.
-

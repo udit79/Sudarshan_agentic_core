@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
-from typing import Any, Callable, Literal, Mapping, Protocol
+from typing import Any, Literal, Mapping, Protocol
 
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
+from pipelines.common.ntro_policy import validate_ntro_response
 
 # Plugin names are deliberately open-ended. Built-in names are documented by
 # their packages; the central router must not need a code change for plugins.
@@ -48,6 +49,18 @@ class PipelineRegistry(dict[str, PipelineAdapter]):
         self[adapter.name] = adapter
         return self
 
+    def register_many(
+        self,
+        adapters: Mapping[str, PipelineAdapter],
+        *,
+        replace: bool = False,
+    ) -> "PipelineRegistry":
+        for name, adapter in adapters.items():
+            if name != adapter.name:
+                raise ValueError(f"Registry key '{name}' does not match adapter name '{adapter.name}'")
+            self.register(adapter, replace=replace)
+        return self
+
 
 def load_pipeline_plugins(
     registry: PipelineRegistry,
@@ -75,19 +88,6 @@ def load_pipeline_plugins(
             registry.register_many(returned)
     return registry
 
-    def register_many(
-        self,
-        adapters: Mapping[str, PipelineAdapter],
-        *,
-        replace: bool = False,
-    ) -> "PipelineRegistry":
-        for name, adapter in adapters.items():
-            if name != adapter.name:
-                raise ValueError(f"Registry key '{name}' does not match adapter name '{adapter.name}'")
-            self.register(adapter, replace=replace)
-        return self
-
-
 @dataclass(frozen=True, slots=True)
 class OrchestrationResult:
     """Backend-facing result after a graph invocation or interruption."""
@@ -110,7 +110,7 @@ class OrchestrationResult:
 def response_to_dict(response: PipelineResponse | None) -> dict[str, Any] | None:
     if response is None:
         return None
-    return {
+    return validate_ntro_response({
         "status": response.status,
         "pipeline": response.pipeline,
         "task_id": response.task_id,
@@ -120,7 +120,7 @@ def response_to_dict(response: PipelineResponse | None) -> dict[str, Any] | None
         "failure": response.failure,
         "attempts": response.attempts,
         "metadata": _jsonable(response.metadata),
-    }
+    })
 
 
 def orchestration_result_to_dict(result: OrchestrationResult) -> dict[str, Any]:
@@ -138,8 +138,29 @@ def orchestration_result_to_dict(result: OrchestrationResult) -> dict[str, Any]:
             for name, response in result.responses.items()
         },
         "interrupt": _jsonable(result.interrupt),
-        "state": _jsonable(result.state),
+        "state": _public_state(result.state),
     }
+
+
+def _public_state(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Project internal graph state without returning raw memory or prompts."""
+
+    allowed = {
+        "run_id",
+        "task_id",
+        "pipeline",
+        "requested_pipelines",
+        "understanding",
+        "clarification_required",
+        "clarification_questions",
+        "response",
+        "responses",
+        "approval_decision",
+        "error",
+        "stage",
+        "status",
+    }
+    return {key: _jsonable(state[key]) for key in allowed if key in state}
 
 
 def _jsonable(value: Any) -> Any:

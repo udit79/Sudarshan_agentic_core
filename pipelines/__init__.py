@@ -6,6 +6,7 @@ from pipelines.executive_summary.crew import ExecutiveSummaryFlow
 from pipelines.infographic.crew import InfographicFlow
 from pipelines.linkedin.crew import LinkedInPostFlow
 from pipelines.ppt.crew import PresentationFlow
+from pipelines.video import MoneyPrinterTurboClient, VideoPipeline
 from pipelines.orchestrator import (
     InMemoryProgressSink,
     OrchestrationResult,
@@ -33,6 +34,8 @@ __all__ = [
     "InfographicFlow",
     "LinkedInPostFlow",
     "PresentationFlow",
+    "MoneyPrinterTurboClient",
+    "VideoPipeline",
     "PipelineResponse",
     "InMemoryProgressSink",
     "OrchestrationResult",

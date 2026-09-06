@@ -1,9 +1,7 @@
-"""Vision-model image transcription supporting OpenAI (gpt-4o-mini) and Gemini fallback.
+"""OpenAI-only vision transcription for images.
 
-Transcribes printed and handwritten text, preserving structure.
-Priority:
-1. OpenAI gpt-4o-mini (fastest: ~1.5–3s, high accuracy, uses OPENAI_API_KEY)
-2. Gemini 3.6 Flash (fallback, uses GEMINI_API_KEY)
+Transcribes printed and handwritten text with OpenAI's vision-capable model,
+preserving structure and provenance for the ingestion boundary.
 """
 
 from __future__ import annotations
@@ -87,51 +85,12 @@ def extract_text_from_image_openai(file_path: str) -> str:
     return response.choices[0].message.content or ""
 
 
-def extract_text_from_image_gemini(file_path: str) -> str:
-    """Vision-model transcription using Google Gemini API."""
-    try:
-        from google import genai
-        from google.genai import types as genai_types
-    except ImportError as err:
-        raise RuntimeError("google-genai is not installed. Run: python -m pip install google-genai") from err
-
-    load_env()
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key or api_key.startswith("replace-"):
-        raise RuntimeError("GEMINI_API_KEY is not set or still default placeholder in .env")
-
-    client = genai.Client(api_key=api_key)
-    with open(file_path, "rb") as f:
-        image_bytes = f.read()
-    mime = _mime_type(file_path)
-
-    print(f"   [Vision OCR] Calling Gemini Vision API for '{Path(file_path).name}' (cloud processing takes ~10-25s)...", flush=True)
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=[
-            genai_types.Part.from_bytes(data=image_bytes, mime_type=mime),
-            _TRANSCRIPTION_PROMPT,
-        ],
-        config=genai_types.GenerateContentConfig(
-            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True)
-        ),
-    )
-    print("   [Vision OCR] Completed transcription via Gemini.", flush=True)
-    return response.text or ""
-
-
 def extract_text_from_image(file_path: str) -> str:
-    """Smart provider resolution: prefers OpenAI gpt-4o-mini, falls back to Gemini."""
+    """Transcribe an image through the configured OpenAI vision model."""
     load_env()
     openai_key = os.environ.get("OPENAI_API_KEY")
 
     if openai_key and not openai_key.startswith("replace-"):
         return extract_text_from_image_openai(file_path)
 
-    gemini_key = os.environ.get("GEMINI_API_KEY")
-    if gemini_key and not gemini_key.startswith("replace-"):
-        return extract_text_from_image_gemini(file_path)
-
-    raise RuntimeError(
-        "Neither OPENAI_API_KEY nor GEMINI_API_KEY is configured in your .env file."
-    )
+    raise RuntimeError("OPENAI_API_KEY is not configured in your .env file.")

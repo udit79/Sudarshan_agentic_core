@@ -25,4 +25,8 @@ The system scenarios currently cover:
 3. pipeline approval interrupt → authorized decision → same-run resume.
 
 Live provider smoke tests should be added separately and must be explicitly
-opted into so normal CI never sends case data to external services.
+opted into so normal CI never sends case data to external services. The video
+adapter component tests use a transport seam to verify the documented request
+and response contract; they do not claim that a video was generated. A real
+MoneyPrinterTurbo or multimodal ingestion smoke test should use synthetic
+input, an explicitly configured worker, and `RUN_LIVE_PROVIDER_TESTS=1` only.

@@ -40,6 +40,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "case-grounded information. Choose the most useful structure: process, timeline, list, comparison, "
             "hierarchy, flow, or another suitable layout. Keep the visual clear and restrained: no flashy "
             "gradients, sensational imagery, decorative clutter, invented logos, seals, statistics, or labels. "
+            "Enforce the Government of India / NTRO color palette. You must preserve bilingual (English/Hindi) "
+            "labels if they appear in the source context. "
             "Do not expose restricted information. Include accessible alt text, evidence, references, confidence, "
             "and gaps. Do not mention agents, prompts, models, or workflow. "
             "Follow the central prompt plan where compatible with these rules:\n{prompt_plan}"
@@ -54,7 +56,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
         description=(
             "Review the InfographicOutput before rendering. Check that the AntV syntax is structurally valid, "
             "the visual type fits the information, every material claim is supported, text remains legible, and "
-            "the style is professional and restrained. Reject unsupported claims, invented official marks, "
+            "the style is professional and restrained using the NTRO color palette. Hindi labels must be correctly "
+            "preserved. Reject unsupported claims, invented official marks, "
             "confidential details, malformed syntax, unresolved placeholders, or AI/meta language. Return "
             "QualityReview JSON with precise revision issues if rejected."
         ),

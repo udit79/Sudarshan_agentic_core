@@ -333,6 +333,7 @@ class TextTransformationFlow(Flow[TaskState]):
                 task_id=self.state.task_id,
                 run_id=self.state.run_id,
                 output=output,
+                artifact=self.state.artifact,
                 attempts=self.state.attempt,
                 metadata={
                     "memory_records": len(self.state.memory_records),

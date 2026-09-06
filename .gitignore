@@ -4,6 +4,7 @@ __pycache__/
 
 # Pytest
 .pytest_cache/
+.pytest-tmp*/
 
 # Coverage
 .coverage
@@ -14,6 +15,9 @@ htmlcov/
 .venv/
 venv/
 env/
+.ruff_cache/
+.uv-cache/
+.pnpm-store/
 
 # IDE
 .vscode/

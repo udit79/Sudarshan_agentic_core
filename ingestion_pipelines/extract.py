@@ -5,7 +5,9 @@ from pathlib import Path
 TEXT_EXTENSIONS = {".txt"}
 PDF_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
-PPTX_EXTENSIONS = {".pptx"}
+# python-pptx can read the OOXML presentation family. Legacy binary .ppt is
+# intentionally excluded because it needs a separate Office conversion step.
+PPTX_EXTENSIONS = {".pptx", ".pptm", ".ppsx", ".ppsm", ".potx", ".potm"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | PDF_EXTENSIONS | IMAGE_EXTENSIONS | PPTX_EXTENSIONS | VIDEO_EXTENSIONS

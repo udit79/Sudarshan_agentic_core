@@ -130,6 +130,171 @@ delimits recalled memory as reference context. Neither component calls Cognee
 directly or emits model chain-of-thought. A future provider-backed agent may be
 injected only if it returns the same validated Pydantic models.
 
+## Internal pipeline architectures
+
+All pipelines share the same application boundary. Ingestion converts source
+files into `KnowledgeUnit` objects and writes them to Cognee under the User,
+Case, and Task memory policy. The request-understanding and prompt-planning
+stages then recall bounded User + Case context, classify the operation, and
+send one common `AdvisoryRequest` to the selected pipeline adapter.
+
+```mermaid
+flowchart LR
+    SRC[Ingestion source] --> KU[KnowledgeUnit]
+    KU --> MEM[Cognee via MemoryManager]
+    REQ[User request] --> UNDER[Request understanding]
+    MEM --> UNDER
+    UNDER --> PLAN[Prompt plan]
+    PLAN --> ROUTE[LangGraph router]
+    ROUTE --> P1[Advisory]
+    ROUTE --> P2[LinkedIn]
+    ROUTE --> P3[Executive summary]
+    ROUTE --> P4[PPT]
+    ROUTE --> P5[Infographic]
+    ROUTE --> P6[Video adapter]
+    P1 --> OUT[Validated PipelineResponse]
+    P2 --> OUT
+    P3 --> OUT
+    P4 --> OUT
+    P5 --> OUT
+    P6 --> OUT
+    OUT --> CASE[Case memory + artifact delivery]
+```
+
+Every generation pipeline uses the same core lifecycle: bounded memory
+recall, CrewAI specialist collaboration, structured Pydantic validation,
+quality review, task-memory callbacks, and case-memory write-back only after
+the pipeline's release gate. The rendering/provider step is pipeline-specific
+and never becomes a second memory or routing owner.
+
+### Advisory pipeline
+
+The NTRO-specific advisory is the only default pipeline with a human release
+gate. Its CrewAI crew runs an intelligence analyst, evidence/provenance
+reviewer, advisory writer, and quality critic. Failed quality review retries
+within the configured attempt budget. A valid draft pauses for authorized
+human approval; only an approved draft is rendered into the formal advisory
+artifact and written to Case memory.
+
+```mermaid
+flowchart LR
+    M[User + Case + Task recall] --> A[Intelligence analyst]
+    A --> E[Evidence/provenance reviewer]
+    E --> W[Advisory writer]
+    W --> Q[Quality critic]
+    Q -->|reject and attempts remain| W
+    Q -->|approved| H[Human release approval]
+    H -->|approved| ART[Formal advisory artifact]
+    ART --> C[Case memory]
+    H -->|rejected/incomplete| T[Task failure memory]
+```
+
+### LinkedIn post pipeline
+
+The LinkedIn pipeline produces a frontend-owned draft; it does not publish to
+LinkedIn. The text crew creates and validates the post, then the image policy
+decides `always`, `never`, or `auto`. In `auto`, the pipeline decides whether a
+visual improves the post. If an image is selected, OpenAI image generation is
+used when configured; otherwise the output contains a professional image
+prompt fallback. The frontend owns final review and publishing.
+
+```mermaid
+flowchart LR
+    M[Bounded memory] --> C[Post analyst + writer + critic]
+    C --> V[Validated LinkedInPostOutput]
+    V --> IP[Image policy: always / never / auto]
+    IP -->|no image| D[LinkedIn draft artifact]
+    IP -->|image and OpenAI configured| IMG[OpenAI image adapter]
+    IP -->|image but unavailable| PF[Professional image-prompt fallback]
+    IMG --> D
+    PF --> D
+    D --> F[Frontend review + publishing]
+```
+
+### Executive summary pipeline
+
+The executive-summary pipeline uses the common text-generation Flow with a
+case analyst, evidence reviewer, summary writer, and quality critic. Its
+structured output is written back to Case memory after quality approval. It
+does not require the advisory human-release gate; the frontend or calling
+workflow can request a later review when the product requires one.
+
+```mermaid
+flowchart LR
+    M[Bounded memory] --> A[Case analyst]
+    A --> E[Evidence reviewer]
+    E --> W[Summary writer]
+    W --> Q[Quality critic]
+    Q -->|retry| W
+    Q -->|approved| S[Validated summary]
+    S --> C[Case memory + artifact response]
+```
+
+### PPT/presentation pipeline
+
+The PPT pipeline does not currently compile presentation code in a sandbox.
+CrewAI generates a validated `PresentationOutput` (slide titles, narrative,
+evidence, and speaker notes). The in-repo renderer then uses `python-pptx` to
+write a native `.pptx` file under `artifacts/presentations/`. The quality
+critic is the release gate and the artifact is then recorded in Case memory.
+
+PPT Master is now natively integrated as an intake processor for existing PPTX files. It extracts structural markdown and slide transitions natively using `python-pptx` fallback without silently executing arbitrary slide code in a sandbox.
+
+```mermaid
+flowchart LR
+    M[Bounded memory] --> A[Slide/content analyst]
+    A --> W[Presentation writer]
+    W --> Q[Presentation quality critic]
+    Q -->|retry| W
+    Q -->|approved| R[python-pptx renderer]
+    R --> PPTX[Native PPTX artifact]
+    PPTX --> C[Case memory + artifact response]
+    PM[Native PPT Master Intake] -. source enrichment only .-> M
+```
+
+Other pipelines can improve a PPT, but they are not implicitly nested today.
+For example, an executive summary or advisory can be requested first and its
+validated Case-memory output can become PPT context; an infographic can be
+generated as a companion visual. If the product requires strict dependency
+ordering, the orchestrator should represent that as explicit parent/child
+tasks rather than letting the PPT crew call another pipeline directly.
+
+### Infographic pipeline
+
+The infographic pipeline generates AntV Infographic declarative syntax rather
+than drawing pixels through an LLM. The CrewAI analyst, evidence reviewer,
+syntax writer, and quality critic produce a validated `InfographicOutput`.
+The local Node SSR bridge calls `@antv/infographic` and writes an SVG artifact.
+If Node rendering is unavailable, the validated syntax is returned as
+`syntax_only` with an explicit caveat; no fake SVG is produced.
+
+```mermaid
+flowchart LR
+    M[Bounded memory] --> A[Infographic analyst]
+    A --> W[AntV syntax writer]
+    W --> Q[Syntax quality critic]
+    Q -->|retry| W
+    Q -->|approved| SSR[Node AntV SSR bridge]
+    SSR --> SVG[SVG artifact or syntax_only response]
+    SVG --> C[Case memory + artifact response]
+```
+
+### Video pipeline
+
+The video pipeline defaults to a **native** architecture running fully in-process. It uses `imageio-ffmpeg` for video concatenation and optional OpenAI TTS for narration. When `MONEYPRINTERTURBO_BASE_URL` is configured, the same adapter can use the upstream asynchronous worker contract and preserve provider-pending state.
+
+The video agent drafts a scene-by-scene script based on memory context, and the `NativeVideoGenerator` natively compiles the asset, writing the result locally into the `artifacts/videos/` directory.
+
+```mermaid
+flowchart LR
+    M[Bounded memory context] --> S[VideoPipeline]
+    S --> NATIVE[NativeVideoGenerator (FFmpeg + TTS)]
+    NATIVE -->|succeeded| V[Native Video Artifact]
+    V --> C[Case memory + frontend delivery]
+```
+
+The DeepSeek Harness calls the application boundary only. It does not call the native video generation layer or Cognee directly.
+
 ## Python entry point
 
 ```python
@@ -467,17 +632,16 @@ generation from approved artifact release so the central LangGraph interrupt
 owns that approval completely. Until then, backend code should not register an
 advisory `resume` callback unless it also owns that release operation.
 
-## Memory and audit policy
+## Memory and NTRO Audit Policy
 
 - User memory stores terminology, preferences, and conventions.
 - Case memory stores validated facts, insights, decisions, and final artifacts.
-- Task memory stores router stages, agent task callbacks, intermediate results,
-  failures, dependencies, and incomplete runs.
-- The live progress stream is a delivery mechanism; Task memory remains the
-  audit record and recovery source.
+- Task memory stores router stages, agent task callbacks, intermediate results, failures, dependencies, and incomplete runs.
 
-The router's checkpointer stores serialized workflow state. It is not a
-replacement for Cognee and must not be treated as semantic memory.
+**NTRO Policy Enforcement**: All outputs are subjected to a strict sanitization pass at the `_finish` node. This pass strips any AI or model self-references (e.g. "As an AI..."), tool-specific language, and chain-of-thought metadata.
+Additionally, the system enforces NTRO classification and distribution labeling, supports bilingual (English/Hindi) output, and logs all state-mutating API events to a tamper-evident local audit trail (`AuditLogger`) with cryptographic hash verification. Production deployments must provide approved at-rest encryption for the SQLite state stores.
+
+The router's checkpointer stores serialized workflow state. It is not a replacement for Cognee and must not be treated as semantic memory.
 
 ## DeepSeek Harness boundary
 
@@ -486,3 +650,32 @@ own sessions, tools, cancellation, and runtime execution. It should not
 instantiate CrewAI agents or call Cognee. The orchestrator returns the same
 `PipelineResponse` envelope used by the existing flows, so Harness integration
 does not need to know pipeline internals.
+
+## PPT and video provider boundaries
+
+```mermaid
+flowchart LR
+    H[DeepSeek Harness] --> O[Python LangGraph orchestrator]
+    O --> M[MemoryManager]
+    O --> P[PPT pipeline]
+    O --> V[Video adapter]
+    P --> N[In-repo native PPTX renderer]
+    P -. optional source enrichment .-> PM[Native PPT Master]
+    V --> MT[Native Video Generator]
+    N --> A[Artifact reference]
+    PM --> I[Markdown + source profile]
+    MT --> A
+```
+
+PPT Master intake and the native MoneyPrinterTurbo-inspired generator run in-process by default. An external MoneyPrinterTurbo worker remains an explicit, supported deployment option for teams that need its provider ecosystem. In both modes, the orchestrator owns the application contract and prevents direct provider access from the Harness.
+
+The Harness boundary has two supported adapters:
+
+- `integrations/deepseek_harness/runner.py` is a thin JSONL boundary for
+  local/headless execution.
+- `integrations/deepseek_harness/mcp_server.py` exposes the same application
+  operation as the MCP tool `run_sudarshan`, and
+  `sudarshan.cordis.yml` registers it for a local Harness session.
+
+A deployed backend exposes the same application service behind a production FastAPI backend (`api/server.py`).
+The MCP server exposes explicit `run_sudarshan`, `get_sudarshan_status`, `resume_sudarshan`, `cancel_sudarshan`, `get_sudarshan_health`, `list_sudarshan_pipelines`, `remember_sudarshan_context`, and `recall_sudarshan_context` operations so the frontend can interact directly with the Harness layer securely. In every form, Harness invokes an application boundary; it does not call native pipelines or Cognee directly, and it must not receive their credentials or duplicate routing and memory policy.

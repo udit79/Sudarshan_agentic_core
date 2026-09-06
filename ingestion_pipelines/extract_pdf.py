@@ -4,7 +4,7 @@ Follows the "PAGE DELIMITERS + HYBRID VISION" design:
 - Preserves structure with clear "--- Page N ---" headers for provenance.
 - Digital pages: Extracted in milliseconds locally (free, 0ms, 0 API cost).
 - Scanned / Handwritten pages (< 30 text chars): Automatically rendered to image
-  and transcribed via our vision model (gpt-4o-mini / Gemini).
+  and transcribed via OpenAI's vision-capable model (gpt-4o-mini).
 - Multi-page concurrency: Scanned pages are processed in parallel via ThreadPoolExecutor.
 """
 
@@ -25,7 +25,7 @@ _TRANSCRIPTION_PROMPT = (
 
 
 def _ocr_page_image_bytes(img_bytes: bytes, page_num: int) -> str:
-    """Transcribes page image bytes using OpenAI gpt-4o-mini (or Gemini fallback)."""
+    """Transcribe a scanned page with OpenAI's vision-capable model."""
     load_env()
     openai_key = os.environ.get("OPENAI_API_KEY")
 
@@ -55,25 +55,7 @@ def _ocr_page_image_bytes(img_bytes: bytes, page_num: int) -> str:
         )
         return response.choices[0].message.content or ""
 
-    gemini_key = os.environ.get("GEMINI_API_KEY")
-    if gemini_key and not gemini_key.startswith("replace-"):
-        from google import genai
-        from google.genai import types as genai_types
-        client = genai.Client(api_key=gemini_key)
-        print(f"   [PDF Hybrid OCR] Page {page_num}: Scanned page detected, calling Gemini Vision...", flush=True)
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=[
-                genai_types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
-                _TRANSCRIPTION_PROMPT,
-            ],
-            config=genai_types.GenerateContentConfig(
-                automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True)
-            ),
-        )
-        return response.text or ""
-
-    return "(Scanned page - OCR unavailable: no API key configured)"
+    return "(Scanned page - OCR unavailable: OPENAI_API_KEY is not configured)"
 
 
 def extract_text_from_pdf(file_path: str) -> str:

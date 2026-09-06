@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import json
+import os
+import sqlite3
 from threading import Lock
 from typing import Any, Literal, Protocol
 from uuid import uuid4
@@ -16,6 +19,7 @@ ProgressStatus = Literal[
     "running",
     "waiting_for_approval",
     "waiting_for_input",
+    "pending",
     "succeeded",
     "failed",
     "completed",
@@ -67,6 +71,52 @@ class InMemoryProgressSink:
     def clear(self, run_id: str) -> None:
         with self._lock:
             self._events.pop(run_id, None)
+
+
+class SQLiteProgressSink:
+    """Durable frontend-safe progress events for a service deployment."""
+
+    def __init__(self, db_path: str | None = None) -> None:
+        configured = db_path or os.getenv(
+            "SUDARSHAN_PROGRESS_DB_PATH", "artifacts/.state/progress_events.db"
+        )
+        self._db_path = configured
+        os.makedirs(os.path.dirname(os.path.abspath(configured)), exist_ok=True)
+        self._lock = Lock()
+        with self._connect() as conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS progress_events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    event_json TEXT NOT NULL
+                )"""
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_progress_run ON progress_events(run_id, sequence)"
+            )
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self._db_path, check_same_thread=False)
+
+    def publish(self, event: ProgressEvent) -> None:
+        payload = json.dumps(event.model_dump(mode="json"), ensure_ascii=False)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO progress_events(run_id, event_json) VALUES (?, ?)",
+                (event.run_id, payload),
+            )
+
+    def events(self, run_id: str) -> tuple[ProgressEvent, ...]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT event_json FROM progress_events WHERE run_id = ? ORDER BY sequence",
+                (run_id,),
+            ).fetchall()
+        return tuple(ProgressEvent.model_validate(json.loads(row[0])) for row in rows)
+
+    def clear(self, run_id: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM progress_events WHERE run_id = ?", (run_id,))
 
 
 class ProgressReporter:

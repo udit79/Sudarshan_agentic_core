@@ -29,7 +29,9 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
             goal="Create valid AntV infographic syntax that presents verified case information professionally.",
             backstory=(
                 "You are an information designer using AntV Infographic's declarative syntax. You choose a "
-                "structure that improves comprehension, keep text legible, and use restrained official styling."
+                "structure that improves comprehension, keep text legible, and use restrained official styling "
+                "(the Indian Government color palette). You must support and retain bilingual (English/Hindi) "
+                "labels from the case information if present."
             ),
             **common,
         ),

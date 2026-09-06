@@ -1,0 +1,10 @@
+- insert:
+    - id: sudarshan-application
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: sudarshan
+        transport: stdio
+        command: .venv/Scripts/python.exe
+        args: [-m, integrations.deepseek_harness.mcp_server]
+        env: {}
+        cwd: !!js process.cwd()

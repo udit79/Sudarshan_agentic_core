@@ -57,6 +57,37 @@ Cancellation is cooperative: active graph boundaries observe it, record a
 Task-memory cancellation event, and return status `cancelled`. A provider call
 already executing may finish before the worker observes the cancellation.
 
+## Video package contract
+
+The video pipeline accepts an optional provider-neutral
+`metadata.video_package` object. It can contain the complete transcript,
+validated script, ordered storyboard scenes, visual terms, subtitle/audio
+references, and provider options. `pipelines/video/contracts.py` compiles
+that package into MoneyPrinterTurbo fields without exposing provider-specific
+details to the frontend. Audio and material references must be uploaded into
+the provider's own task boundary before they are passed as references; arbitrary
+host paths are not accepted.
+
+Example metadata payload:
+
+```json
+{
+  "video_package": {
+    "subject": "Case briefing",
+    "transcript": "The bounded source transcript...",
+    "storyboard": [
+      {
+        "scene_id": "scene-1",
+        "narration": "Verified opening statement.",
+        "visual_description": "A restrained briefing room.",
+        "duration_seconds": 5
+      }
+    ],
+    "video_terms": ["briefing room", "document review"]
+  }
+}
+```
+
 The router supports fan-out requests such as `Create outputs A and B`. It runs
 registered adapters concurrently, gives every child its own task/run identity,
 and returns `result.responses` keyed by pipeline. A later revision should send

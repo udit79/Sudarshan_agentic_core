@@ -35,6 +35,8 @@ from pipelines.orchestrator.progress import (
 from pipelines.orchestrator.types import (
     OrchestrationResult,
     PipelineAdapter,
+    PipelineRegistry,
+    load_pipeline_plugins,
     response_to_dict,
 )
 from pipelines.orchestrator.understanding import (
@@ -156,6 +158,9 @@ def build_default_pipeline_registry(
 ) -> dict[str, PipelineAdapter]:
     """Build adapters without exposing Cognee or CrewAI objects to the router."""
 
+    from pipelines.video.pipeline import VideoPipeline
+    from integrations.providers.moneyprinterturbo import MoneyPrinterTurboClient
+
     def progress_callback(request: AdvisoryRequest) -> Callable[[str, str], None] | None:
         if progress_sink is None:
             return None
@@ -221,6 +226,13 @@ def build_default_pipeline_registry(
                 progress_callback=progress_callback(request),
             ).run(request),
         ),
+        "video": PipelineAdapter(
+            "video",
+            lambda request: VideoPipeline(
+                memory_manager,
+                client=(MoneyPrinterTurboClient() if os.getenv("MONEYPRINTERTURBO_BASE_URL", "").strip() else None),
+            ).run(request),
+        ),
     }
 
 
@@ -262,13 +274,22 @@ class PipelineOrchestrator:
         self.intent_resolver = intent_resolver
         self.request_understander = request_understander or RequestUnderstandingAgent(intent_resolver)
         self.prompt_crafter = prompt_crafter or PromptCrafterAgent()
-        self.registry = dict(registry or build_default_pipeline_registry(
-            memory_manager,
-            llm=llm,
-            image_generator=image_generator,
-            renderer=renderer,
-            progress_sink=self.progress_sink,
-        ))
+        if registry is None:
+            discovered = PipelineRegistry()
+            discovered.register_many(build_default_pipeline_registry(
+                memory_manager,
+                llm=llm,
+                image_generator=image_generator,
+                renderer=renderer,
+                progress_sink=self.progress_sink,
+            ))
+            if os.getenv("SUDARSHAN_LOAD_PLUGINS", "false").lower() in {"1", "true", "yes"}:
+                load_pipeline_plugins(discovered)
+            self.registry = dict(discovered)
+        else:
+            # An explicit registry is an allow-list, including an intentional
+            # empty registry used by constrained deployments and tests.
+            self.registry = dict(registry)
         self._checkpointer = checkpointer or InMemorySaver()
         self._cancel_events: dict[str, Event] = {}
         self._active_runs: set[str] = set()
@@ -940,6 +961,13 @@ class PipelineOrchestrator:
                 if response is None:
                     raise ValueError(f"Pipeline '{pipeline}' returned an invalid response")
                 if response.status == "pending":
+                    response_metadata = dict(payload.get("metadata") or {})
+                    response_metadata.setdefault(
+                        "human_approval_required",
+                        self.registry[pipeline].resume is not None,
+                    )
+                    payload["metadata"] = response_metadata
+                if response.status == "pending":
                     reporter.emit(stage="human_approval", status="waiting_for_approval", progress=75,
                                   message="Waiting for an authorized approval decision", pipeline=pipeline,
                                   requires_action=True)
@@ -1068,7 +1096,10 @@ class PipelineOrchestrator:
             return "fail"
         response = state.get("response") or {}
         if response.get("status") == "pending":
-            return "approval"
+            metadata = response.get("metadata") or {}
+            if metadata.get("human_approval_required") is True:
+                return "approval"
+            return "finish"
         return "finish" if response.get("status") == "succeeded" else "fail"
 
     def _await_approval(self, state: OrchestratorState) -> dict[str, Any]:
