@@ -10,18 +10,20 @@ knowledge graph and semantic retrieval to Cognee. See
 From PowerShell, run the single bootstrap command:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
 ```
 
 This bootstraps `uv` through Python when it is missing, installs the locked
-Python dependencies, installs the pinned AntV infographic renderer, and
-installs the frozen DeepSeek Harness workspace. It requires Python 3.13+ and
-Node.js LTS/npm; pnpm is used when present or installed automatically.
+Python dependencies, installs the pinned AntV infographic renderer, installs
+the frozen DeepSeek Harness workspace, and installs the Node/Express gateway
+dependencies. It requires Python 3.13+ and Node.js LTS/npm; pnpm is used when
+present or installed automatically.
 Runtime rendering is performed by the checked-in AntV bridge under
 `pipelines/infographic/antv_renderer/`.
 
-After setup, use the Python environment with `uv run ...`; no separate npm
-installation command is needed.
+After setup, `startup.ps1` starts the Python orchestrator/pipelines API, the
+Node gateway, and the static frontend. Use `-NoStart` when only dependency and
+schema initialization is needed. `setup.ps1` remains a compatibility alias.
 
 ## Native Media Pipelines
 
@@ -31,9 +33,9 @@ Video generation defaults to a native **MoneyPrinterTurbo-inspired** architectur
 
 ## Start testing
 
-Copy `.env.example` to `.env` if needed, then add the Cognee Cloud values and
-the CrewAI provider credentials. The example disables optional CrewAI telemetry
-by default. Run the focused unit suite with:
+Copy `.env.example` to `.env` if needed, then add the MongoDB Atlas, Google
+OAuth, Cognee Cloud, and CrewAI/provider credentials. The example disables
+optional CrewAI telemetry by default. Run the focused unit suite with:
 
 ```powershell
 uv run pytest -q

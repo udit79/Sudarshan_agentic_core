@@ -182,6 +182,12 @@ def build_default_pipeline_registry(
 
         return report
 
+    presentation_runner = lambda request: PresentationFlow(
+        memory_manager,
+        llm=llm,
+        progress_callback=progress_callback(request),
+    ).run(request)
+
     return {
         "advisory": PipelineAdapter(
             "advisory",
@@ -220,11 +226,14 @@ def build_default_pipeline_registry(
         ),
         "presentation": PipelineAdapter(
             "presentation",
-            lambda request: PresentationFlow(
-                memory_manager,
-                llm=llm,
-                progress_callback=progress_callback(request),
-            ).run(request),
+            presentation_runner,
+        ),
+        # ``ppt`` was the public route name in the first backend contract.
+        # Keep it as a real adapter so older clients and natural-language
+        # routing continue to reach the native presentation flow.
+        "ppt": PipelineAdapter(
+            "ppt",
+            presentation_runner,
         ),
         "video": PipelineAdapter(
             "video",

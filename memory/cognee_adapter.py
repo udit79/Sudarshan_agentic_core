@@ -73,8 +73,11 @@ class CogneeConfig:
             except ValueError as exc:
                 raise ValueError(f"{name} must be numeric") from exc
 
-        base_url = os.getenv("COGNEE_BASE_URL", cls.base_url).strip().rstrip("/")
-        dataset_name = os.getenv("COGNEE_DATASET_NAME", cls.dataset_name).strip()
+        # A slotted dataclass exposes fields on the class as descriptors, not
+        # their default values. Keep the environment fallbacks explicit here
+        # so ``from_env()`` also works before an instance is constructed.
+        base_url = os.getenv("COGNEE_BASE_URL", "http://localhost:8011").strip().rstrip("/")
+        dataset_name = os.getenv("COGNEE_DATASET_NAME", "sudarshan_memory").strip()
         tenant_id = os.getenv("COGNEE_TENANT_ID") or None
         if not base_url or not dataset_name:
             raise ValueError("COGNEE_BASE_URL and COGNEE_DATASET_NAME must be non-empty")

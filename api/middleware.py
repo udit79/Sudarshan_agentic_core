@@ -18,7 +18,7 @@ class NTROSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Require Operator ID for all state-mutating requests
         if request.method in ("POST", "PUT", "DELETE"):
-            operator_id = request.headers.get("x-operator-id")
+            operator_id = request.headers.get("x-operator-id", "").strip()
             if not operator_id:
                 return Response(
                     content=json.dumps({"error": "Missing X-Operator-Id header"}),
@@ -47,14 +47,6 @@ class AuditMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         start_time = time.time()
         
-        # Read body if it's not a stream
-        body = b""
-        if request.method in ("POST", "PUT"):
-            try:
-                body = await request.body()
-            except Exception:
-                pass
-
         response = await call_next(request)
         process_time = time.time() - start_time
 
@@ -65,7 +57,12 @@ class AuditMiddleware(BaseHTTPMiddleware):
             status=str(response.status_code),
             case_id=request.headers.get("x-case-id", ""),
             classification=request.headers.get("x-classification-level", "RESTRICTED"),
-            detail=f"path={request.url.path}; duration={process_time:.3f}s; body_len={len(body)}"
+            # Do not consume or persist request bodies: uploads are streamed
+            # and JSON bodies may contain case-sensitive information.
+            detail=(
+                f"path={request.url.path}; duration={process_time:.3f}s; "
+                f"body_len={request.headers.get('content-length', 'unknown')}"
+            )
         )
 
         return response

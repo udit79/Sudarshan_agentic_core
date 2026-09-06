@@ -3,9 +3,11 @@
 import asyncio
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from uuid import uuid4
 from pathlib import Path
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks, File, Form, HTTPException, FastAPI, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -15,11 +17,23 @@ from integrations.deepseek_harness.application import get_application
 from api.sse import event_generator
 from ingestion_pipelines.extract import SUPPORTED_EXTENSIONS
 from pipelines.common.ntro_policy import validate_classification
+from pipelines.common.contracts import AdvisoryRequest
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+
+@asynccontextmanager
+async def lifespan(_application: FastAPI):
+    """Fail fast and warm the orchestrator/pipeline registry on service boot."""
+
+    await asyncio.to_thread(lambda: get_application().list_pipelines())
+    yield
 
 app = FastAPI(
     title="Sudarshan Agentic Core API",
     description="NTRO Intelligent Advisory Platform Backend",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS configuration
@@ -131,31 +145,58 @@ async def ingest_source(
 @app.post("/runs")
 async def create_run(request: Request):
     """Start a new graph execution."""
-    payload = await request.json()
-    
-    # Enforce NTRO operator ID from headers if not in payload
-    operator_id = request.headers.get("x-operator-id")
-    if operator_id and "user_id" not in payload:
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Request body must be valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Request body must be a JSON object")
+
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    if payload.get("user_id") is None:
         payload["user_id"] = operator_id
-    elif operator_id and payload.get("user_id") != operator_id:
-        return JSONResponse(
-            status_code=403,
-            content={"error": "user_id must match the authenticated operator"},
-        )
-        
-    case_id = request.headers.get("x-case-id")
-    if case_id and "case_id" not in payload:
+    elif str(payload["user_id"]).strip() != operator_id:
+        raise HTTPException(status_code=403, detail="user_id must match the authenticated operator")
+
+    case_id = request.headers.get("x-case-id", "").strip()
+    if payload.get("case_id") is None:
         payload["case_id"] = case_id
-        
+    elif case_id and str(payload["case_id"]).strip() != case_id:
+        raise HTTPException(status_code=403, detail="case_id must match the authenticated case")
+
+    classification_header = request.headers.get("x-classification-level")
+    if payload.get("classification_level") is None and classification_header:
+        payload["classification_level"] = classification_header
+
+    if not payload.get("task_id"):
+        payload["task_id"] = f"task-{uuid4()}"
+
     app_instance = get_application()
-    metadata = dict(payload.get("metadata") or {})
+    try:
+        validated = AdvisoryRequest(**payload)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    metadata = dict(validated.metadata)
     run_id = str(metadata.get("run_id") or f"run-{uuid4()}")
     metadata["run_id"] = run_id
     payload["metadata"] = metadata
-    if not payload.get("task_id"):
-        payload["task_id"] = f"task-{uuid4()}"
+    explicit = list(validated.requested_pipelines)
+    if not explicit:
+        explicit_pipeline = metadata.get("pipeline")
+        explicit_pipelines = metadata.get("pipelines")
+        if isinstance(explicit_pipeline, str) and explicit_pipeline.strip():
+            explicit = [explicit_pipeline.strip().lower()]
+        elif isinstance(explicit_pipelines, str) and explicit_pipelines.strip():
+            explicit = [explicit_pipelines.strip().lower()]
+        elif isinstance(explicit_pipelines, (list, tuple)):
+            explicit = [str(item).strip().lower() for item in explicit_pipelines if str(item).strip()]
+    unknown = sorted(set(explicit) - set(app_instance.list_pipelines()))
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown pipeline(s): {', '.join(unknown)}")
+
     background_tasks = BackgroundTasks()
-    background_tasks.add_task(asyncio.to_thread, app_instance.run, payload)
+    background_tasks.add_task(asyncio.to_thread, app_instance.run, payload, operator_id=operator_id)
     response = JSONResponse(content={
         "status": "queued",
         "run_id": run_id,
@@ -190,18 +231,51 @@ async def stream_run_events(run_id: str):
 @app.post("/runs/{run_id}/resume")
 async def resume_run(run_id: str, request: Request):
     """Resume a run with clarification or approval decision."""
-    payload = await request.json()
-    task_id = payload.get("task_id", "unknown")
-    result = await asyncio.to_thread(get_application().resume, run_id, task_id, payload)
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Request body must be valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Request body must be a JSON object")
+    task_id = str(payload.get("task_id", "")).strip()
+    if not task_id:
+        raise HTTPException(status_code=422, detail="task_id is required")
+    try:
+        result = await asyncio.to_thread(
+            get_application().resume,
+            run_id,
+            task_id,
+            payload,
+            operator_id=request.headers.get("x-operator-id", "").strip(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return JSONResponse(content=result)
 
 
 @app.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str, request: Request):
     """Frontend cooperative cancellation."""
-    payload = await request.json()
-    task_id = payload.get("task_id", "unknown")
-    result = await asyncio.to_thread(get_application().cancel, run_id, task_id)
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Request body must be valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Request body must be a JSON object")
+    task_id = str(payload.get("task_id", "")).strip()
+    if not task_id:
+        raise HTTPException(status_code=422, detail="task_id is required")
+    try:
+        result = await asyncio.to_thread(
+            get_application().cancel,
+            run_id,
+            task_id,
+            operator_id=request.headers.get("x-operator-id", "").strip(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return JSONResponse(content=result)
 
 

@@ -9,10 +9,12 @@ SSE/WebSocket bridge owned by the backend.
 from __future__ import annotations
 
 from threading import Lock
+from uuid import uuid4
 from typing import Any, Mapping
 
 from memory import MemoryManager
 from pipelines.common.contracts import AdvisoryRequest
+from pipelines.common.audit_logger import get_audit_logger
 from pipelines.orchestrator import (
     PipelineOrchestrator,
     SQLiteProgressSink,
@@ -32,17 +34,148 @@ class SudarshanApplication:
             progress_sink=self.progress_sink,
             checkpointer=create_sqlite_checkpointer(),
         )
+        self._run_contexts: dict[str, dict[str, str]] = {}
+        self._run_context_lock = Lock()
 
-    def run(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        result = self.orchestrator.run(AdvisoryRequest(**dict(payload)))
+    def _prepare_request(
+        self, payload: Mapping[str, Any]
+    ) -> tuple[AdvisoryRequest, str]:
+        """Validate a public request and reserve its durable run identity."""
+
+        data = dict(payload)
+        metadata = dict(data.get("metadata") or {})
+        requested_run_id = metadata.get("run_id")
+        run_id = (
+            str(requested_run_id).strip()
+            if requested_run_id is not None and str(requested_run_id).strip()
+            else f"run-{uuid4()}"
+        )
+        metadata["run_id"] = run_id
+        data["metadata"] = metadata
+        request = AdvisoryRequest(**data)
+
+        # Explicit routes are rejected at the application boundary. Natural
+        # language routing remains the orchestrator's responsibility.
+        explicit = list(request.requested_pipelines)
+        if not explicit:
+            pipeline = metadata.get("pipeline")
+            pipelines = metadata.get("pipelines")
+            if isinstance(pipeline, str) and pipeline.strip():
+                explicit = [pipeline.strip().lower()]
+            elif isinstance(pipelines, str):
+                explicit = [pipelines.strip().lower()]
+            elif isinstance(pipelines, (list, tuple)):
+                explicit = [str(item).strip().lower() for item in pipelines if str(item).strip()]
+        unknown = sorted(set(explicit) - set(self.orchestrator.registry))
+        if unknown:
+            raise ValueError(f"Unknown pipeline(s): {', '.join(unknown)}")
+        return request, run_id
+
+    def run(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        operator_id: str | None = None,
+    ) -> dict[str, Any]:
+        request, run_id = self._prepare_request(payload)
+        operator = (operator_id or request.user_id).strip()
+        if operator != request.user_id:
+            raise PermissionError("user_id must match the authenticated operator")
+        with self._run_context_lock:
+            self._run_contexts[run_id] = {
+                "operator_id": operator,
+                "user_id": request.user_id,
+                "case_id": request.case_id,
+                "task_id": request.task_id,
+                "classification_level": request.classification_level,
+            }
+
+        audit = get_audit_logger()
+        audit.log_run_start(
+            operator_id=operator,
+            case_id=request.case_id,
+            task_id=request.task_id,
+            run_id=run_id,
+            classification=request.classification_level,
+            pipeline=next(iter(request.requested_pipelines), str(request.metadata.get("pipeline", ""))),
+            query=request.query,
+        )
+        try:
+            result = self.orchestrator.run(request, run_id=run_id)
+        except Exception:
+            audit.log_run_complete(
+                operator_id=operator,
+                case_id=request.case_id,
+                task_id=request.task_id,
+                run_id=run_id,
+                classification=request.classification_level,
+                pipeline=str(request.metadata.get("pipeline", "")),
+                status="failed",
+            )
+            raise
+        audit.log_run_complete(
+            operator_id=operator,
+            case_id=request.case_id,
+            task_id=request.task_id,
+            run_id=run_id,
+            classification=request.classification_level,
+            pipeline=result.pipeline or "",
+            status=result.status,
+        )
         return orchestration_result_to_dict(result)
 
-    def resume(self, run_id: str, task_id: str, decision: Mapping[str, Any]) -> dict[str, Any]:
+    def resume(
+        self,
+        run_id: str,
+        task_id: str,
+        decision: Mapping[str, Any],
+        *,
+        operator_id: str | None = None,
+    ) -> dict[str, Any]:
+        current = self.status(run_id)
+        if current.get("status") == "not_found":
+            return {"run_id": run_id, "task_id": task_id, "status": "not_found"}
+        if current.get("task_id") and current["task_id"] != task_id:
+            raise PermissionError("task_id does not match the run")
+        reviewer_id = decision.get("reviewer_id")
+        if operator_id and reviewer_id is not None and str(reviewer_id).strip() != operator_id:
+            raise PermissionError("reviewer_id must match the authenticated operator")
         result = self.orchestrator.resume(run_id, task_id, decision)
-        return orchestration_result_to_dict(result)
+        output = orchestration_result_to_dict(result)
+        if operator_id and decision.get("decision"):
+            context = self._run_contexts.get(run_id, {})
+            get_audit_logger().log_approval(
+                operator_id=operator_id,
+                reviewer_id=str(decision.get("reviewer_id", operator_id)),
+                run_id=run_id,
+                task_id=task_id,
+                case_id=context.get("case_id", ""),
+                decision=str(decision.get("decision")),
+                classification=context.get("classification_level", "RESTRICTED"),
+            )
+        return output
 
-    def cancel(self, run_id: str, task_id: str) -> dict[str, str]:
-        return self.orchestrator.cancel(run_id, task_id)
+    def cancel(
+        self,
+        run_id: str,
+        task_id: str,
+        *,
+        operator_id: str | None = None,
+    ) -> dict[str, str]:
+        current = self.status(run_id)
+        if current.get("status") != "not_found" and current.get("task_id") != task_id:
+            raise PermissionError("task_id does not match the run")
+        result = self.orchestrator.cancel(run_id, task_id)
+        if result.get("status") in {"requested", "cancelled"}:
+            context = self._run_contexts.get(run_id, {})
+            get_audit_logger().log_cancellation(
+                operator_id=operator_id or context.get("operator_id", "unknown"),
+                run_id=run_id,
+                task_id=task_id,
+                case_id=context.get("case_id", ""),
+                classification=context.get("classification_level", "RESTRICTED"),
+            )
+        return result
 
     def events(self, run_id: str) -> list[dict[str, Any]]:
         return [event_dict(event) for event in self.progress_sink.events(run_id)]
@@ -52,7 +185,7 @@ class SudarshanApplication:
         values = dict(snapshot.values or {})
         if not values:
             return {"run_id": run_id, "status": "not_found", "events": self.events(run_id)}
-        return {
+        status_response = {
             "run_id": run_id,
             "task_id": values.get("task_id"),
             "status": values.get("status"),
@@ -64,6 +197,21 @@ class SudarshanApplication:
             "error": values.get("error"),
             "events": self.events(run_id),
         }
+        # The projection is already serialized through the NTRO response
+        # sanitizer and contains no prompts, raw memory, credentials, or
+        # model reasoning. Include completed results so trusted API gateways
+        # can return transformed outputs without calling pipeline internals.
+        from pipelines.orchestrator.graph import _response_from_dict
+        from pipelines.orchestrator.types import response_to_dict
+
+        if values.get("response") is not None:
+            status_response["response"] = response_to_dict(_response_from_dict(values["response"]))
+        if values.get("responses"):
+            status_response["responses"] = {
+                str(name): response_to_dict(_response_from_dict(value))
+                for name, value in values["responses"].items()
+            }
+        return status_response
 
     def health(self) -> dict[str, Any]:
         """Return system health for operational monitoring."""

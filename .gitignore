@@ -18,6 +18,7 @@ env/
 .ruff_cache/
 .uv-cache/
 .pnpm-store/
+node_modules/
 
 # IDE
 .vscode/

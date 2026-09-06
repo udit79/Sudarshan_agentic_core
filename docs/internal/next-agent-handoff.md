@@ -152,7 +152,7 @@ should remain behind a backend service boundary.
 The current Sudarshan setup command remains the supported local setup path:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
 uv run pytest -q
 ```
 

@@ -54,9 +54,14 @@ class AdvisoryRequest:
             raise ValueError("top_k must be positive")
         if self.token_budget < 256:
             raise ValueError("token_budget must be at least 256")
+        raw_pipelines = self.requested_pipelines
+        if isinstance(raw_pipelines, str):
+            raw_pipelines = (raw_pipelines,)
+        if not isinstance(raw_pipelines, (list, tuple)):
+            raise ValueError("requested_pipelines must be a list of pipeline names")
         pipelines = tuple(
             str(item).strip().lower()[:64]
-            for item in self.requested_pipelines
+            for item in raw_pipelines
             if str(item).strip()
         )
         if len(pipelines) > 8:
@@ -74,10 +79,17 @@ class AdvisoryRequest:
             object.__setattr__(self, "revision_instruction", self.revision_instruction.strip()[:4000])
         elif any((self.parent_run_id, self.parent_artifact_id, self.revision_instruction, self.revision_scope)):
             raise ValueError("revision fields require operation='revise'")
-        scope = tuple(str(item).strip()[:120] for item in self.revision_scope if str(item).strip())
+        raw_scope = self.revision_scope
+        if isinstance(raw_scope, str):
+            raw_scope = (raw_scope,)
+        if not isinstance(raw_scope, (list, tuple)):
+            raise ValueError("revision_scope must be a list of field names")
+        scope = tuple(str(item).strip()[:120] for item in raw_scope if str(item).strip())
         if len(scope) > 20:
             raise ValueError("revision_scope cannot contain more than 20 fields")
         object.__setattr__(self, "revision_scope", scope)
+        if not isinstance(self.metadata, Mapping):
+            raise ValueError("metadata must be an object")
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     @property

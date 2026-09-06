@@ -42,15 +42,15 @@ sink, pipeline registry, and audit behavior.
 
 ```powershell
 Copy-Item .env.example .env
-# Fill Cognee, CrewAI/model, and any provider settings in .env.
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
-uv run python -m api.server
+# Fill MongoDB Atlas, Google OAuth, Cognee, CrewAI/model, and provider settings.
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
 ```
 
-`setup.ps1` is the single dependency command. It bootstraps `uv` when needed,
-installs the locked Python environment, installs the AntV renderer, and installs
-the frozen `deepseek-harness` workspace. If the machine already has pnpm,
-the script uses it directly and avoids a Corepack version download.
+`startup.ps1` is the single dependency, database, and local-service command. It
+bootstraps `uv` when needed, installs all locked workspaces, initializes the
+MongoDB Atlas schema/indexes, and starts the Python orchestrator/pipelines API,
+Node gateway, and static frontend. If the machine already has pnpm, the script
+uses it directly and avoids a Corepack version download.
 
 The API listens on `SUDARSHAN_API_HOST:SUDARSHAN_API_PORT` (default
 `0.0.0.0:8000`). Use `SUDARSHAN_CORS_ORIGINS` for a comma-separated allow-list;
@@ -174,9 +174,10 @@ response.
 
 ### Status and events
 
-`GET /runs/{run_id}` returns frontend-safe state only: stage, status, selected
-pipelines, clarification questions, errors, and ordered lifecycle events. Raw
-Cognee results, prompts, credentials, and model reasoning are not returned.
+`GET /runs/{run_id}` returns frontend-safe state: stage, status, selected
+pipelines, clarification questions, errors, ordered lifecycle events, and the
+validated `response`/`responses` output envelope when available. Raw Cognee
+results, prompts, credentials, and model reasoning are not returned.
 The SSE event payload is a `ProgressEvent` with `event_id`, `run_id`,
 `task_id`, `pipeline`, `stage`, `status`, `progress`, `message`, and optional
 `artifact_id`/`error_code`.

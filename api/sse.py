@@ -31,9 +31,10 @@ async def event_generator(run_id: str, timeout: int = 3600) -> AsyncGenerator[st
                 # Format as SSE
                 yield f"event: progress\ndata: {json.dumps(event)}\n\n"
                 
-                # Close stream if terminal
-                status = event.get("status")
-                if status in ("succeeded", "failed", "cancelled") and event.get("stage") in ("orchestrator.finish", "pipeline_result", "cancellation", "fail"):
+                # Only the parent terminal stages close the stream. A
+                # pipeline_result event is not terminal for a fan-out run and
+                # a pending provider job must remain observable.
+                if event.get("stage") in ("completed", "failed", "cancellation", "cancelled"):
                     return
                     
             last_event_count = len(all_events)

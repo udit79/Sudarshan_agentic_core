@@ -40,7 +40,7 @@ From the repository root:
 
 ```powershell
 Copy-Item .env.example .env
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
 uv run python -m api.server
 ```
 

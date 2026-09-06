@@ -1,0 +1,29 @@
+{
+  "name": "sudarshan-backend-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "db:init": "node scripts/initialize-database.mjs",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/auth.js && node --check src/config.js && node --check src/db.js && node --check src/models.js && node --check src/python-client.js && node --check src/rate-limit.js && node --check src/routes.js && node --check src/tasks.js && node --check src/tokens.js && node --check src/validation.js && node --check scripts/initialize-database.mjs"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "google-auth-library": "^10.4.0",
+    "helmet": "^8.1.0",
+    "js-tiktoken": "^1.0.21",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.18.1",
+    "pino": "^9.9.4",
+    "pino-http": "^10.5.0",
+    "zod": "^4.1.5"
+  }
+}
