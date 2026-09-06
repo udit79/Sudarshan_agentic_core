@@ -15,6 +15,7 @@ dependencies = [
     "pytesseract>=0.3.13",
     "python-pptx>=1.0.0",
     "google-genai>=2.0.0",
+    "pymupdf>=1.24.0",
 ]
 
 [dependency-groups]

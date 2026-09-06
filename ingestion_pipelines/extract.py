@@ -28,12 +28,6 @@ def extract_text_from_txt(file_path: str) -> str:
         return f.read()
 
 
-def extract_text_from_pdf(file_path: str) -> str:
-    from pypdf import PdfReader
-    reader = PdfReader(file_path)
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
-
-
 def extract_text(file_path: str) -> tuple[str, str]:
     """Validates, then dispatches to the right extractor.
     Returns (raw_text, doc_type).
@@ -45,10 +39,11 @@ def extract_text(file_path: str) -> tuple[str, str]:
     if ext in TEXT_EXTENSIONS:
         return extract_text_from_txt(file_path), "text"
     if ext in PDF_EXTENSIONS:
+        from ingestion_pipelines.extract_pdf import extract_text_from_pdf
         return extract_text_from_pdf(file_path), "pdf"
     if ext in IMAGE_EXTENSIONS:
-        from ingestion_pipelines.extract_image import extract_text_from_image_gemini
-        return extract_text_from_image_gemini(file_path), "image"
+        from ingestion_pipelines.extract_image import extract_text_from_image
+        return extract_text_from_image(file_path), "image"
     if ext in PPTX_EXTENSIONS:
         from ingestion_pipelines.extract_pptx import extract_text_from_pptx
         return extract_text_from_pptx(file_path), "pptx"

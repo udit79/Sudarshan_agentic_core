@@ -2,6 +2,12 @@ import sys
 from pathlib import Path
 from ingestion_pipelines import ingest_file, to_knowledge_unit
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 
 def run_ingestion_demo(
     file_path: str,

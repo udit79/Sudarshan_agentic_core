@@ -26,6 +26,18 @@ def test_ingest_pptx_file():
     assert unit.source.source_reference == "sample_data/dummy_presentation.pptx"
 
 
+def test_ingest_pdf_file():
+    doc = ingest_file("sample_data/dsaqueue.pdf", user_id="user1", case_id="case1", task_id="task1")
+    assert doc.doc_type == "pdf"
+    assert "--- Page 1 ---" in doc.raw_text
+    assert "Enqueue" in doc.raw_text
+
+    unit = to_knowledge_unit(doc)
+    assert unit.source.source_type is SourceType.PDF
+    assert unit.source.source_reference == "sample_data/dsaqueue.pdf"
+
+
+
 def test_adapter_to_knowledge_unit_and_context():
     doc = ingest_file("sample_data/sample_text.txt", user_id="user1", case_id="case1", task_id="task1")
     unit = to_knowledge_unit(doc)
