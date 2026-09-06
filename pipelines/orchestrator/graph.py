@@ -26,6 +26,7 @@ from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, Task
 from pipelines.executive_summary.crew import ExecutiveSummaryFlow
 from pipelines.infographic.crew import InfographicFlow
 from pipelines.linkedin.crew import LinkedInPostFlow
+from pipelines.ppt.crew import PresentationFlow
 from pipelines.orchestrator.progress import (
     InMemoryProgressSink,
     ProgressReporter,
@@ -209,6 +210,14 @@ def build_default_pipeline_registry(
                 memory_manager,
                 llm=llm,
                 renderer=renderer,
+                progress_callback=progress_callback(request),
+            ).run(request),
+        ),
+        "presentation": PipelineAdapter(
+            "presentation",
+            lambda request: PresentationFlow(
+                memory_manager,
+                llm=llm,
                 progress_callback=progress_callback(request),
             ).run(request),
         ),

@@ -5,6 +5,7 @@ from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.executive_summary.crew import ExecutiveSummaryFlow
 from pipelines.infographic.crew import InfographicFlow
 from pipelines.linkedin.crew import LinkedInPostFlow
+from pipelines.ppt.crew import PresentationFlow
 from pipelines.orchestrator import (
     InMemoryProgressSink,
     OrchestrationResult,
@@ -31,6 +32,7 @@ __all__ = [
     "ExecutiveSummaryFlow",
     "InfographicFlow",
     "LinkedInPostFlow",
+    "PresentationFlow",
     "PipelineResponse",
     "InMemoryProgressSink",
     "OrchestrationResult",
