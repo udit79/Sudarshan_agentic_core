@@ -142,6 +142,22 @@ Default services:
 | Node gateway | http://127.0.0.1:8080 |
 | Static frontend | http://127.0.0.1:3000 |
 
+### Stop local services
+
+`startup.ps1` launches the API, gateway, and frontend as detached processes, so
+closing the terminal does not stop them. Stop only the Sudarshan processes with:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\stop-servers.ps1
+```
+
+The script targets the default ports `3000`, `8000`, and `8080`. If custom ports
+are configured, pass them explicitly:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\stop-servers.ps1 -Ports 3001,8001,8081
+```
+
 Useful options and manual service commands are in
 [docs/operations.md](docs/operations.md).
 
