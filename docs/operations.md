@@ -1,7 +1,7 @@
 # Operations and deployment guide
 
 This document contains the detailed setup, configuration, service contracts,
-testing, troubleshooting, and deployment limitations for Sudarshan Agentic
+testing, troubleshooting, and deployment requirements for Sudarshan Agentic
 Core. The root README is intentionally shorter and links here for operational
 depth.
 
@@ -187,21 +187,10 @@ imageio-ffmpeg. MONEYPRINTERTURBO_BASE_URL selects the asynchronous
 compatibility path. Provider pending means the worker is still running; it is
 not a human approval state.
 
-## Production limitations and required hardening
+## Deployment requirements
 
-- Local SQLite checkpoint, progress, audit, and CrewAI state stores are for
-  development or a single instance. Production requires approved durable,
-  encrypted shared storage.
-- Fan-out currently runs in-process. Production multi-instance deployments
-  should move work to a durable queue while preserving parent/child contracts.
-- Live provider integration requires configured MongoDB, Cognee, Google OAuth,
-  and OpenAI credentials.
-- Cross-pipeline collaboration currently exchanges typed proposals and
-  validated artifacts. LLM-to-LLM crafter dialogue is not enabled by default;
-  any future mode must remain bounded and policy-checked.
-- Human approval batching across multiple approval-requiring pipelines is not
-  yet supported.
-- Production requires HTTPS, secure cookies, strict CORS, an approved SSO
-  identity source, encrypted state, secret management, observability, backup,
-  and provider-specific cancellation/retry policies.
-
+Production deployments should use HTTPS, secure cookies, strict CORS, an
+approved SSO identity source, secret management, encrypted durable state,
+observability, backups, and provider-specific cancellation/retry policies.
+Configure the approved shared state and worker infrastructure for the target
+deployment before exposing the system to operational users.

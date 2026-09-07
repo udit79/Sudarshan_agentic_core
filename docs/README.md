@@ -74,8 +74,8 @@ technical source of truth.
 
 ## Operational documents
 
-- [MVP status](internal/mvp-status.md) records what is implemented and what
-  still requires live deployment work.
+- [Operations](operations.md) records setup, configuration, testing,
+  troubleshooting, and deployment requirements.
 - [Design review](design-review.md) records factual improvements for the
   submitted architecture slides.
 
