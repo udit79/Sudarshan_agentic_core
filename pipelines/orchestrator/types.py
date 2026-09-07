@@ -156,7 +156,6 @@ def _public_state(state: Mapping[str, Any]) -> dict[str, Any]:
         "response",
         "responses",
         "approval_decision",
-        "collaboration_plan",
         "error",
         "stage",
         "status",

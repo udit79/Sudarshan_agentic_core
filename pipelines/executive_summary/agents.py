@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from crewai import Agent
 from crewai.tools import BaseTool
-from pipelines.common.model_routing import resolve_model
 
 
 def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
     common = {"verbose": False, "allow_delegation": False, "tools": tools}
-
-    def agent_options(role: str) -> dict[str, Any]:
-        return {**common, "llm": resolve_model(role, override=llm)}
+    configured_llm = llm or os.getenv("CREWAI_MODEL")
+    if configured_llm:
+        common["llm"] = configured_llm
     return {
         "case_analyst": Agent(
             role="Case Intelligence Analyst",
@@ -22,7 +22,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You produce evidence-linked analytical briefs. You distinguish fact from assessment and "
                 "make uncertainty visible without adding unsupported information."
             ),
-            **agent_options("executive_analyst"),
+            **common,
         ),
         "summary_writer": Agent(
             role="Executive Summary Writer",
@@ -31,7 +31,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You write clear, neutral executive summaries. You prioritize material findings, implications, "
                 "actions, provenance, and gaps over narrative decoration."
             ),
-            **agent_options("executive_writer"),
+            **common,
         ),
         "quality_critic": Agent(
             role="Executive Summary Quality Reviewer",
@@ -40,6 +40,6 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You reject unsupported conclusions, missing caveats, invented policy, and any AI or workflow "
                 "language that should not appear in the delivered summary."
             ),
-            **agent_options("executive_quality"),
+            **common,
         ),
     }

@@ -22,7 +22,6 @@ from langgraph.types import Command, interrupt
 from memory import AccessContext
 from pipelines.advisory.crew import AdvisoryFlow
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
-from pipelines.common.collaboration import build_collaborative_workflow
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter
 from pipelines.executive_summary.crew import ExecutiveSummaryFlow
 from pipelines.infographic.crew import InfographicFlow
@@ -63,7 +62,6 @@ class OrchestratorState(TypedDict):
     memory_records: list[dict[str, Any]]
     prompt_plan: dict[str, Any]
     prompt_plans: dict[str, Any]
-    collaboration_plan: dict[str, Any]
     response: dict[str, Any] | None
     responses: dict[str, dict[str, Any]]
     approval_decision: dict[str, Any] | None
@@ -506,7 +504,6 @@ class PipelineOrchestrator:
             "memory_records": [],
             "prompt_plan": {},
             "prompt_plans": {},
-            "collaboration_plan": {},
             "response": None,
             "responses": {},
             "approval_decision": None,
@@ -918,13 +915,6 @@ class PipelineOrchestrator:
                 )
                 plans[selected] = plan.model_dump(mode="json")
             primary_plan = plans[pipelines[0]]
-            collaboration = build_collaborative_workflow(
-                pipelines,
-                plans,
-                metadata=request.metadata,
-                classification_level=request.classification_level,
-                distribution=request.distribution,
-            )
             reporter.emit(
                 stage="prompt_crafting",
                 status="succeeded",
@@ -941,7 +931,6 @@ class PipelineOrchestrator:
             return {
                 "prompt_plan": primary_plan,
                 "prompt_plans": plans,
-                "collaboration_plan": collaboration.model_dump(mode="json"),
                 "stage": "prompt_crafting",
                 "status": "running",
             }
@@ -1000,90 +989,45 @@ class PipelineOrchestrator:
                 return {"response": payload, "responses": {pipeline: payload}, "stage": "pipeline_result", "status": response.status}
 
             payloads: dict[str, dict[str, Any]] = {}
-            collaboration = state.get("collaboration_plan") or {}
-            raw_waves = collaboration.get("execution_waves") if isinstance(collaboration, Mapping) else None
-            waves = [
-                [str(item) for item in wave if str(item) in pipelines]
-                for wave in raw_waves or [pipelines]
-                if isinstance(wave, (list, tuple))
-            ]
-            waves = [wave for wave in waves if wave]
-            if sorted(name for wave in waves for name in wave) != sorted(pipelines):
-                waves = [list(pipelines)]
-            dependencies = collaboration.get("dependencies", {}) if isinstance(collaboration, Mapping) else {}
-
-            # Pipelines in the same wave remain parallel. Later waves receive
-            # only the validated results of their explicitly declared inputs.
-            for wave in waves:
-                self._check_cancelled(state["run_id"])
-                runnable: list[str] = []
-                for selected in wave:
-                    required = dependencies.get(selected, []) if isinstance(dependencies, Mapping) else []
-                    blocked = [
-                        dependency for dependency in required
-                        if payloads.get(dependency, {}).get("status") != "succeeded"
-                    ]
-                    if blocked:
+            with ThreadPoolExecutor(max_workers=min(len(pipelines), 8), thread_name_prefix="sudarshan-pipeline") as executor:
+                futures = {
+                    executor.submit(
+                        self._run_one_pipeline,
+                        state,
+                        request,
+                        selected,
+                        state.get("prompt_plans", {}).get(selected, {}),
+                    ): selected
+                    for selected in pipelines
+                }
+                for future in as_completed(futures):
+                    selected = futures[future]
+                    try:
+                        payloads[selected] = future.result()
+                    except RunCancelled:
+                        raise
+                    except Exception as exc:
                         payloads[selected] = response_to_dict(PipelineResponse(
                             status="failed",
                             pipeline=selected,
                             task_id=f"{state['task_id']}-{selected}",
                             run_id=f"{state['run_id']}-{selected}",
-                            failure=f"Required pipeline(s) did not succeed: {', '.join(blocked)}",
+                            failure=str(exc),
                             metadata={
                                 "parent_orchestration_run_id": state["run_id"],
                                 "parent_task_id": state["task_id"],
-                                "blocked_by": blocked,
                             },
                         )) or {}
-                        continue
-                    runnable.append(selected)
-                if not runnable:
-                    continue
-                with ThreadPoolExecutor(max_workers=min(len(runnable), 8), thread_name_prefix="sudarshan-pipeline") as executor:
-                    futures = {
-                        executor.submit(
-                            self._run_one_pipeline,
-                            state,
-                            request,
-                            selected,
-                            state.get("prompt_plans", {}).get(selected, {}),
-                            {
-                                dependency: payloads[dependency]
-                                for dependency in (dependencies.get(selected, []) if isinstance(dependencies, Mapping) else [])
-                                if dependency in payloads
-                            },
-                        ): selected
-                        for selected in runnable
-                    }
-                    for future in as_completed(futures):
-                        selected = futures[future]
-                        try:
-                            payloads[selected] = future.result()
-                        except RunCancelled:
-                            raise
-                        except Exception as exc:
-                            payloads[selected] = response_to_dict(PipelineResponse(
-                                status="failed",
-                                pipeline=selected,
-                                task_id=f"{state['task_id']}-{selected}",
-                                run_id=f"{state['run_id']}-{selected}",
-                                failure=str(exc),
-                                metadata={
-                                    "parent_orchestration_run_id": state["run_id"],
-                                    "parent_task_id": state["task_id"],
-                                },
-                            )) or {}
-                        child = _response_from_dict(payloads[selected])
-                        if child is not None:
-                            reporter.emit(
-                                stage="pipeline_result",
-                                status="succeeded" if child.status == "succeeded" else "failed",
-                                progress=90 if child.status == "succeeded" else 100,
-                                message=f"{selected} pipeline completed with status {child.status}",
-                                pipeline=selected,
-                                error_code="PIPELINE_FAILED" if child.status == "failed" else None,
-                            )
+                    child = _response_from_dict(payloads[selected])
+                    if child is not None:
+                        reporter.emit(
+                            stage="pipeline_result",
+                            status="succeeded" if child.status == "succeeded" else "failed",
+                            progress=90 if child.status == "succeeded" else 100,
+                            message=f"{selected} pipeline completed with status {child.status}",
+                            pipeline=selected,
+                            error_code="PIPELINE_FAILED" if child.status == "failed" else None,
+                        )
             self._check_cancelled(state["run_id"])
             aggregate = _aggregate_pipeline_status(payloads)
             primary_name = next((name for name in pipelines if payloads.get(name, {}).get("status") == "succeeded"), pipelines[0])
@@ -1107,7 +1051,6 @@ class PipelineOrchestrator:
         request: AdvisoryRequest,
         pipeline: str,
         prompt_plan: Mapping[str, Any],
-        upstream_results: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Run one isolated child execution inside a fan-out parent run."""
 
@@ -1138,8 +1081,6 @@ class PipelineOrchestrator:
             "resolved_memory_context": state.get("memory_context", ""),
             "resolved_memory_records": state.get("memory_records", []),
             "prompt_plan": dict(prompt_plan),
-            "collaboration_plan": state.get("collaboration_plan", {}),
-            "upstream_pipeline_results": dict(upstream_results or {}),
         }
         response = self.registry[pipeline].run(_request_from_dict(request_data))
         self._check_cancelled(state["run_id"])

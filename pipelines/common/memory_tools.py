@@ -151,10 +151,6 @@ class TaskMemoryWriter:
             "infographic_case_analyst": infographic_case_analyst_callback,
             "infographic_syntax_writer": infographic_syntax_writer_callback,
             "infographic_quality_critic": infographic_quality_critic_callback,
-            "video_evidence": video_evidence_callback,
-            "video_script": video_script_callback,
-            "video_storyboard": video_storyboard_callback,
-            "video_quality": video_quality_callback,
         }
         try:
             return callbacks[step]
@@ -241,22 +237,6 @@ def infographic_syntax_writer_callback(output: TaskOutput) -> TaskOutput:
 
 def infographic_quality_critic_callback(output: TaskOutput) -> TaskOutput:
     return _record_task_output("infographic_quality_critic", output)
-
-
-def video_evidence_callback(output: TaskOutput) -> TaskOutput:
-    return _record_task_output("video_evidence", output)
-
-
-def video_script_callback(output: TaskOutput) -> TaskOutput:
-    return _record_task_output("video_script", output)
-
-
-def video_storyboard_callback(output: TaskOutput) -> TaskOutput:
-    return _record_task_output("video_storyboard", output)
-
-
-def video_quality_callback(output: TaskOutput) -> TaskOutput:
-    return _record_task_output("video_quality", output)
 
 
 def memory_tools(runtime: MemoryRuntime) -> list[BaseTool]:

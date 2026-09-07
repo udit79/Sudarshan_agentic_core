@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from crewai import Agent
 from crewai.tools import BaseTool
-from pipelines.common.model_routing import resolve_model
 
 
 def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
@@ -17,9 +17,9 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
         "allow_delegation": False,
         "tools": tools,
     }
-
-    def agent_options(role: str) -> dict[str, Any]:
-        return {**common, "llm": resolve_model(role, override=llm)}
+    configured_llm = llm or os.getenv("CREWAI_MODEL")
+    if configured_llm:
+        common["llm"] = configured_llm
 
     return {
         "intelligence_analyst": Agent(
@@ -29,7 +29,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You prepare defensible case assessments for an NTRO context. "
                 "You never invent facts, sources, attribution, policy, or organizational authority."
             ),
-            **agent_options("advisory_intelligence"),
+            **common,
         ),
         "provenance_reviewer": Agent(
             role="Case Evidence and Provenance Reviewer",
@@ -38,7 +38,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You are a rigorous intelligence-quality reviewer. You downgrade confidence, "
                 "flag unsupported claims, and require explicit caveats when provenance is weak."
             ),
-            **agent_options("advisory_provenance"),
+            **common,
         ),
         "advisory_writer": Agent(
             role="NTRO Advisory Writer",
@@ -47,7 +47,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You write formal advisories for authorized NTRO personnel. "
                 "You distinguish facts, assessments, impacts, recommendations, and unknowns."
             ),
-            **agent_options("advisory_writer"),
+            **common,
         ),
         "quality_critic": Agent(
             role="Advisory Quality Critic",
@@ -56,6 +56,6 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You are the final release gate. You verify structure, evidence linkage, confidence, "
                 "classification handling, formal advisory style, and NTRO-specific framing before human review."
             ),
-            **agent_options("advisory_quality"),
+            **common,
         ),
     }

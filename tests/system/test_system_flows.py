@@ -5,7 +5,6 @@ from pathlib import Path
 from ingestion_pipelines import ingest_file, to_access_context, to_knowledge_unit
 from memory import ScopeType
 from pipelines import InMemoryProgressSink, PipelineAdapter, PipelineOrchestrator, PipelineResponse
-from pipelines.common.contracts import AdvisoryRequest
 
 from tests.conftest import FakeRecallManager, make_request, successful_response
 
@@ -148,38 +147,3 @@ def test_system_frontend_cancellation_stops_at_next_safe_boundary() -> None:
 
     assert result.status == "cancelled"
     assert result.response is None
-
-
-def test_system_collaborative_dependency_runs_in_waves_and_passes_upstream_results() -> None:
-    observed: list[tuple[str, dict[str, object]]] = []
-
-    def runner(name: str):
-        def run(request: AdvisoryRequest) -> PipelineResponse:
-            upstream = request.metadata.get("upstream_pipeline_results", {})
-            observed.append((name, dict(upstream) if isinstance(upstream, dict) else {}))
-            return successful_response(request, name)
-
-        return run
-
-    orchestrator = PipelineOrchestrator(
-        FakeRecallManager(),
-        registry={
-            "advisory": PipelineAdapter("advisory", runner("advisory")),
-            "video": PipelineAdapter("video", runner("video")),
-        },
-    )
-    request = AdvisoryRequest(
-        query="Create an advisory and then create a video from it",
-        user_id="user-1",
-        case_id="case-1",
-        task_id="task-1",
-        requested_pipelines=("advisory", "video"),
-        metadata={"pipeline_dependencies": {"video": ["advisory"]}},
-    )
-
-    result = orchestrator.run(request, run_id="run-collaboration")
-
-    assert result.status == "succeeded"
-    assert [name for name, _ in observed] == ["advisory", "video"]
-    assert set(observed[1][1]) == {"advisory"}
-    assert observed[1][1]["advisory"]["status"] == "succeeded"

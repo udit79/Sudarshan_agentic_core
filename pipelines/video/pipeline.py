@@ -4,41 +4,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 
 from memory import KnowledgeUnit, MemoryType, ScopeType, Source, SourceType
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter
-from pipelines.video.contracts import VideoPackage, VideoScene as VideoContractScene
+from pipelines.video.contracts import VideoPackage
 from pipelines.video.native_generator import (
-    NativeVideoGenerator,
-    VideoScene as NativeVideoScene,
-    scenes_from_package,
-    scenes_from_script,
+    NativeVideoGenerator, 
+    scenes_from_package, 
+    scenes_from_script
 )
-from pipelines.video.planner import CrewAIVideoPlanner, OpenAIVideoPlanner
+from pipelines.video.planner import OpenAIVideoPlanner
 from integrations.providers.moneyprinterturbo import MoneyPrinterTurboClient
-
-
-def _contract_scene(scene: NativeVideoScene) -> VideoContractScene:
-    """Convert the native renderer scene into the validated package contract."""
-
-    return VideoContractScene(
-        scene_id=scene.scene_id,
-        narration=scene.narration,
-        visual_description=scene.visual_description,
-        duration_seconds=scene.duration_seconds,
-        on_screen_text=scene.on_screen_text,
-        image_path=scene.image_path,
-        audio_path=scene.audio_path,
-        video_path=scene.video_path,
-    )
-
-
-def _scene_payload(scene: NativeVideoScene) -> dict[str, Any]:
-    """Serialize a native scene without assuming it is a Pydantic model."""
-
-    return _contract_scene(scene).model_dump(mode="json")
 
 
 class VideoPipeline:
@@ -50,12 +28,12 @@ class VideoPipeline:
         *,
         generator: NativeVideoGenerator | None = None,
         client: MoneyPrinterTurboClient | None = None,
-        planner: CrewAIVideoPlanner | OpenAIVideoPlanner | None = None,
+        planner: OpenAIVideoPlanner | None = None,
     ) -> None:
         self.memory_manager = memory_manager
         self.generator = generator or NativeVideoGenerator()
         self.client = client
-        self.planner = planner or CrewAIVideoPlanner()
+        self.planner = planner or OpenAIVideoPlanner()
 
     def _runtime(self, request: AdvisoryRequest) -> MemoryRuntime:
         return MemoryRuntime(
@@ -96,7 +74,13 @@ class VideoPipeline:
                     title=subject,
                     script=supplied_script,
                     storyboard=[
-                        _contract_scene(scene)
+                        {
+                            "scene_id": scene.scene_id,
+                            "narration": scene.narration,
+                            "visual_description": scene.visual_description,
+                            "duration_seconds": scene.duration_seconds,
+                            "on_screen_text": scene.on_screen_text,
+                        }
                         for scene in scenes
                     ],
                 )
@@ -107,10 +91,13 @@ class VideoPipeline:
                         subject=subject,
                         title=subject,
                         script=supplied_script,
-                        storyboard=[
-                            _contract_scene(scene)
-                            for scene in scenes_from_script(supplied_script, subject)
-                        ],
+                        storyboard=[scene.model_dump() if hasattr(scene, "model_dump") else {
+                            "scene_id": scene.scene_id,
+                            "narration": scene.narration,
+                            "visual_description": scene.visual_description,
+                            "duration_seconds": scene.duration_seconds,
+                            "on_screen_text": scene.on_screen_text,
+                        } for scene in scenes_from_script(supplied_script, subject)],
                     )
                 else:
                     package = self.planner.plan(
@@ -118,7 +105,6 @@ class VideoPipeline:
                         query=request.query,
                         memory_context=memory_context,
                         prompt_plan=dict(request.metadata.get("prompt_plan") or {}),
-                        task_writer=writer,
                     )
                 scenes = scenes_from_package(package.model_dump())
                 
@@ -169,7 +155,7 @@ class VideoPipeline:
                     "subject": subject,
                     "title": subject,
                     "script": "\n\n".join(scene.narration for scene in scenes),
-                    "storyboard": [_scene_payload(scene) for scene in scenes],
+                    "storyboard": [scene.model_dump() for scene in scenes],
                 }
                 package_payload["storyboard"] = scene_records or package_payload.get("storyboard", [])
                 package_root = Path(result.metadata.get("package_dir", package_dir))

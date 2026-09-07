@@ -76,8 +76,6 @@ class TextTransformationFlow(Flow[TaskState]):
             **self.pipeline_options(request),
             "request_understanding": request.metadata.get("request_understanding", {}),
             "prompt_plan": request.metadata.get("prompt_plan", {}),
-            "collaboration_plan": request.metadata.get("collaboration_plan", {}),
-            "upstream_pipeline_results": request.metadata.get("upstream_pipeline_results", {}),
             "resolved_memory_context": request.metadata.get("resolved_memory_context"),
             "resolved_memory_records": request.metadata.get("resolved_memory_records", []),
         }
