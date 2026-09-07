@@ -10,7 +10,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, File, Form, HTTPException, FastAPI, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 
 from api.middleware import NTROSecurityMiddleware, AuditMiddleware
 from integrations.deepseek_harness.application import get_application
@@ -20,6 +20,7 @@ from pipelines.common.ntro_policy import require_classification
 from pipelines.common.contracts import AdvisoryRequest
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+ARTIFACT_ROOT = (Path(__file__).resolve().parents[1] / "artifacts").resolve()
 
 
 @asynccontextmanager
@@ -92,6 +93,63 @@ async def health_check():
 async def list_pipelines():
     """Registered pipeline discovery."""
     return {"pipelines": get_application().list_pipelines()}
+
+
+@app.post("/config/session")
+async def configure_session(request: Request):
+    """Set a development-only provider key for this running API process."""
+
+    if os.getenv("NODE_ENV", "development").lower() == "production":
+        raise HTTPException(status_code=403, detail="Runtime configuration is disabled in production")
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Request body must be valid JSON") from exc
+    api_key = str(payload.get("openai_api_key", "")).strip() if isinstance(payload, dict) else ""
+    if not api_key or len(api_key) > 500:
+        raise HTTPException(status_code=422, detail="openai_api_key is required")
+    os.environ["OPENAI_API_KEY"] = api_key
+    return {"status": "configured", "provider": "openai", "storage": "process-memory"}
+
+
+def _artifact_path_from_status(status: dict, artifact_key: str) -> Path | None:
+    responses = status.get("responses") or {}
+    response = responses.get(artifact_key) or (
+        status.get("response") if status.get("pipeline") == artifact_key else None
+    ) or {}
+    output = response.get("output") or {}
+    artifact = response.get("artifact") or {}
+    candidates = []
+    if artifact_key == "video":
+        candidates.extend([artifact.get("video_path"), artifact.get("path")])
+    if artifact_key == "presentation":
+        candidates.append(artifact.get("path"))
+    if artifact_key == "infographic":
+        candidates.extend([output.get("artifact_path"), artifact.get("path")])
+    if artifact_key == "linkedin_post":
+        image = output.get("image") or {}
+        candidates.extend([image.get("asset_uri"), artifact.get("path")])
+    candidates.extend([artifact.get("path"), output.get("artifact_path")])
+    for candidate in candidates:
+        if not isinstance(candidate, str) or candidate.startswith(("http://", "https://")):
+            continue
+        candidate_path = Path(candidate)
+        resolved = (ARTIFACT_ROOT.parent / candidate_path).resolve() if not candidate_path.is_absolute() else candidate_path.resolve()
+        if resolved == ARTIFACT_ROOT or ARTIFACT_ROOT in resolved.parents:
+            if resolved.is_file():
+                return resolved
+    return None
+
+
+@app.get("/artifacts/{run_id}/{artifact_key}")
+async def serve_artifact(run_id: str, artifact_key: str):
+    status = get_application().status(run_id)
+    if status.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="Run not found")
+    artifact_path = _artifact_path_from_status(status, artifact_key.strip().lower())
+    if artifact_path is None:
+        raise HTTPException(status_code=404, detail="Artifact is not available for this run")
+    return FileResponse(artifact_path)
 
 
 @app.post("/ingest", status_code=201)

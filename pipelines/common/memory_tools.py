@@ -149,8 +149,12 @@ class TaskMemoryWriter:
             "executive_summary_writer": executive_summary_writer_callback,
             "executive_quality_critic": executive_quality_critic_callback,
             "infographic_case_analyst": infographic_case_analyst_callback,
+            "infographic_evidence_review": infographic_evidence_review_callback,
             "infographic_syntax_writer": infographic_syntax_writer_callback,
             "infographic_quality_critic": infographic_quality_critic_callback,
+            "ppt_content_analyst": ppt_content_analyst_callback,
+            "ppt_presentation_writer": ppt_presentation_writer_callback,
+            "ppt_quality_critic": ppt_quality_critic_callback,
         }
         try:
             return callbacks[step]
@@ -231,12 +235,28 @@ def infographic_case_analyst_callback(output: TaskOutput) -> TaskOutput:
     return _record_task_output("infographic_case_analyst", output)
 
 
+def infographic_evidence_review_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("infographic_evidence_review", output)
+
+
 def infographic_syntax_writer_callback(output: TaskOutput) -> TaskOutput:
     return _record_task_output("infographic_syntax_writer", output)
 
 
 def infographic_quality_critic_callback(output: TaskOutput) -> TaskOutput:
     return _record_task_output("infographic_quality_critic", output)
+
+
+def ppt_content_analyst_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("ppt_content_analyst", output)
+
+
+def ppt_presentation_writer_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("ppt_presentation_writer", output)
+
+
+def ppt_quality_critic_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("ppt_quality_critic", output)
 
 
 def memory_tools(runtime: MemoryRuntime) -> list[BaseTool]:

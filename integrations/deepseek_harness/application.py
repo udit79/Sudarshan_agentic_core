@@ -9,6 +9,7 @@ SSE/WebSocket bridge owned by the backend.
 from __future__ import annotations
 
 from threading import Lock
+import os
 from uuid import uuid4
 from typing import Any, Mapping
 
@@ -221,7 +222,12 @@ class SudarshanApplication:
             "memory_system": "connected",
             "registered_pipelines": len(pipelines),
             "pipelines": pipelines,
-            "routing_engine": "langgraph"
+            "routing_engine": "langgraph",
+            "configuration": {
+                "openai_api_key": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+                "cognee_api_key": bool(os.getenv("COGNEE_API_KEY", "").strip()),
+                "cognee_base_url": bool(os.getenv("COGNEE_BASE_URL", "").strip()),
+            },
         }
 
     def list_pipelines(self) -> list[str]:

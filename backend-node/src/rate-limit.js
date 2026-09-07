@@ -18,8 +18,32 @@ async function changeBucket({ key, kind, inputTokens = 0, outputTokens = 0, rese
     ? []
     : [{ $lte: [{ $add: [{ $ifNull: ["$requestCount", 0] }, requestCount] }, config.requestLimitPerMinute] }];
   try {
+    if (release) {
+      return await RateLimitBucket.findOneAndUpdate(
+        { _id: id },
+        { $inc: inc },
+        { new: true, session },
+      );
+    }
+
+    // MongoDB does not allow $expr in an upsert predicate. Create the bucket
+    // with a simple _id upsert first, then apply the quota predicate in a
+    // second atomic update. The predicate is re-evaluated after every update,
+    // so concurrent requests cannot overspend the bucket.
+    try {
+      await RateLimitBucket.updateOne(
+        { _id: id },
+        { $setOnInsert: { key, kind, windowStart: start, expiresAt } },
+        { upsert: true, setDefaultsOnInsert: true, session },
+      );
+    } catch (error) {
+      // Another request may create the same bucket between the two operations.
+      // The subsequent conditional update can safely continue in that case.
+      if (error?.code !== 11000) throw error;
+    }
+
     return await RateLimitBucket.findOneAndUpdate(
-      release ? { _id: id } : {
+      {
         _id: id,
         $expr: {
           $and: [
@@ -28,8 +52,8 @@ async function changeBucket({ key, kind, inputTokens = 0, outputTokens = 0, rese
           ],
         },
       },
-      { $setOnInsert: { key, kind, windowStart: start, expiresAt }, $inc: inc },
-      { upsert: true, new: true, setDefaultsOnInsert: true, session },
+      { $inc: inc },
+      { new: true, session },
     );
   } catch (error) {
     // An exhausted bucket can lose the conditional race to another request;

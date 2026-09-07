@@ -25,6 +25,21 @@
 
   <!-- App Layout Shell -->
   <div class="app-layout" id="appLayout">
+
+    <div class="config-modal-backdrop" id="configModal" hidden>
+      <form class="config-modal" id="configForm">
+        <p class="result-eyebrow">ONE-TIME SESSION SETUP</p>
+        <h2>Connect your OpenAI API</h2>
+        <p class="config-modal-copy">The backend does not have an OpenAI key in its environment. Enter one to enable model and media pipelines. It will be held only in the running API process and is never saved in this browser or repository.</p>
+        <label class="config-label" for="openaiApiKey">OpenAI API key</label>
+        <input class="config-input" id="openaiApiKey" name="openai_api_key" type="password" autocomplete="off" required placeholder="sk-…">
+        <p class="config-modal-error" id="configModalError" hidden></p>
+        <div class="config-modal-actions">
+          <button class="result-action-btn" id="configSkipBtn" type="button">Continue without it</button>
+          <button class="btn-submit config-submit" type="submit">Connect</button>
+        </div>
+      </form>
+    </div>
     
     <!-- LEFT SIDEBAR -->
     <aside class="sidebar" id="sidebar">
@@ -45,7 +60,7 @@
             <span class="brand-tag">AI</span>
           </div>
         </div>
-        <button class="icon-btn collapse-btn" id="collapseBtn" title="Toggle Sidebar">
+        <button class="icon-btn collapse-btn" id="collapseBtn" type="button" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="11 17 6 12 11 7"></polyline>
             <polyline points="18 17 13 12 18 7"></polyline>
@@ -65,45 +80,6 @@
           <span class="btn-label">New Transformation</span>
         </button>
       </div>
-
-      <!-- Navigation Menu -->
-      <nav class="sidebar-nav">
-        <ul class="nav-list">
-          <li class="nav-item">
-            <a href="#history" class="nav-link">
-              <span class="nav-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                  <path d="M3 3v5h5"/>
-                  <path d="M12 7v5l4 2"/>
-                </svg>
-              </span>
-              <span class="nav-text">History</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="#saved" class="nav-link">
-              <span class="nav-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>
-                </svg>
-              </span>
-              <span class="nav-text">Saved Outputs</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <a href="#settings" class="nav-link">
-              <span class="nav-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-                  <circle cx="12" cy="12" r="3"/>
-                </svg>
-              </span>
-              <span class="nav-text">Settings</span>
-            </a>
-          </li>
-        </ul>
-      </nav>
 
       <!-- Middle Scrollable Section: Chats & History -->
       <div class="sidebar-middle-scroll">
@@ -139,11 +115,11 @@
       <div class="sidebar-footer">
         <div class="user-card" id="userCardBtn" tabindex="0">
           <div class="user-avatar">
-            <span>AS</span>
+            <span>SO</span>
           </div>
           <div class="user-info">
-            <span class="user-name">Aarav Sharma</span>
-            <span class="user-plan">Pro Plan</span>
+            <span class="user-name">Sudarshan Operator</span>
+            <span class="user-plan">“From context to clarity.”</span>
           </div>
           <div class="user-chevron">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -178,8 +154,8 @@
           </div>
 
           <!-- Top Profile Avatar -->
-          <div class="top-user-avatar" title="Account Settings">
-            <span>AS</span>
+          <div class="top-user-avatar" title="Signed-in user" aria-label="Signed-in user">
+            <span>SO</span>
           </div>
         </div>
       </header>
@@ -195,15 +171,9 @@
       <section class="welcome-section">
         <div class="welcome-text">
           <h2 class="greeting-heading">
-            Good afternoon, <span class="highlight-name">Aarav.</span>
+            Good afternoon, <span class="highlight-name">Operator.</span>
           </h2>
           <p class="greeting-subtitle">What would you like to transform today?</p>
-        </div>
-        
-        <div class="hero-tagline">
-          <span class="tagline-text">BUILT FOR A</span>
-          <span class="tagline-text">BRIGHTER TOMORROW</span>
-          <div class="tagline-dash"></div>
         </div>
       </section>
 
@@ -220,6 +190,11 @@
           
           <div class="prompt-controls">
             <div class="prompt-left-tools">
+              <input id="fileInput" type="file" hidden multiple accept=".txt,.pdf,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.webp,.pptx,.pptm,.ppsx,.ppsm,.potx,.potm,.mp4,.mov,.avi,.mkv,.webm">
+              <button class="tool-btn attach-files-btn" id="attachFilesBtn" type="button" title="Add source files" aria-label="Add source files">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48"/></svg>
+                <span>Add files</span>
+              </button>
               <span class="input-help">Your prompt is token-counted before submission.</span>
             </div>
 
@@ -236,6 +211,7 @@
               </button>
             </div>
           </div>
+          <div class="attachment-list" id="attachmentList" aria-live="polite" hidden></div>
         </div>
         <div class="result-panel" id="resultPanel" aria-live="polite" hidden>
           <div class="result-panel-header">
@@ -252,11 +228,21 @@
                 </svg>
                 <span id="exportBtnLabel">Export</span>
               </button>
-              <button class="result-cancel" id="cancelTaskBtn" type="button" hidden>Cancel</button>
+              <button class="result-cancel" id="stopTaskBtn" type="button" title="Stop active run at the next safe boundary" hidden>Stop</button>
             </div>
           </div>
 
           <p class="result-message" id="resultMessage"></p>
+
+          <div class="task-progress" id="taskProgress" hidden>
+            <div class="task-progress-header">
+              <span id="taskProgressLabel">Agent progress</span>
+              <span id="taskProgressValue">0%</span>
+            </div>
+            <div class="task-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Agentic pipeline progress">
+              <div class="task-progress-bar" id="taskProgressBar"></div>
+            </div>
+          </div>
 
           <!-- Output Type Switcher Tabs (Rendered when outputs are active) -->
           <div class="output-tabs-container" id="outputTabsContainer" hidden>
@@ -297,7 +283,7 @@
         <div class="output-grid" id="outputGrid">
           
           <!-- Card 1: Intelligence Brief (Active/Selected by default) -->
-          <div class="output-card active" data-type="executive_summary">
+          <button class="output-card active" data-type="executive_summary" type="button" aria-pressed="true">
             <div class="card-top-row">
               <div class="card-icon-wrap icon-blue">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -308,16 +294,16 @@
                   <polyline points="10 9 9 9 8 9"></polyline>
                 </svg>
               </div>
-              <span class="card-pipeline-tag">Multi-Agent Consensus</span>
+              <span class="card-pipeline-tag">Executive Summary Pipeline</span>
             </div>
             <div class="card-content">
               <h4 class="card-title">Intelligence Brief</h4>
               <p class="card-desc">Concise, actionable insights</p>
             </div>
-          </div>
+          </button>
 
           <!-- Card 2: Presentation -->
-          <div class="output-card" data-type="presentation">
+          <button class="output-card" data-type="presentation" type="button" aria-pressed="false">
             <div class="card-top-row">
               <div class="card-icon-wrap icon-amber">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -327,16 +313,16 @@
                   <polygon points="10 8 15 10 10 12"></polygon>
                 </svg>
               </div>
-              <span class="card-pipeline-tag">Slide Deck Studio</span>
+              <span class="card-pipeline-tag">Native PPTX Renderer</span>
             </div>
             <div class="card-content">
               <h4 class="card-title">Presentation</h4>
-              <p class="card-desc">PPT with key highlights</p>
+              <p class="card-desc">Native PowerPoint briefing deck</p>
             </div>
-          </div>
+          </button>
 
           <!-- Card 3: Report -->
-          <div class="output-card" data-type="advisory">
+          <button class="output-card" data-type="advisory" type="button" aria-pressed="false">
             <div class="card-top-row">
               <div class="card-icon-wrap icon-indigo">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -346,16 +332,16 @@
                   <line x1="8" y1="11" x2="14" y2="11"></line>
                 </svg>
               </div>
-              <span class="card-pipeline-tag">Deep Advisory</span>
+              <span class="card-pipeline-tag">NTRO Advisory</span>
             </div>
             <div class="card-content">
               <h4 class="card-title">Report</h4>
-              <p class="card-desc">Detailed analysis report</p>
+              <p class="card-desc">Formal case advisory</p>
             </div>
-          </div>
+          </button>
 
           <!-- Card 5: Infographic -->
-          <div class="output-card" data-type="infographic">
+          <button class="output-card" data-type="infographic" type="button" aria-pressed="false">
             <div class="card-top-row">
               <div class="card-icon-wrap icon-pink">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -364,16 +350,16 @@
                   <line x1="6" y1="20" x2="6" y2="14"></line>
                 </svg>
               </div>
-              <span class="card-pipeline-tag">Visual Analytics</span>
+              <span class="card-pipeline-tag">AntV Renderer</span>
             </div>
             <div class="card-content">
               <h4 class="card-title">Infographic</h4>
-              <p class="card-desc">Visual representation</p>
+              <p class="card-desc">Rendered visual summary</p>
             </div>
-          </div>
+          </button>
 
-          <!-- Card 6: Video Script -->
-          <div class="output-card" data-type="video">
+          <!-- Card 6: Complete Video Package -->
+          <button class="output-card" data-type="video" type="button" aria-pressed="false">
             <div class="card-top-row">
               <div class="card-icon-wrap icon-violet">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -381,16 +367,16 @@
                   <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
                 </svg>
               </div>
-              <span class="card-pipeline-tag">Teleprompter AI</span>
+              <span class="card-pipeline-tag">Native Video Pipeline</span>
             </div>
             <div class="card-content">
-              <h4 class="card-title">Video Script</h4>
-              <p class="card-desc">Script for explainer video</p>
+              <h4 class="card-title">Video Package</h4>
+              <p class="card-desc">MP4, story, storyboard and scene assets</p>
             </div>
-          </div>
+          </button>
 
-          <!-- Card 7: Social Media Post -->
-          <div class="output-card" data-type="linkedin_post">
+          <!-- Card 7: LinkedIn Post -->
+          <button class="output-card" data-type="linkedin_post" type="button" aria-pressed="false">
             <div class="card-top-row">
               <div class="card-icon-wrap icon-cyan">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -398,13 +384,13 @@
                   <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                 </svg>
               </div>
-              <span class="card-pipeline-tag">Growth Copywriter</span>
+              <span class="card-pipeline-tag">LinkedIn Pipeline</span>
             </div>
             <div class="card-content">
-              <h4 class="card-title">Social Media Post</h4>
-              <p class="card-desc">Short-form content</p>
+              <h4 class="card-title">LinkedIn Post</h4>
+              <p class="card-desc">Publish-ready post with optional visual</p>
             </div>
-          </div>
+          </button>
 
         </div>
       </section>
@@ -427,42 +413,6 @@
         </div>
 
         <div class="recent-grid" id="recentGrid"></div>
-      </section>
-
-      <!-- BOTTOM BANNER: Unlock more with Sudarshan Pro -->
-      <section class="promo-section">
-        <div class="promo-card">
-          <!-- Background Curved Cosmic Planet Horizon Placeholder -->
-          <div class="promo-bg-horizon" title="Atmosphere Horizon Curve (Placeholder)">
-            <svg class="horizon-arc-svg" viewBox="0 0 800 120" preserveAspectRatio="none">
-              <defs>
-                <radialGradient id="arcGlow" cx="65%" cy="130%" r="90%">
-                  <stop offset="0%" stop-color="#4f46e5" stop-opacity="0.8"/>
-                  <stop offset="40%" stop-color="#38bdf8" stop-opacity="0.4"/>
-                  <stop offset="80%" stop-color="#0e1438" stop-opacity="0"/>
-                </radialGradient>
-              </defs>
-              <ellipse cx="520" cy="140" rx="360" ry="80" fill="url(#arcGlow)"/>
-              <path d="M160 140 Q 520 40 880 140" stroke="#60a5fa" stroke-width="2" fill="none" opacity="0.75" filter="drop-shadow(0 0 8px #38bdf8)"/>
-            </svg>
-          </div>
-
-          <div class="promo-left">
-            <div class="promo-sparkle-icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">
-                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
-              </svg>
-            </div>
-            <div class="promo-text">
-              <h4 class="promo-title">Unlock more with Sudarshan Pro</h4>
-              <p class="promo-subtitle">Get higher limits, advanced models and exclusive tools.</p>
-            </div>
-          </div>
-
-          <div class="promo-right">
-            <span class="btn-upgrade" aria-disabled="true">Upgrade coming soon</span>
-          </div>
-        </div>
       </section>
 
     </main>

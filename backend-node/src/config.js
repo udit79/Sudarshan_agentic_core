@@ -49,6 +49,7 @@ export const config = {
   cookieSameSite: (process.env.COOKIE_SAME_SITE || (isProduction ? "none" : "lax")).toLowerCase(),
   pythonApiBaseUrl: (process.env.PYTHON_API_BASE_URL || "http://localhost:8000").replace(/\/$/, ""),
   pythonApiTimeoutMs: integer("PYTHON_API_TIMEOUT_MS", process.env.PYTHON_API_TIMEOUT_MS, 30000, 1000),
+  pythonIngestTimeoutMs: integer("PYTHON_INGEST_TIMEOUT_MS", process.env.PYTHON_INGEST_TIMEOUT_MS, 180000, 1000),
   corsOrigins: (process.env.CORS_ORIGINS || "http://localhost:3000,http://localhost:5173")
     .split(",").map((item) => item.trim()).filter(Boolean),
   tokenLimitPerMinute: integer("TOKEN_LIMIT_PER_MINUTE", process.env.TOKEN_LIMIT_PER_MINUTE, 20000, 1),

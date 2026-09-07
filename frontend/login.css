@@ -139,14 +139,6 @@ body {
   letter-spacing: -0.01em;
 }
 
-.top-slogan {
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-}
-
 /* ==========================================================================
    2-COLUMN SPLIT CONTENT GRID
    ========================================================================== */
@@ -167,26 +159,6 @@ body {
   flex-direction: column;
   max-width: 540px;
   z-index: 5;
-}
-
-.eyebrow-tag {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 18px;
-}
-
-.eyebrow-dash {
-  color: #818cf8;
-  font-weight: 700;
-}
-
-.eyebrow-text {
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  color: #818cf8;
-  text-transform: uppercase;
 }
 
 .hero-title {
@@ -638,9 +610,6 @@ body {
 }
 
 @media (max-width: 480px) {
-  .top-slogan {
-    display: none;
-  }
   .hero-title {
     font-size: 2.2rem;
   }

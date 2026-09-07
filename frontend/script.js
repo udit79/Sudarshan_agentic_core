@@ -14,6 +14,9 @@ document.addEventListener("DOMContentLoaded", () => {
     promptInput: document.getElementById("promptInput"),
     charCount: document.getElementById("charCount"),
     submitBtn: document.getElementById("submitBtn"),
+    fileInput: document.getElementById("fileInput"),
+    attachFilesBtn: document.getElementById("attachFilesBtn"),
+    attachmentList: document.getElementById("attachmentList"),
     newTransformBtn: document.getElementById("newTransformBtn"),
     caseSelect: document.getElementById("caseSelect"),
     newCaseBtn: document.getElementById("newCaseBtn"),
@@ -26,7 +29,11 @@ document.addEventListener("DOMContentLoaded", () => {
     richOutputContainer: document.getElementById("richOutputContainer"),
     exportOutputBtn: document.getElementById("exportOutputBtn"),
     exportBtnLabel: document.getElementById("exportBtnLabel"),
-    cancelTaskBtn: document.getElementById("cancelTaskBtn"),
+    stopTaskBtn: document.getElementById("stopTaskBtn"),
+    taskProgress: document.getElementById("taskProgress"),
+    taskProgressBar: document.getElementById("taskProgressBar"),
+    taskProgressValue: document.getElementById("taskProgressValue"),
+    taskProgressLabel: document.getElementById("taskProgressLabel"),
     toggleAllOutputsBtn: document.getElementById("toggleAllOutputsBtn"),
     viewAllLabel: document.getElementById("viewAllLabel"),
     recentFilterBar: document.getElementById("recentFilterBar"),
@@ -40,6 +47,11 @@ document.addEventListener("DOMContentLoaded", () => {
     backendStatusBadge: document.getElementById("backendStatusBadge"),
     backendStatusDot: document.getElementById("backendStatusDot"),
     backendStatusText: document.getElementById("backendStatusText"),
+    configModal: document.getElementById("configModal"),
+    configForm: document.getElementById("configForm"),
+    configInput: document.getElementById("openaiApiKey"),
+    configError: document.getElementById("configModalError"),
+    configSkipBtn: document.getElementById("configSkipBtn"),
   };
 
   const outputCards = [...document.querySelectorAll(".output-card")];
@@ -54,7 +66,15 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentSlideIndex = 0;
   let activeRecentFilter = "all";
   let pollTimer = null;
-  let currentUser = { id: "operator-default", name: "Aarav Sharma", email: "aarav.sharma@sudarshan.ai" };
+  let closeProgressStream = null;
+  const selectedFiles = [];
+  const supportedUploadExtensions = new Set([
+    "txt", "pdf", "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp",
+    "pptx", "pptm", "ppsx", "ppsm", "potx", "potm", "mp4", "mov", "avi", "mkv", "webm",
+  ]);
+  const sudarshanDisplayName = "Sudarshan Operator";
+  const sudarshanFriendlyLine = "“From context to clarity.”";
+  let currentUser = { id: "operator-default", name: sudarshanDisplayName, email: "" };
 
   // Toast notifications
   function showToast(message, isError = false) {
@@ -69,6 +89,175 @@ document.addEventListener("DOMContentLoaded", () => {
   function showApiError(error) {
     const suffix = error.requestId ? ` (${error.requestId})` : "";
     showToast(`${error.message}${suffix}`, true);
+  }
+
+  function updateTaskProgress(progress, message = "", stage = "") {
+    if (!elements.taskProgress) return;
+
+    const numericProgress = Number(progress);
+    const hasProgress = Number.isFinite(numericProgress);
+    const boundedProgress = hasProgress
+      ? Math.min(100, Math.max(0, numericProgress))
+      : null;
+    const readableStage = stage ? String(stage).replaceAll("_", " ") : "";
+    const label = message || (readableStage ? `Stage: ${readableStage}` : "Agent progress");
+
+    elements.taskProgress.hidden = false;
+    if (elements.taskProgressLabel) elements.taskProgressLabel.textContent = label;
+    if (boundedProgress !== null) {
+      if (elements.taskProgressBar) elements.taskProgressBar.style.width = `${boundedProgress}%`;
+      if (elements.taskProgressValue) elements.taskProgressValue.textContent = `${Math.round(boundedProgress)}%`;
+      const track = elements.taskProgress.querySelector('[role="progressbar"]');
+      track?.setAttribute("aria-valuenow", String(Math.round(boundedProgress)));
+    }
+    if (elements.resultMessage && (hasProgress || message || readableStage)) {
+      const progressText = boundedProgress === null ? "Progress" : `Progress ${Math.round(boundedProgress)}%`;
+      elements.resultMessage.textContent = `${progressText}${readableStage ? ` · ${readableStage}` : ""}`;
+    }
+  }
+
+  function resetTaskProgress() {
+    if (!elements.taskProgress) return;
+    elements.taskProgress.hidden = true;
+    if (elements.taskProgressBar) elements.taskProgressBar.style.width = "0%";
+    if (elements.taskProgressValue) elements.taskProgressValue.textContent = "0%";
+    const track = elements.taskProgress.querySelector('[role="progressbar"]');
+    track?.setAttribute("aria-valuenow", "0");
+  }
+
+  function handleProgressEvent(event) {
+    const payload = event && typeof event === "object" ? event : {};
+    const message = payload.message || "";
+    const stepEl = document.getElementById("liveStepIndicator");
+    if (stepEl && message) stepEl.textContent = message;
+    updateTaskProgress(payload.progress, message, payload.stage || "");
+  }
+
+  function showConfigurationPrompt() {
+    if (!elements.configModal || !elements.configForm) return;
+    elements.configModal.hidden = false;
+    elements.configInput?.focus();
+  }
+
+  function hideConfigurationPrompt() {
+    if (elements.configModal) elements.configModal.hidden = true;
+    if (elements.configInput) elements.configInput.value = "";
+  }
+
+  async function submitConfiguration(event) {
+    event.preventDefault();
+    const apiKey = elements.configInput?.value.trim() || "";
+    if (!apiKey) return;
+    const submit = elements.configForm.querySelector("button[type=submit]");
+    if (submit) submit.disabled = true;
+    if (elements.configError) elements.configError.hidden = true;
+    try {
+      await api.configureSession(apiKey);
+      hideConfigurationPrompt();
+      showToast("OpenAI configured for this running session.");
+    } catch (error) {
+      if (elements.configError) {
+        elements.configError.textContent = error.message || "The API key could not be configured.";
+        elements.configError.hidden = false;
+      }
+    } finally {
+      if (submit) submit.disabled = false;
+    }
+  }
+
+  function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes || 0} B`;
+    const units = ["KB", "MB", "GB"];
+    let value = bytes;
+    let unit = "B";
+    for (const nextUnit of units) {
+      value /= 1024;
+      unit = nextUnit;
+      if (value < 1024 || nextUnit === units.at(-1)) break;
+    }
+    return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
+  }
+
+  function renderAttachments() {
+    if (!elements.attachmentList) return;
+    elements.attachmentList.replaceChildren();
+    elements.attachmentList.hidden = selectedFiles.length === 0;
+    selectedFiles.forEach((file, index) => {
+      const chip = document.createElement("div");
+      chip.className = "attachment-chip";
+      const icon = document.createElement("span");
+      icon.textContent = "📎";
+      const name = document.createElement("span");
+      name.className = "attachment-chip-name";
+      name.textContent = file.name;
+      name.title = file.name;
+      const size = document.createElement("span");
+      size.className = "attachment-chip-status";
+      size.textContent = formatBytes(file.size);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "attachment-remove";
+      remove.title = `Remove ${file.name}`;
+      remove.setAttribute("aria-label", `Remove ${file.name}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        selectedFiles.splice(index, 1);
+        renderAttachments();
+      });
+      chip.append(icon, name, size, remove);
+      elements.attachmentList.appendChild(chip);
+    });
+  }
+
+  function addSelectedFiles(fileList) {
+    const files = [...(fileList || [])];
+    const rejected = [];
+    for (const file of files) {
+      const extension = file.name.split(".").pop()?.toLowerCase() || "";
+      if (!supportedUploadExtensions.has(extension)) {
+        rejected.push(file.name);
+        continue;
+      }
+      if (!selectedFiles.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified)) {
+        selectedFiles.push(file);
+      }
+    }
+    renderAttachments();
+    if (rejected.length) {
+      showToast(`Unsupported file type: ${rejected.join(", ")}`, true);
+    }
+    if (selectedFiles.length) {
+      showToast(`${selectedFiles.length} source file${selectedFiles.length === 1 ? "" : "s"} ready to add.`);
+    }
+  }
+
+  async function ingestSelectedFiles(caseId) {
+    if (!selectedFiles.length) return;
+    if (elements.attachFilesBtn) elements.attachFilesBtn.disabled = true;
+    try {
+      let index = 0;
+      while (index < selectedFiles.length) {
+        const file = selectedFiles[index];
+        const ingestionProgress = Math.min(20, 5 + Math.round((index / selectedFiles.length) * 15));
+        updateTaskProgress(
+          ingestionProgress,
+          `Adding source ${index + 1} of ${selectedFiles.length}: ${file.name}`,
+          "source_ingestion",
+        );
+        elements.resultMessage.textContent = `Adding source ${index + 1} of ${selectedFiles.length}: ${file.name}`;
+        await api.ingestFile(file, {
+          caseId,
+          taskId: `ingest-${Date.now()}-${index}`,
+          classificationLevel: "RESTRICTED",
+        });
+        selectedFiles.splice(index, 1);
+        renderAttachments();
+      }
+      updateTaskProgress(20, "Source files indexed; preparing the agentic run...", "source_ingestion");
+      showToast("Source files added to case memory.");
+    } finally {
+      if (elements.attachFilesBtn) elements.attachFilesBtn.disabled = false;
+    }
   }
 
   function initials(user) {
@@ -94,6 +283,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function chatsStorageKey() {
     return `sudarshan.chats.${currentUser?.id || "default"}`;
+  }
+
+  function adoptCurrentUser(user) {
+    if (!user || typeof user !== "object") return;
+    const previousId = currentUser?.id || "operator-default";
+    const nextId = user.id || user.user_id || previousId;
+    if (previousId !== nextId) {
+      for (const prefix of ["sudarshan.chats.", "sudarshan.recentTasks."]) {
+        const previousKey = `${prefix}${previousId}`;
+        const nextKey = `${prefix}${nextId}`;
+        const previousValue = localStorage.getItem(previousKey);
+        if (previousValue && !localStorage.getItem(nextKey)) {
+          localStorage.setItem(nextKey, previousValue);
+        }
+      }
+    }
+    currentUser = { ...currentUser, ...user, id: nextId };
+    cachedRecentTasks = null;
   }
 
   // Dynamic Chat Naming derived from user query/question
@@ -177,6 +384,33 @@ document.addEventListener("DOMContentLoaded", () => {
     renderRecentTasks();
   }
 
+  async function syncRemoteHistory() {
+    if (!api.listTasks) return;
+    try {
+      const response = await api.listTasks();
+      const remoteTasks = response?.tasks || [];
+      if (!Array.isArray(remoteTasks) || remoteTasks.length === 0) return;
+
+      const merged = new Map(remoteTasks.filter((task) => task?.task_id).map((task) => [task.task_id, task]));
+      for (const localTask of readRecentTasks()) {
+        if (!localTask?.task_id) continue;
+        const remoteTask = merged.get(localTask.task_id);
+        // Preserve the richer browser copy when it contains rendered output.
+        if (!remoteTask || localTask.result || new Date(localTask.updated_at || 0) > new Date(remoteTask.updated_at || 0)) {
+          merged.set(localTask.task_id, localTask);
+        }
+      }
+      cachedRecentTasks = [...merged.values()]
+        .sort((left, right) => new Date(right.updated_at || right.created_at || 0) - new Date(left.updated_at || left.created_at || 0))
+        .slice(0, 30);
+      localStorage.setItem(recentStorageKey(), JSON.stringify(cachedRecentTasks));
+      renderSidebarHistory();
+      renderRecentTasks();
+    } catch {
+      // Local history remains usable when the gateway history endpoint is unavailable.
+    }
+  }
+
   // Format Helper
   function formatName(type) {
     const map = {
@@ -184,8 +418,8 @@ document.addEventListener("DOMContentLoaded", () => {
       presentation: "Presentation",
       advisory: "Report",
       infographic: "Infographic",
-      video: "Video Script",
-      linkedin_post: "Social Media Post"
+      video: "Video Package",
+      linkedin_post: "LinkedIn Post"
     };
     return map[type] || type;
   }
@@ -209,7 +443,7 @@ document.addEventListener("DOMContentLoaded", () => {
       advisory: "Report",
       infographic: "Infographic",
       video: "Video",
-      linkedin_post: "Social"
+      linkedin_post: "LinkedIn"
     };
     return map[type] || "Brief";
   }
@@ -305,6 +539,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function createNewChat() {
+    selectedFiles.splice(0);
+    renderAttachments();
     const chats = getChats();
     // Check if the current chat is already fresh and unused
     const currentChat = chats.find((c) => c.id === activeChatId);
@@ -548,6 +784,84 @@ document.addEventListener("DOMContentLoaded", () => {
     // Render Active Format Viewer
     const payload = extractOutputForType(task.result, activeTabType) || task.result;
     renderFormatView(activeTabType, payload);
+    renderArtifactPreview(activeTabType, payload);
+  }
+
+  function renderArtifactPreview(type, data) {
+    if (!currentTaskData?.task_id || !elements.richOutputContainer || !api.artifactUrl) return;
+    const artifactTypes = new Set(["presentation", "infographic", "video", "linkedin_post", "advisory"]);
+    if (!artifactTypes.has(type)) return;
+    const response = extractResponseForType(currentTaskData.result, type);
+    const artifact = response?.artifact && typeof response.artifact === "object" ? response.artifact : {};
+    const output = response?.output && typeof response.output === "object" ? response.output : data;
+    const artifactPath = type === "video"
+      ? (artifact.video_path || artifact.path)
+      : type === "infographic"
+        ? (output?.artifact_path || artifact.path)
+        : type === "presentation"
+          ? artifact.path
+          : (output?.image?.asset_uri || artifact.path || output?.artifact_path);
+    const artifactId = api.activeMode === "fastapi"
+      ? (currentTaskData.run_id || currentTaskData.task_id)
+      : currentTaskData.task_id;
+    const url = api.artifactUrl(artifactId, type);
+    const panel = document.createElement("div");
+    panel.className = "artifact-preview-panel";
+    const heading = document.createElement("div");
+    heading.className = "artifact-preview-heading";
+    heading.textContent = `${formatName(type)} artifact`;
+    panel.appendChild(heading);
+
+    // Failed or syntax-only pipelines must not render a broken image/video URL.
+    // Keep the pipeline failure visible instead of presenting a misleading 404.
+    if (!artifactPath) {
+      const message = document.createElement("p");
+      message.className = "result-message";
+      message.textContent = response?.failure
+        ? `${formatName(type)} was not rendered: ${response.failure}`
+        : `${formatName(type)} has no rendered artifact yet.`;
+      panel.appendChild(message);
+      elements.richOutputContainer.appendChild(panel);
+      return;
+    }
+
+    if (type === "video") {
+      const video = document.createElement("video");
+      video.className = "artifact-video-player";
+      video.controls = true;
+      video.preload = "metadata";
+      video.src = url;
+      video.setAttribute("aria-label", "Generated video artifact");
+      panel.appendChild(video);
+    } else if (type === "infographic" || type === "linkedin_post") {
+      const imageUri = data?.image?.asset_uri;
+      const image = document.createElement("img");
+      image.className = "artifact-image-preview";
+      image.alt = data?.alt_text || data?.image?.alt_text || `${formatName(type)} artifact`;
+      image.src = imageUri && /^https?:\/\//i.test(imageUri) ? imageUri : url;
+      panel.appendChild(image);
+    }
+
+    const link = document.createElement("a");
+    link.className = "result-action-btn artifact-download-link";
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = type === "video" ? "Open video" : `Open ${formatShort(type)} artifact`;
+    panel.appendChild(link);
+    elements.richOutputContainer.appendChild(panel);
+  }
+
+  function extractResponseForType(result, type) {
+    if (!result || typeof result !== "object") return null;
+    let candidate = result[type];
+    if (!candidate && result.responses && typeof result.responses === "object") {
+      candidate = result.responses[type];
+    }
+    if (!candidate && type === "linkedin_post") candidate = result.linkedin || result.linkedin_post;
+    if (!candidate && type === "presentation") candidate = result.ppt || result.presentation;
+    if (!candidate && result.pipeline === type) candidate = result;
+    return candidate && typeof candidate === "object" ? candidate : null;
   }
 
   // Specialized Rich Format Viewers
@@ -569,7 +883,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (type === "infographic") {
       renderInfographicView(data);
     } else if (type === "video") {
-      renderVideoScriptView(data);
+      renderVideoPackageView(data);
     } else if (type === "linkedin_post") {
       renderSocialPostView(data);
     } else {
@@ -896,8 +1210,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // 5. Video Script View (Video Explainer Pipeline)
-  function renderVideoScriptView(data) {
+  // 5. Complete Video Package View (native video pipeline)
+  function renderVideoPackageView(data) {
     const wrap = document.createElement("div");
     wrap.className = "video-script-viewer";
 
@@ -905,9 +1219,9 @@ document.addEventListener("DOMContentLoaded", () => {
     header.className = "brief-meta-bar";
     header.innerHTML = `
       <span class="brief-tag" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border-color: rgba(139, 92, 246, 0.35);">
-        ${data.title || data.subject || "TELEPROMPTER PRODUCTION SCRIPT"}
+        ${data.title || data.subject || "NATIVE VIDEO PACKAGE"}
       </span>
-      <button class="result-action-btn" id="copyScriptBtn" style="padding: 4px 10px; font-size: 0.75rem;">Copy Script</button>
+      <button class="result-action-btn" id="copyScriptBtn" style="padding: 4px 10px; font-size: 0.75rem;">Copy narration</button>
     `;
 
     const scenes = data.storyboard || data.scenes || [];
@@ -956,11 +1270,11 @@ document.addEventListener("DOMContentLoaded", () => {
         scriptText = data.script || data.transcript || "";
       }
       navigator.clipboard?.writeText(scriptText);
-      showToast("Video script copied to clipboard.");
+      showToast("Video narration copied to clipboard.");
     });
   }
 
-  // 6. Social Media Post View (LinkedIn / Social Pipeline)
+  // 6. LinkedIn Post View
   function renderSocialPostView(data) {
     const wrap = document.createElement("div");
     wrap.className = "social-post-viewer";
@@ -1108,10 +1422,16 @@ document.addEventListener("DOMContentLoaded", () => {
       clearTimeout(pollTimer);
       pollTimer = null;
     }
+    closeProgressStream?.();
+    closeProgressStream = null;
     elements.submitBtn.disabled = false;
     elements.promptInput.disabled = false;
     elements.submitBtn.classList.remove("is-loading");
-    if (elements.cancelTaskBtn) elements.cancelTaskBtn.hidden = true;
+    if (elements.stopTaskBtn) {
+      elements.stopTaskBtn.hidden = true;
+      elements.stopTaskBtn.disabled = false;
+    }
+    resetTaskProgress();
 
     const question = task.prompt || elements.promptInput?.value.trim() || "";
 
@@ -1191,7 +1511,10 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.submitBtn.disabled = true;
     elements.promptInput.disabled = true;
     elements.submitBtn.classList.add("is-loading");
-    if (elements.cancelTaskBtn) elements.cancelTaskBtn.hidden = false;
+    if (elements.stopTaskBtn) {
+      elements.stopTaskBtn.hidden = false;
+      elements.stopTaskBtn.disabled = false;
+    }
 
     elements.resultPanel.hidden = false;
     elements.resultTitle.textContent = "Synthesizing";
@@ -1204,8 +1527,11 @@ document.addEventListener("DOMContentLoaded", () => {
         <div style="font-size: 0.78rem; color: var(--text-secondary);">Formats: ${outputTypes.map(formatName).join(", ")}</div>
       </div>
     `;
+    updateTaskProgress(0, "Connecting to Sudarshan Core orchestrator...", "queued");
 
     try {
+      await api.ensureCase?.(caseId, currentChat.title || "Untitled case");
+      await ingestSelectedFiles(caseId);
       const response = await api.createTransform({
         case_id: caseId,
         input,
@@ -1222,17 +1548,14 @@ document.addEventListener("DOMContentLoaded", () => {
       task.created_at = task.created_at || Date.now();
       activeTaskId = task.task_id;
       const targetRunId = task.run_id || task.runId || task.task_id;
+      const progressSubscriptionId = api.activeMode === "fastapi" ? targetRunId : activeTaskId;
+      updateTaskProgress(0, "Run accepted; waiting for the orchestrator...", "queued");
 
       // Connect live SSE streaming progress listener for real-time agent updates
-      if (api.subscribeToTask && targetRunId) {
-        api.subscribeToTask(targetRunId, (event) => {
-          const stepEl = document.getElementById("liveStepIndicator");
-          if (stepEl && event.message) {
-            stepEl.textContent = event.message;
-          }
-          if (event.progress) {
-            elements.resultMessage.textContent = `Progress ${event.progress}% · ${event.stage || "processing"}`;
-          }
+      if (api.subscribeToTask && progressSubscriptionId) {
+        closeProgressStream?.();
+        closeProgressStream = api.subscribeToTask(progressSubscriptionId, handleProgressEvent, () => {
+          // Polling remains the source of truth if the optional event stream closes.
         });
       }
 
@@ -1247,7 +1570,13 @@ document.addEventListener("DOMContentLoaded", () => {
       elements.submitBtn.disabled = false;
       elements.promptInput.disabled = false;
       elements.submitBtn.classList.remove("is-loading");
-      if (elements.cancelTaskBtn) elements.cancelTaskBtn.hidden = true;
+      closeProgressStream?.();
+      closeProgressStream = null;
+      if (elements.stopTaskBtn) {
+        elements.stopTaskBtn.hidden = true;
+        elements.stopTaskBtn.disabled = false;
+      }
+      resetTaskProgress();
       const isNetworkError = !err.status && (
         !window.navigator.onLine ||
         err.message?.includes("fetch") ||
@@ -1300,7 +1629,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // Update stage indicator while waiting
-      if (task.stage) {
+      updateTaskProgress(task.progress, task.message || "", task.stage || "");
+      if (task.stage && !task.message) {
         const stepEl = document.getElementById("liveStepIndicator");
         if (stepEl) stepEl.textContent = `Stage: ${task.stage.replaceAll("_", " ")}...`;
       }
@@ -1310,7 +1640,13 @@ document.addEventListener("DOMContentLoaded", () => {
       elements.submitBtn.disabled = false;
       elements.promptInput.disabled = false;
       elements.submitBtn.classList.remove("is-loading");
-      if (elements.cancelTaskBtn) elements.cancelTaskBtn.hidden = true;
+      closeProgressStream?.();
+      closeProgressStream = null;
+      if (elements.stopTaskBtn) {
+        elements.stopTaskBtn.hidden = true;
+        elements.stopTaskBtn.disabled = false;
+      }
+      resetTaskProgress();
       showApiError(error);
     }
   }
@@ -1318,7 +1654,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // Wire Event Listeners
   function wireEvents() {
     // Sidebar collapse & mobile toggle
-    elements.collapseBtn?.addEventListener("click", () => elements.sidebar.classList.toggle("collapsed"));
+    elements.collapseBtn?.addEventListener("click", () => {
+      const collapsed = elements.sidebar.classList.toggle("collapsed");
+      elements.collapseBtn.setAttribute("aria-expanded", String(!collapsed));
+      elements.collapseBtn.setAttribute("title", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    });
     elements.mobileMenuBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
       elements.sidebar.classList.toggle("mobile-open");
@@ -1354,22 +1694,36 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.exportOutputBtn?.addEventListener("click", exportActiveOutput);
     elements.toggleAllOutputsBtn?.addEventListener("click", toggleAllOutputs);
 
-    // Cancel Active Task
-    elements.cancelTaskBtn?.addEventListener("click", async () => {
+    // Stop Active Task. Cancellation is cooperative at safe graph boundaries;
+    // it is not a resumable provider-level pause.
+    elements.stopTaskBtn?.addEventListener("click", async () => {
       if (!activeTaskId) return;
+      elements.stopTaskBtn.disabled = true;
       try {
         await api.cancelTask(activeTaskId);
-        showToast("Task cancellation requested.");
+        showToast("Stop requested; the run will halt at the next safe boundary.");
         if (pollTimer) clearTimeout(pollTimer);
+        pollTimer = null;
+        closeProgressStream?.();
+        closeProgressStream = null;
         elements.submitBtn.disabled = false;
         elements.promptInput.disabled = false;
         elements.submitBtn.classList.remove("is-loading");
-        if (elements.cancelTaskBtn) elements.cancelTaskBtn.hidden = true;
-        elements.resultTitle.textContent = "Cancelled";
-        elements.resultMessage.textContent = "Task was cancelled by operator.";
+        elements.stopTaskBtn.hidden = true;
+        elements.stopTaskBtn.disabled = false;
+        elements.resultTitle.textContent = "Stopped";
+        updateTaskProgress(undefined, "Stop requested. Waiting for the safe cancellation boundary...", "cancellation");
+        elements.resultMessage.textContent = "Stop requested. The agentic run will halt at the next safe graph boundary.";
       } catch (err) {
+        elements.stopTaskBtn.disabled = false;
         showApiError(err);
       }
+    });
+
+    elements.attachFilesBtn?.addEventListener("click", () => elements.fileInput?.click());
+    elements.fileInput?.addEventListener("change", () => {
+      addSelectedFiles(elements.fileInput.files);
+      elements.fileInput.value = "";
     });
 
     // Output Cards Click Handlers
@@ -1426,10 +1780,26 @@ document.addEventListener("DOMContentLoaded", () => {
         window.location.replace("login.html");
       }
     });
+    elements.configForm?.addEventListener("submit", submitConfiguration);
+    elements.configSkipBtn?.addEventListener("click", hideConfigurationPrompt);
   }
 
   // Initialize Dashboard State with Live Backend Sync
   async function init() {
+    try {
+      const identity = await api.getCurrentUser?.();
+      if (identity?.user) {
+        adoptCurrentUser(identity.user);
+        if (elements.userName) elements.userName.textContent = sudarshanDisplayName;
+        if (elements.userPlan) elements.userPlan.textContent = sudarshanFriendlyLine;
+        if (elements.userAvatar) elements.userAvatar.textContent = "SO";
+        if (elements.topAvatar) elements.topAvatar.textContent = "SO";
+        if (elements.greetingName) elements.greetingName.textContent = "Operator.";
+      }
+    } catch {
+      // Use the anonymous development scope when no authenticated gateway user exists.
+    }
+
     renderSidebarChats();
     syncCaseSelect();
     renderSidebarHistory();
@@ -1463,7 +1833,11 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
+    const initialHealth = await api.checkHealth();
     await updateHealth();
+    if (initialHealth?.ok && initialHealth.data?.configuration && initialHealth.data.configuration.openai_api_key === false) {
+      showConfigurationPrompt();
+    }
     // Re-check health every 20 seconds
     setInterval(updateHealth, 20000);
 
@@ -1490,19 +1864,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (tasks.length > 0) {
       loadTaskIntoView(tasks[0]);
     }
-
-    // Try background API user fetch
-    api.getCurrentUser?.().then((res) => {
-      if (res?.user) {
-        currentUser = res.user;
-        const name = currentUser.name || currentUser.email;
-        if (elements.userName) elements.userName.textContent = name;
-        if (elements.userPlan) elements.userPlan.textContent = currentUser.email;
-        if (elements.userAvatar) elements.userAvatar.textContent = initials(currentUser);
-        if (elements.topAvatar) elements.topAvatar.textContent = initials(currentUser);
-        if (elements.greetingName) elements.greetingName.textContent = `${name.split(" ")[0]}.`;
-      }
-    }).catch(() => { /* offline standalone mode */ });
+    await syncRemoteHistory();
   }
 
   init();

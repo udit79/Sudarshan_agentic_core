@@ -33,6 +33,31 @@ MongoDB collections/indexes and starts:
 | Node gateway | http://127.0.0.1:8080 | OAuth, cases, quotas, browser API |
 | Static frontend | http://127.0.0.1:3000 | Login and output UI |
 
+`startup.ps1` launches these services as detached processes. Closing the
+PowerShell window does not stop them. Stop only the services bound to the
+default Sudarshan ports with:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\stop-servers.ps1
+```
+
+For custom ports, pass them explicitly:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\stop-servers.ps1 -Ports 3001,8001,8081
+```
+
+Verify the ports are clear before restarting:
+
+```powershell
+Get-NetTCPConnection -State Listen |
+  Where-Object { $_.LocalPort -in 3000,8000,8080 }
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
+```
+
+The stop script only targets processes currently listening on the ports you
+provide. It does not terminate unrelated processes on other ports.
+
 Useful switches:
 
 @@@powershell
@@ -73,7 +98,7 @@ python -m http.server 3000 --directory frontend
 | OpenAI media | OPENAI_API_KEY, OPENAI_IMAGE_MODEL, OPENAI_TTS_MODEL, OPENAI_TTS_VOICE | image, speech, video assets |
 | Python API | SUDARSHAN_API_HOST, SUDARSHAN_API_PORT, SUDARSHAN_CORS_ORIGINS | orchestrator service |
 | State and audit | LANGGRAPH_CHECKPOINT_DB_PATH, CREWAI_FLOW_DB_PATH, SUDARSHAN_AUDIT_DB_PATH | local durable state |
-| Gateway | MONGODB_URI, MONGODB_DB_NAME, PYTHON_API_BASE_URL | browser-facing backend |
+| Gateway | MONGODB_URI, MONGODB_DB_NAME, PYTHON_API_BASE_URL, PYTHON_API_TIMEOUT_MS, PYTHON_INGEST_TIMEOUT_MS | browser-facing backend and bounded Python calls |
 | Google OAuth | GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALLBACK_URL | sign-in |
 | Browser security | JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, COOKIE_SECURE, CORS_ORIGINS | sessions and origin policy |
 | Optional worker | MONEYPRINTERTURBO_BASE_URL and related variables | legacy asynchronous video mode |
@@ -103,8 +128,8 @@ memory behavior, and application-boundary details.
 
 ### Node gateway
 
-The browser-facing gateway exposes Google authentication, cases,
-transformations, task polling, task resume/cancel, and SSE proxying below the
+The browser-facing gateway exposes Google authentication, cases, authenticated
+source upload, transformations, task polling, task resume/cancel, and SSE proxying below the
 /api/v1 prefix. See gateway-integration.md for the complete route tables,
 cookie rules, MongoDB requirements, idempotency behavior, and errors.
 
@@ -116,7 +141,8 @@ Run this only after configuring the external services intentionally:
 2. GET /readyz and /api/v1/health on the gateway.
 3. Complete Google OAuth through /api/v1/auth/google.
 4. Create a case through POST /api/v1/cases.
-5. Upload a source through POST /ingest or the gateway upload route.
+5. Upload a source through POST /api/v1/ingest from the browser (or POST /ingest
+   directly to FastAPI in a trusted development client).
 6. Create a transformation with an Idempotency-Key.
 7. Poll the task or subscribe to its SSE events.
 8. Resume only when the state is waiting_for_input or waiting_for_approval.

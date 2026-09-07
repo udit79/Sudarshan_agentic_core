@@ -57,11 +57,13 @@ class InfographicFlow(TextTransformationFlow):
                 output.syntax,
                 artifact_name=f"{output.infographic_id}-{self.state.run_id}",
             )
-            return output.model_copy(update={
+            rendered = output.model_copy(update={
                 "render_status": "rendered",
                 "artifact_path": artifact_path,
                 "render_error": None,
             })
+            self.state.artifact = {"path": artifact_path, "artifact_type": "svg"}
+            return rendered
         except Exception as exc:
             return output.model_copy(update={
                 "render_status": "syntax_only",

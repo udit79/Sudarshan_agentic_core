@@ -68,6 +68,51 @@ export async function getPythonHealth() {
   return request("/health", { timeoutMs: Math.min(config.pythonApiTimeoutMs, 5000) });
 }
 
+export async function configureRuntime({ userId, openaiApiKey }) {
+  return request("/config/session", {
+    method: "POST",
+    body: JSON.stringify({ openai_api_key: openaiApiKey }),
+    headers: { "X-Operator-Id": userId },
+  });
+}
+
+export async function ingestSource({ request: incomingRequest, userId, caseId, taskId, classificationLevel }) {
+  const controller = new AbortController();
+  // OCR and memory persistence can take longer than ordinary JSON requests.
+  const timer = setTimeout(() => controller.abort(), config.pythonIngestTimeoutMs);
+  try {
+    const headers = {
+      "X-Operator-Id": userId,
+      "X-Case-Id": caseId,
+      "X-Classification-Level": classificationLevel || "RESTRICTED",
+      "Content-Type": incomingRequest.headers["content-type"] || "multipart/form-data",
+    };
+    if (incomingRequest.headers["content-length"]) {
+      headers["Content-Length"] = incomingRequest.headers["content-length"];
+    }
+    if (taskId) headers["X-Task-Id"] = taskId;
+
+    const response = await fetch(`${config.pythonApiBaseUrl}/ingest`, {
+      method: "POST",
+      headers,
+      body: incomingRequest,
+      duplex: "half",
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { error: "Python API returned invalid JSON" }; }
+    if (!response.ok) {
+      const error = new Error(body.detail || body.error || `Python API returned ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return body;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function streamRunEvents(runId, res) {
   const upstream = await fetch(`${config.pythonApiBaseUrl}/runs/${encodeURIComponent(runId)}/events`, {
     headers: { "X-Operator-Id": "gateway" },

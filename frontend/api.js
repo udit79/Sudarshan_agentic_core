@@ -107,6 +107,26 @@
     return payload;
   }
 
+  async function multipartRequest(path, formData, headers = {}, canRefresh = true) {
+    const requestHeaders = new Headers(headers);
+    requestHeaders.set("Accept", "application/json");
+    const response = await fetch(apiUrl(path), {
+      method: "POST",
+      credentials: "include",
+      headers: requestHeaders,
+      body: formData,
+    });
+    if (response.status === 401 && canRefresh && activeMode === "gateway") {
+      try {
+        await refresh();
+        return multipartRequest(path, formData, headers, false);
+      } catch { /* surface the original authentication error below */ }
+    }
+    const payload = await parseBody(response);
+    if (!response.ok) throw await readError(response, payload);
+    return payload;
+  }
+
   function googleLogin() {
     global.location.assign(apiUrl("/api/v1/auth/google"));
   }
@@ -151,6 +171,22 @@
     get apiOrigin() { return activeOrigin; },
     get activeMode() { return activeMode; },
     apiUrl,
+    artifactUrl: (taskId, artifactKey) => activeMode === "fastapi"
+      ? `http://localhost:8000/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(artifactKey)}`
+      : apiUrl(`/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactKey)}`),
+    configureSession: (openaiApiKey) => {
+      if (activeMode === "fastapi") {
+        return request("/config/session", {
+          method: "POST",
+          headers: { "X-Operator-Id": "operator-local" },
+          body: { openai_api_key: openaiApiKey },
+        });
+      }
+      return request("/api/v1/config/session", {
+        method: "POST",
+        body: { openai_api_key: openaiApiKey },
+      });
+    },
     checkHealth,
     request,
     refresh,
@@ -160,7 +196,7 @@
     idempotencyKey,
     getCurrentUser: () => {
       if (activeMode === "fastapi") {
-        return Promise.resolve({ user: { id: "operator-local", email: "aarav.sharma@sudarshan.ai", name: "Aarav Sharma" } });
+        return Promise.resolve({ user: { id: "operator-local", email: "", name: "Sudarshan Operator" } });
       }
       return request("/api/v1/auth/me");
     },
@@ -179,6 +215,37 @@
     createCase: (body) => {
       if (activeMode === "fastapi") return Promise.resolve(body);
       return request("/api/v1/cases", { method: "POST", body });
+    },
+    ensureCase: async (caseId, name = "Untitled case") => {
+      if (activeMode === "fastapi") return { case_id: caseId, name };
+      const existing = await request("/api/v1/cases");
+      const found = (existing?.cases || []).find((item) => (item.case_id || item.caseId) === caseId);
+      if (found) return found;
+      try {
+        return await request("/api/v1/cases", { method: "POST", body: { case_id: caseId, name } });
+      } catch (error) {
+        if (error.status === 409) return { case_id: caseId, name };
+        throw error;
+      }
+    },
+    ingestFile: (file, { caseId, taskId, classificationLevel = "RESTRICTED" } = {}) => {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      form.append("case_id", caseId || "");
+      form.append("task_id", taskId || `ingest-${Date.now()}`);
+      form.append("classification_level", classificationLevel);
+      if (activeMode === "fastapi") {
+        return multipartRequest("/ingest", form, {
+          "X-Operator-Id": "operator-local",
+          "X-Case-Id": caseId || "",
+          "X-Classification-Level": classificationLevel,
+        });
+      }
+      return multipartRequest("/api/v1/ingest", form, {
+        "X-Case-Id": caseId || "",
+        "X-Classification-Level": classificationLevel,
+        "X-Task-Id": taskId || "",
+      });
     },
     createTransform: (body, key = generateIdempotencyKey()) => {
       if (activeMode === "fastapi") {
@@ -227,6 +294,8 @@
             run_id: res.run_id || targetId,
             status: res.status,
             stage: res.stage || null,
+            progress: Number(res.progress ?? 0),
+            message: res.message || "",
             output_types: res.pipelines || (res.pipeline ? [res.pipeline] : []),
             result: res.responses || (res.response ? { [res.response.pipeline || "output"]: res.response } : null),
             error: res.error || null,
@@ -235,8 +304,19 @@
       }
       return request(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
     },
+    listTasks: () => {
+      if (activeMode === "fastapi") return Promise.resolve({ tasks: [] });
+      return request("/api/v1/tasks");
+    },
     cancelTask: (taskId) => {
-      if (activeMode === "fastapi") return Promise.resolve({ status: "cancelled" });
+      if (activeMode === "fastapi") {
+        const runId = taskToRunMap.get(taskId) || taskId;
+        return request(`/runs/${encodeURIComponent(runId)}/cancel`, {
+          method: "POST",
+          headers: { "X-Operator-Id": "operator-local" },
+          body: { task_id: taskId },
+        });
+      }
       return request(`/api/v1/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" });
     },
     getUsage: () => {

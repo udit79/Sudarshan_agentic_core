@@ -177,11 +177,42 @@ export async function ingestSource(
 }
 ```
 
+The reference frontend uses the authenticated Node gateway route
+`POST /api/v1/ingest`; the gateway verifies case ownership and streams the
+multipart request to the Python `/ingest` boundary. This keeps Cognee and
+provider credentials out of the browser. The UI accepts text, PDF, image,
+PowerPoint OOXML, and common video extensions supported by
+`ingestion_pipelines.extract` and shows the selected files before submission.
+
 The backend streams the upload to a bounded temporary file, extracts the real
 source, synchronously persists the resulting `KnowledgeUnit` through scoped
 memory, writes the audit event, and removes the temporary file. Display the
 receipt and refresh the case memory/run view; do not display raw extracted
 content from this response because it is intentionally not returned.
+
+## Artifact delivery
+
+Generated files are never exposed through a raw filesystem path. After task
+ownership is verified, the gateway serves the artifact associated with the
+task through:
+
+```text
+GET /api/v1/tasks/{task_id}/artifacts/{pipeline}
+```
+
+The reference frontend uses this route for video playback, SVG/image preview,
+and opening/downloading PPTX or Markdown artifacts. The route only resolves
+files below the repository `artifacts/` directory and rejects paths that are
+not part of the task result.
+
+## Missing provider configuration
+
+The health response includes non-secret configuration flags. When
+`OPENAI_API_KEY` is absent, the development frontend shows a session setup
+dialog. The entered key is sent over the authenticated gateway to the running
+Python process, is kept in process memory only, and is not stored in browser
+storage or `.env`. Production deployments disable this endpoint; configure
+provider secrets through the deployment secret manager instead.
 
 ## Starting a run
 
@@ -299,6 +330,12 @@ export async function cancelRun(apiOrigin: string, runId: string, taskId: string
   return response.json();
 }
 ```
+
+The dashboard's **Stop** action uses this cooperative cancellation endpoint.
+It stops the run at the next orchestration boundary; it is not a provider-level
+pause and cannot resume work that has already been cancelled. Resumable user
+actions remain separate: use `/resume` only for runs reported as
+`waiting_for_input` or `waiting_for_approval`.
 
 In production, the gateway must apply the same authenticated operator/case
 identity to resume and cancel requests. The current development middleware

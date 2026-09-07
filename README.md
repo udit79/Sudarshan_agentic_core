@@ -25,6 +25,15 @@ After setup, `startup.ps1` starts the Python orchestrator/pipelines API, the
 Node gateway, and the static frontend. Use `-NoStart` when only dependency and
 schema initialization is needed. `setup.ps1` remains a compatibility alias.
 
+Because the services run detached, stop them before restarting with:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\stop-servers.ps1
+```
+
+See [docs/operations.md](docs/operations.md) for custom-port and verification
+commands.
+
 ## Native Media Pipelines
 
 The in-repo presentation pipeline generates native PPTX files. The ingestion process now includes a native **PPT Master** implementation that extracts structural markdown and slide transitions natively. No external service is required.

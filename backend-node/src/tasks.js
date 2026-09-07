@@ -17,6 +17,7 @@ export function safeTask(task) {
     task_id: task.taskId,
     run_id: task.runId || null,
     case_id: task.caseId,
+    prompt: task.inputPreview,
     output_types: task.outputTypes,
     status: task.status,
     result: task.result,
@@ -29,6 +30,13 @@ export function safeTask(task) {
     created_at: task.createdAt,
     updated_at: task.updatedAt,
   };
+}
+
+export async function listTasksForUser(userId, limit = 30) {
+  return Task.find({ userId })
+    .sort({ updatedAt: -1 })
+    .limit(limit)
+    .lean();
 }
 
 function resultFromStatus(status) {
