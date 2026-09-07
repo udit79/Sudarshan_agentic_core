@@ -59,14 +59,21 @@ already executing may finish before the worker observes the cancellation.
 
 ## Video package contract
 
-The video pipeline accepts an optional provider-neutral
-`metadata.video_package` object. It can contain the complete transcript,
-validated script, ordered storyboard scenes, visual terms, subtitle/audio
-references, and provider options. `pipelines/video/contracts.py` compiles
-that package into MoneyPrinterTurbo fields without exposing provider-specific
-details to the frontend. Audio and material references must be uploaded into
-the provider's own task boundary before they are passed as references; arbitrary
-host paths are not accepted.
+The video pipeline accepts an optional `metadata.video_package` object. It can
+contain the complete transcript, validated script, ordered storyboard scenes,
+visual terms, and provider options. If no package is supplied, the OpenAI
+planner creates the story and storyboard from the bounded memory context.
+
+The default native path uses OpenAI for script planning, scene images, and TTS;
+local FFmpeg writes a durable package under `artifacts/videos/<run_id>/`:
+`script.txt`, `storyboard.json`, `images/scene_*.png`, `audio/scene_*.mp3`,
+`segments/scene_*.mp4`, `final.mp4`, `manifest.json`, and the final MP4. The DeepSeek Harness
+only calls the application boundary and never calls OpenAI, Cognee, or the
+native renderer directly.
+
+`MONEYPRINTERTURBO_BASE_URL` is an explicit compatibility mode for deployments
+that still operate the upstream asynchronous worker contract. It is not used
+when blank, and it is not required for the native OpenAI/local path.
 
 Example metadata payload:
 

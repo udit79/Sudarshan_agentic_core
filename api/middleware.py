@@ -9,7 +9,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from pipelines.common.audit_logger import get_audit_logger
-from pipelines.common.ntro_policy import validate_classification
+from pipelines.common.ntro_policy import require_classification
 
 
 class NTROSecurityMiddleware(BaseHTTPMiddleware):
@@ -29,9 +29,16 @@ class NTROSecurityMiddleware(BaseHTTPMiddleware):
         response: Response = await call_next(request)
 
         # Enforce classification response header
-        classification = validate_classification(
-            request.headers.get("x-classification-level", "RESTRICTED")
-        )
+        try:
+            classification = require_classification(
+                request.headers.get("x-classification-level", "RESTRICTED")
+            )
+        except ValueError as exc:
+            return Response(
+                content=json.dumps({"error": str(exc)}),
+                status_code=422,
+                media_type="application/json",
+            )
         response.headers["X-Classification-Level"] = classification
         
         # Security headers

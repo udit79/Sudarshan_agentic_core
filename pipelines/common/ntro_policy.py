@@ -30,18 +30,28 @@ CLASSIFICATION_LEVELS: tuple[str, ...] = (
 DEFAULT_CLASSIFICATION = "RESTRICTED"
 
 
-def validate_classification(level: str) -> str:
+def validate_classification(level: str, *, strict: bool = False) -> str:
     """Normalise and validate a classification level string.
 
-    Returns the canonical uppercase form.  Invalid values are replaced by
-    ``RESTRICTED`` so a misconfigured request does not receive a lower
-    classification than intended.
+    Returns the canonical uppercase form. Invalid values fall back to
+    ``RESTRICTED`` for legacy internal metadata paths. Public request
+    boundaries must use ``strict=True`` so misclassified requests are rejected.
     """
 
     normalised = level.strip().upper()
     if normalised in CLASSIFICATION_LEVELS:
         return normalised
+    if strict:
+        raise ValueError(
+            f"classification_level must be one of: {', '.join(CLASSIFICATION_LEVELS)}"
+        )
     return DEFAULT_CLASSIFICATION
+
+
+def require_classification(level: str) -> str:
+    """Validate a caller-supplied classification without silent downgrading."""
+
+    return validate_classification(level, strict=True)
 
 
 # ---------------------------------------------------------------------------

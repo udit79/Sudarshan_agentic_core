@@ -281,19 +281,42 @@ flowchart LR
 
 ### Video pipeline
 
-The video pipeline defaults to a **native** architecture running fully in-process. It uses `imageio-ffmpeg` for video concatenation and optional OpenAI TTS for narration. When `MONEYPRINTERTURBO_BASE_URL` is configured, the same adapter can use the upstream asynchronous worker contract and preserve provider-pending state.
+The video pipeline defaults to a native architecture running fully in-process.
+OpenAI is the only supported model/media provider: the planner produces the
+story and storyboard, OpenAI Images produces one PNG per scene, and OpenAI TTS
+produces one MP3 per narrated scene. Local `imageio-ffmpeg` creates one MP4
+segment per scene, concatenates the final MP4, and writes the complete package
+to `artifacts/videos/<run_id>/`.
 
-The video agent drafts a scene-by-scene script based on memory context, and the `NativeVideoGenerator` natively compiles the asset, writing the result locally into the `artifacts/videos/` directory.
+The durable package contains `script.txt`, `storyboard.json`, `images/`,
+`audio/`, `segments/`, `final.mp4`, and `manifest.json`. A local title
+card is used only when an image cannot be produced, and the manifest preserves
+the asset paths and rendered-scene count. This keeps the result inspectable and
+allows the frontend to deliver the whole package rather than only a final MP4.
+
+When `MONEYPRINTERTURBO_BASE_URL` is explicitly configured, the adapter uses
+the legacy asynchronous worker contract and preserves provider-pending state.
+The default path does not call that worker or any stock-media service.
 
 ```mermaid
 flowchart LR
-    M[Bounded memory context] --> S[VideoPipeline]
-    S --> NATIVE["NativeVideoGenerator (FFmpeg + TTS)"]
-    NATIVE -->|succeeded| V[Native Video Artifact]
-    V --> C[Case memory + frontend delivery]
+    M[Bounded User Case Task memory] --> P[OpenAI video planner]
+    P --> SB[Story and storyboard]
+    SB --> IMG[OpenAI Images per scene]
+    SB --> TTS[OpenAI TTS per scene]
+    IMG --> FF[Local FFmpeg composer]
+    TTS --> FF
+    FF --> PKG[Durable package: PNG MP3 MP4 manifest]
+    PKG --> V[Final MP4 and package artifact]
+    V --> C[Case memory and frontend delivery]
+    LEG[Explicit legacy worker config] -.-> LEGACY[MoneyPrinterTurbo pending mode]
+    LEGACY --> V
 ```
 
-The DeepSeek Harness calls the application boundary only. It does not call the native video generation layer or Cognee directly.
+The DeepSeek Harness calls the application boundary only. It does not call the
+OpenAI adapters, native video generation layer, or Cognee directly. Classification
+metadata is validated at the request boundary and does not select a pipeline;
+explicitly requested pipelines still fan out in parallel.
 
 ## Python entry point
 

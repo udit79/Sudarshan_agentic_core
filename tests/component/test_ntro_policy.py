@@ -1,6 +1,7 @@
 import pytest
 from pipelines.common.ntro_policy import (
     validate_classification,
+    require_classification,
     validate_distribution,
     sanitize_text,
     sanitize_output,
@@ -17,6 +18,12 @@ def test_validate_classification():
     # Invalid values fallback to RESTRICTED
     assert validate_classification("public") == "RESTRICTED"
     assert validate_classification("") == "RESTRICTED"
+
+
+def test_require_classification_rejects_misclassified_requests():
+    assert require_classification("secret") == "SECRET"
+    with pytest.raises(ValueError, match="classification_level"):
+        require_classification("public")
 
 
 def test_validate_distribution():

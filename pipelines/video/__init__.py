@@ -1,7 +1,8 @@
-"""MoneyPrinterTurbo-backed video generation boundary."""
+"""OpenAI-native video generation boundary with optional legacy compatibility."""
 
 from pipelines.video.pipeline import VideoPipeline
 from pipelines.video.contracts import VideoPackage, VideoScene
+from pipelines.video.planner import OpenAIVideoPlanner, VideoPlanningError
 from integrations.providers.moneyprinterturbo.client import (
     MoneyPrinterTurboClient,
     MoneyPrinterTurboError,
@@ -15,4 +16,6 @@ __all__ = [
     "VideoPipeline",
     "VideoPackage",
     "VideoScene",
+    "OpenAIVideoPlanner",
+    "VideoPlanningError",
 ]

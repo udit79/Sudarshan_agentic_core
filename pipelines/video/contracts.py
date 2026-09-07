@@ -1,8 +1,8 @@
-"""Provider-neutral video package contracts.
+"""Video package contracts shared by the planner, renderer, and frontend.
 
-The frontend/backend may send a complete transcript and storyboard without
-leaking MoneyPrinterTurbo-specific fields into the public request contract.
-The adapter compiles this package into the provider's supported options.
+The frontend/backend may send a complete transcript and storyboard. The native
+path persists these fields alongside generated media; the legacy compatibility
+adapter can compile them into its provider options when explicitly enabled.
 """
 
 from __future__ import annotations
@@ -19,12 +19,16 @@ class VideoScene(BaseModel):
     duration_seconds: int = Field(default=5, ge=1, le=600)
     on_screen_text: str = Field(default="", max_length=1000)
     material_references: list[str] = Field(default_factory=list, max_length=20)
+    image_path: str | None = Field(default=None, max_length=2000)
+    audio_path: str | None = Field(default=None, max_length=2000)
+    video_path: str | None = Field(default=None, max_length=2000)
 
 
 class VideoPackage(BaseModel):
     """A complete, provider-neutral video preparation package."""
 
     subject: str = Field(min_length=1, max_length=500)
+    title: str = Field(default="", max_length=500)
     transcript: str = Field(default="", max_length=100_000)
     script: str = Field(default="", max_length=20_000)
     storyboard: list[VideoScene] = Field(default_factory=list, max_length=100)
@@ -34,7 +38,7 @@ class VideoPackage(BaseModel):
     provider_options: dict[str, Any] = Field(default_factory=dict)
 
     def provider_payload(self) -> dict[str, Any]:
-        """Compile supported package fields into MoneyPrinterTurbo options."""
+        """Compile supported package fields into legacy worker options."""
 
         script = self.script.strip() or "\n\n".join(
             scene.narration.strip()

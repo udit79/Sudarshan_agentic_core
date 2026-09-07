@@ -324,9 +324,11 @@ topology.
   uploaded PPTX source content without executing arbitrary slide code.
 - Infographic output is validated AntV syntax and optionally rendered to SVG
   through the checked-in Node SSR bridge.
-- Video defaults to the in-process native generator. If
-  `MONEYPRINTERTURBO_BASE_URL` is set, the adapter uses the upstream
-  MoneyPrinterTurbo task API and returns `pending` while the provider job is
+- Video defaults to the in-process OpenAI/native generator and returns a full
+  package of script, storyboard, per-scene PNG/MP3/MP4 assets, manifest, and
+  final MP4 under `artifacts/videos/<run_id>/`. If
+  `MONEYPRINTERTURBO_BASE_URL` is explicitly set, the adapter uses the legacy
+  asynchronous task API and returns `pending` while that provider job is
   running. Provider-pending is not treated as human approval.
 - Human approval is entered only when an adapter returns `pending` with an
   approval resume seam or explicitly sets `human_approval_required=true`.

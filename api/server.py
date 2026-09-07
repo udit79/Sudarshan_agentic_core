@@ -16,7 +16,7 @@ from api.middleware import NTROSecurityMiddleware, AuditMiddleware
 from integrations.deepseek_harness.application import get_application
 from api.sse import event_generator
 from ingestion_pipelines.extract import SUPPORTED_EXTENSIONS
-from pipelines.common.ntro_policy import validate_classification
+from pipelines.common.ntro_policy import require_classification
 from pipelines.common.contracts import AdvisoryRequest
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -114,7 +114,7 @@ async def ingest_source(
         raise HTTPException(status_code=422, detail="case_id is required for NTRO ingestion")
 
     resolved_task_id = (task_id or f"ingest-{uuid4()}").strip()
-    classification = validate_classification(
+    classification = require_classification(
         classification_level or request.headers.get("x-classification-level", "RESTRICTED")
     )
     max_bytes = int(os.getenv("SUDARSHAN_MAX_INGEST_BYTES", str(50 * 1024 * 1024)))

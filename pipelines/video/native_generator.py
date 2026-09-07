@@ -1,16 +1,16 @@
 """Native video generation — reverse-engineered from MoneyPrinterTurbo.
 
 This module runs entirely in-process.  It does NOT call an external FastAPI
-worker.  Video assembly uses ``imageio-ffmpeg`` (already in project
-dependencies) and OpenCV for frame composition.  TTS is delegated to the
-OpenAI TTS endpoint using the same ``OPENAI_API_KEY`` that powers CrewAI.
+worker. Video assembly uses ``imageio-ffmpeg`` (already in project
+dependencies). Scene images and narration are generated through OpenAI, then
+FFmpeg writes a durable media package and final MP4 locally.
 
 The pipeline follows the MoneyPrinterTurbo architecture:
     1. Script analysis → scene segmentation
-    2. Per-scene material selection (stock footage from Pexels when configured)
+    2. Per-scene image generation via OpenAI Images
     3. TTS narration per scene via OpenAI
-    4. Frame-by-frame composition with on-screen text overlays
-    5. FFmpeg concatenation → final MP4 artifact
+    4. Per-scene MP4 composition with optional on-screen text overlays
+    5. FFmpeg concatenation → final MP4 artifact plus manifest
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ import os
 import shutil
 import subprocess
 import tempfile
+import base64
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote_plus
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -45,6 +45,7 @@ class VideoScene:
     visual_description: str = ""
     duration_seconds: int = 5
     on_screen_text: str = ""
+    image_path: str | None = None
     audio_path: str | None = None
     video_path: str | None = None
 
@@ -91,12 +92,12 @@ class OpenAITTSAdapter:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "tts-1",
-        voice: str = "alloy",
+        model: str | None = None,
+        voice: str | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
-        self.model = model
-        self.voice = voice
+        self.model = model or os.getenv("OPENAI_TTS_MODEL", "tts-1")
+        self.voice = voice or os.getenv("OPENAI_TTS_VOICE", "alloy")
 
     @property
     def configured(self) -> bool:
@@ -134,76 +135,75 @@ class OpenAITTSAdapter:
         return output_path
 
 
-class PexelsStockProvider:
-    """Download royalty-free stock footage from Pexels."""
+class OpenAIImageAdapter:
+    """Generate durable scene images through OpenAI's Images API."""
 
-    def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or os.getenv("PEXELS_API_KEY", "")
-        self.base_url = "https://api.pexels.com/videos"
+    def __init__(self, *, api_key: str | None = None, model: str | None = None, client: Any = None) -> None:
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+        self.model = model or os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
+        self._client = client
 
     @property
     def configured(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key) or self._client is not None
 
-    def search(self, query: str, *, per_page: int = 3) -> list[dict[str, Any]]:
-        """Search for stock videos.  Returns video metadata list."""
+    @property
+    def client(self) -> Any:
+        if self._client is None:
+            from openai import OpenAI
 
+            self._client = OpenAI(api_key=self.api_key)
+        return self._client
+
+    def generate(self, prompt: str, output_path: str) -> str:
         if not self.configured:
-            return []
-
-        url = f"{self.base_url}/search?query={quote_plus(query)}&per_page={per_page}&orientation=landscape"
-        request = Request(url, method="GET")
-        request.add_header("Authorization", self.api_key)
-
-        try:
-            with urlopen(request, timeout=15) as response:
-                data = json.loads(response.read().decode("utf-8"))
-            return data.get("videos", [])
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
-            return []
-
-    def download(self, video_meta: dict[str, Any], output_path: str) -> str | None:
-        """Download the best-quality video file.  Returns the path or None."""
-
-        files = video_meta.get("video_files", [])
-        if not files:
-            return None
-
-        # Prefer HD quality.
-        best = max(files, key=lambda f: f.get("height", 0))
-        url = best.get("link")
-        if not url:
-            return None
-
-        try:
-            with urlopen(url, timeout=60) as response:
-                data = response.read()
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, "wb") as f:
-                f.write(data)
-            return output_path
-        except (HTTPError, URLError, TimeoutError):
-            return None
+            raise NativeVideoError("OPENAI_API_KEY is required for scene image generation")
+        response = self.client.images.generate(
+            model=self.model,
+            prompt=(
+                "Create a restrained, factual, government-quality visual for a case briefing. "
+                "Do not add logos, seals, invented people, statistics, labels, or readable text. "
+                f"Visual brief: {prompt[:2000]}"
+            ),
+            size="1536x1024",
+            quality="high",
+            output_format="png",
+        )
+        image = response.data[0]
+        encoded = getattr(image, "b64_json", None)
+        if encoded:
+            data = base64.b64decode(encoded)
+        else:
+            url = getattr(image, "url", None)
+            if not url:
+                raise NativeVideoError("OpenAI Images returned neither image data nor a URL")
+            with urlopen(url, timeout=90) as response_stream:
+                data = response_stream.read()
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(data)
+        return output_path
 
 
 class NativeVideoGenerator:
-    """Assemble a video from scenes using FFmpeg, TTS, and optional stock footage.
+    """Assemble a video from scenes using OpenAI media and local FFmpeg.
 
-    This is the in-process equivalent of MoneyPrinterTurbo's task pipeline.
+    This is the in-process video implementation. The ``stock`` argument is
+    intentionally absent: the supported media provider is OpenAI, while all
+    composition and package persistence remain local.
     """
 
     def __init__(
         self,
         *,
         tts: OpenAITTSAdapter | None = None,
-        stock: PexelsStockProvider | None = None,
+        image_generator: OpenAIImageAdapter | None = None,
         output_dir: str | Path = _ARTIFACT_DIR,
         width: int = 1920,
         height: int = 1080,
         fps: int = 24,
     ) -> None:
         self.tts = tts or OpenAITTSAdapter()
-        self.stock = stock or PexelsStockProvider()
+        self.image_generator = image_generator or OpenAIImageAdapter()
         self.output_dir = Path(output_dir)
         self.width = width
         self.height = height
@@ -215,12 +215,13 @@ class NativeVideoGenerator:
         subject: str,
         scenes: Sequence[VideoScene],
         artifact_name: str | None = None,
+        package_dir: str | Path | None = None,
     ) -> NativeVideoResult:
         """Generate a complete video from scenes.
 
-        If TTS is configured, narration audio is generated per scene.
-        If Pexels is configured, stock footage is downloaded per scene.
-        Otherwise, simple title-card frames are generated for each scene.
+        If OpenAI media is configured, narration audio and scene images are
+        generated per scene. Without an image response, a local title card is
+        used so the package remains renderable and inspectable.
         """
 
         if not scenes:
@@ -231,6 +232,11 @@ class NativeVideoGenerator:
 
         artifact_name = artifact_name or f"video-{uuid4().hex[:12]}"
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        package_root = Path(package_dir) if package_dir else self.output_dir / artifact_name
+        package_root.mkdir(parents=True, exist_ok=True)
+        (package_root / "images").mkdir(exist_ok=True)
+        (package_root / "audio").mkdir(exist_ok=True)
+        (package_root / "segments").mkdir(exist_ok=True)
 
         try:
             ffmpeg = _ffmpeg_binary()
@@ -244,7 +250,7 @@ class NativeVideoGenerator:
             for i, scene in enumerate(scenes):
                 try:
                     segment = self._generate_scene(
-                        scene, work, i, ffmpeg, subject,
+                        scene, work, i, ffmpeg, subject, package_root,
                     )
                     if segment:
                         segment_paths.append(segment)
@@ -260,7 +266,9 @@ class NativeVideoGenerator:
                 )
 
             # Concatenate all segments.
-            output_path = str(self.output_dir / f"{artifact_name}.mp4")
+            # Keep the final render inside the same durable package as its
+            # source script, storyboard, scene media, and manifest.
+            output_path = str(package_root / "final.mp4")
             try:
                 self._concatenate(segment_paths, output_path, work, ffmpeg)
             except Exception as exc:
@@ -282,6 +290,20 @@ class NativeVideoGenerator:
                     "total_scenes": len(scenes),
                     "rendered_scenes": len(segment_paths),
                     "resolution": f"{self.width}x{self.height}",
+                    "package_dir": str(package_root),
+                    "scenes": [
+                        {
+                            "scene_id": scene.scene_id,
+                            "narration": scene.narration,
+                            "visual_description": scene.visual_description,
+                            "duration_seconds": scene.duration_seconds,
+                            "on_screen_text": scene.on_screen_text,
+                            "image_path": scene.image_path,
+                            "audio_path": scene.audio_path,
+                            "video_path": scene.video_path,
+                        }
+                        for scene in scenes
+                    ],
                 },
             )
 
@@ -292,6 +314,7 @@ class NativeVideoGenerator:
         index: int,
         ffmpeg: str,
         subject: str,
+        package_root: Path,
     ) -> str | None:
         """Generate one video segment for a scene."""
 
@@ -299,22 +322,27 @@ class NativeVideoGenerator:
         audio_path: str | None = None
         video_source: str | None = None
 
-        # 1. Generate TTS audio if narration exists.
+        # 1. Generate durable TTS audio if narration exists.
         if scene.narration.strip() and self.tts.configured:
-            audio_path = str(work_dir / f"{prefix}_audio.mp3")
+            audio_path = str(package_root / "audio" / f"{prefix}.mp3")
             try:
                 self.tts.generate(scene.narration, audio_path)
             except NativeVideoError:
                 audio_path = None
+        scene.audio_path = audio_path
 
-        # 2. Search for stock footage if visual description exists.
-        if scene.visual_description.strip() and self.stock.configured:
-            results = self.stock.search(scene.visual_description)
-            if results:
-                dl_path = str(work_dir / f"{prefix}_stock.mp4")
-                video_source = self.stock.download(results[0], dl_path)
+        # 2. Generate a durable OpenAI image for this scene.
+        if scene.visual_description.strip() and self.image_generator.configured:
+            image_path = str(package_root / "images" / f"{prefix}.png")
+            try:
+                scene.image_path = self.image_generator.generate(scene.visual_description, image_path)
+                video_source = str(work_dir / f"{prefix}_image.mp4")
+                self._generate_image_video(scene.image_path, video_source, scene, ffmpeg)
+            except Exception:
+                scene.image_path = None
+                video_source = None
 
-        # 3. Generate a title-card video if no stock footage.
+        # 3. Generate a local title card if image generation is unavailable.
         if not video_source:
             video_source = str(work_dir / f"{prefix}_card.mp4")
             self._generate_title_card(
@@ -322,13 +350,27 @@ class NativeVideoGenerator:
             )
 
         # 4. Add on-screen text overlay if provided.
-        segment_path = str(work_dir / f"{prefix}_segment.mp4")
+        segment_path = str(package_root / "segments" / f"{prefix}.mp4")
         self._compose_segment(
             video_source, audio_path, segment_path,
             scene, ffmpeg,
         )
 
-        return segment_path if Path(segment_path).exists() else None
+        scene.video_path = segment_path if Path(segment_path).exists() else None
+        return scene.video_path
+
+    def _generate_image_video(self, image_path: str, output_path: str, scene: VideoScene, ffmpeg: str) -> None:
+        duration = max(1, scene.duration_seconds)
+        vf = (
+            f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+            f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2"
+        )
+        cmd = [
+            ffmpeg, "-y", "-loop", "1", "-i", image_path, "-t", str(duration),
+            "-vf", vf, "-r", str(self.fps), "-c:v", "libx264", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p", "-an", output_path,
+        ]
+        subprocess.run(cmd, capture_output=True, timeout=120, check=True)
 
     def _generate_title_card(
         self,
@@ -447,6 +489,9 @@ def scenes_from_package(package_data: Mapping[str, Any]) -> list[VideoScene]:
             visual_description=scene_data.get("visual_description", ""),
             duration_seconds=int(scene_data.get("duration_seconds", 5)),
             on_screen_text=scene_data.get("on_screen_text", ""),
+            image_path=scene_data.get("image_path"),
+            audio_path=scene_data.get("audio_path"),
+            video_path=scene_data.get("video_path"),
         ))
     return scenes
 

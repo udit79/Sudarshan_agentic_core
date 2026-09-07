@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
 from memory.scope_policy import AccessContext
-from pipelines.common.ntro_policy import validate_classification, validate_distribution
+from pipelines.common.ntro_policy import require_classification, validate_distribution
 
 
 def _required(value: str, field_name: str) -> str:
@@ -48,7 +48,7 @@ class AdvisoryRequest:
     def __post_init__(self) -> None:
         for name in ("query", "user_id", "case_id", "task_id", "classification_level", "distribution"):
             object.__setattr__(self, name, _required(getattr(self, name), name))
-        object.__setattr__(self, "classification_level", validate_classification(self.classification_level))
+        object.__setattr__(self, "classification_level", require_classification(self.classification_level))
         object.__setattr__(self, "distribution", validate_distribution(self.distribution))
         if self.top_k < 1:
             raise ValueError("top_k must be positive")

@@ -242,7 +242,15 @@ class SudarshanApplication:
             metadata={"origin": "harness"},
             provenance={"user_id": user_id, "case_id": case_id}
         )
-        self.orchestrator.memory_manager.remember(unit, mem_ctx, scope_type=ScopeType.CASE, memory_type=MemoryType.FACT)
+        # Keep the same bounded context available at both permitted session
+        # boundaries. Task-scoped events are written by the pipeline runtime
+        # once a concrete task exists.
+        self.orchestrator.memory_manager.remember(
+            unit, mem_ctx, scope_type=ScopeType.USER, memory_type=MemoryType.FACT
+        )
+        self.orchestrator.memory_manager.remember(
+            unit, mem_ctx, scope_type=ScopeType.CASE, memory_type=MemoryType.FACT
+        )
 
     def recall_session_context(self, user_id: str, case_id: str, query: str) -> str:
         """Load prior User/Case context before routing."""
@@ -273,9 +281,9 @@ class SudarshanApplication:
 
         from ingestion_pipelines import ingest_file
         from pipelines.common.audit_logger import get_audit_logger
-        from pipelines.common.ntro_policy import validate_classification
+        from pipelines.common.ntro_policy import require_classification
 
-        classification = validate_classification(classification_level)
+        classification = require_classification(classification_level)
         audit = get_audit_logger()
         try:
             document = ingest_file(

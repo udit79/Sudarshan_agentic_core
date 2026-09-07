@@ -15,6 +15,7 @@ from pipelines.video.native_generator import (
     scenes_from_package, 
     scenes_from_script
 )
+from pipelines.video.planner import OpenAIVideoPlanner
 from integrations.providers.moneyprinterturbo import MoneyPrinterTurboClient
 
 
@@ -27,10 +28,12 @@ class VideoPipeline:
         *,
         generator: NativeVideoGenerator | None = None,
         client: MoneyPrinterTurboClient | None = None,
+        planner: OpenAIVideoPlanner | None = None,
     ) -> None:
         self.memory_manager = memory_manager
         self.generator = generator or NativeVideoGenerator()
         self.client = client
+        self.planner = planner or OpenAIVideoPlanner()
 
     def _runtime(self, request: AdvisoryRequest) -> MemoryRuntime:
         return MemoryRuntime(
@@ -59,9 +62,51 @@ class VideoPipeline:
             
             if package is not None:
                 scenes = scenes_from_package(package.model_dump())
+            elif self.client is not None:
+                # Preserve the explicit legacy worker contract without
+                # requiring the OpenAI planner for provider-owned jobs.
+                supplied_script = str(
+                    request.metadata.get("video_script") or memory_context or request.query
+                ).strip()[:20000]
+                scenes = scenes_from_script(supplied_script, subject)
+                package = VideoPackage(
+                    subject=subject,
+                    title=subject,
+                    script=supplied_script,
+                    storyboard=[
+                        {
+                            "scene_id": scene.scene_id,
+                            "narration": scene.narration,
+                            "visual_description": scene.visual_description,
+                            "duration_seconds": scene.duration_seconds,
+                            "on_screen_text": scene.on_screen_text,
+                        }
+                        for scene in scenes
+                    ],
+                )
             else:
-                script = str(request.metadata.get("video_script") or memory_context).strip()[:20000]
-                scenes = scenes_from_script(script, subject)
+                supplied_script = str(request.metadata.get("video_script") or "").strip()[:20000]
+                if supplied_script:
+                    package = VideoPackage(
+                        subject=subject,
+                        title=subject,
+                        script=supplied_script,
+                        storyboard=[scene.model_dump() if hasattr(scene, "model_dump") else {
+                            "scene_id": scene.scene_id,
+                            "narration": scene.narration,
+                            "visual_description": scene.visual_description,
+                            "duration_seconds": scene.duration_seconds,
+                            "on_screen_text": scene.on_screen_text,
+                        } for scene in scenes_from_script(supplied_script, subject)],
+                    )
+                else:
+                    package = self.planner.plan(
+                        subject=subject,
+                        query=request.query,
+                        memory_context=memory_context,
+                        prompt_plan=dict(request.metadata.get("prompt_plan") or {}),
+                    )
+                scenes = scenes_from_package(package.model_dump())
                 
             if self.client is not None:
                 provider_options = package.provider_payload() if package is not None else {}
@@ -91,22 +136,61 @@ class VideoPipeline:
                     )
                 output = {"provider": "moneyprinterturbo", "subject": subject, "status": "succeeded"}
             else:
-                result = self.generator.generate(subject=subject, scenes=scenes, artifact_name=f"video-{run_id}")
+                package_dir = Path("artifacts") / "videos" / str(run_id)
+                result = self.generator.generate(
+                    subject=subject,
+                    scenes=scenes,
+                    artifact_name=f"video-{run_id}",
+                    package_dir=package_dir,
+                )
                 if result.status == "failed":
                     writer.write("video_generation", "failed", result.error or "Native video generation failed")
                     return PipelineResponse(
                         status="failed", pipeline=self.pipeline_name, task_id=request.task_id,
                         run_id=run_id, failure=result.error or "video generation failed",
-                        metadata={"provider": "native"},
+                        metadata={"provider": "openai-native"},
                     )
+                scene_records = list(result.metadata.get("scenes", []))
+                package_payload = package.model_dump() if package is not None else {
+                    "subject": subject,
+                    "title": subject,
+                    "script": "\n\n".join(scene.narration for scene in scenes),
+                    "storyboard": [scene.model_dump() for scene in scenes],
+                }
+                package_payload["storyboard"] = scene_records or package_payload.get("storyboard", [])
+                package_root = Path(result.metadata.get("package_dir", package_dir))
+                package_root.mkdir(parents=True, exist_ok=True)
+                script_path = package_root / "script.txt"
+                storyboard_path = package_root / "storyboard.json"
+                manifest_path = package_root / "manifest.json"
+                script_path.write_text(str(package_payload.get("script", "")), encoding="utf-8")
+                storyboard_path.write_text(json.dumps(package_payload["storyboard"], ensure_ascii=False, indent=2), encoding="utf-8")
+                manifest = {
+                    "provider": "openai-native",
+                    "subject": subject,
+                    "title": package_payload.get("title", subject),
+                    "script_path": str(script_path),
+                    "storyboard_path": str(storyboard_path),
+                    "video_path": result.video_path,
+                    "duration_seconds": result.duration_seconds,
+                    "scene_count": result.scene_count,
+                    "scenes": scene_records,
+                }
+                manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
                 artifact = {
-                    "provider": "native",
+                    "provider": "openai-native",
+                    "package_dir": str(package_root),
+                    "manifest_path": str(manifest_path),
+                    "script_path": str(script_path),
+                    "storyboard_path": str(storyboard_path),
+                    "story": package_payload.get("script", ""),
+                    "storyboard": package_payload["storyboard"],
                     "video_path": result.video_path,
                     "duration_seconds": result.duration_seconds,
                     "scene_count": result.scene_count,
                     "status_url": f"file://{Path(result.video_path).resolve()}" if result.video_path else None,
                 }
-                output = {"provider": "native", "subject": subject, "status": "succeeded"}
+                output = {"provider": "openai-native", "subject": subject, "status": "succeeded"}
             
             writer.write("video_generation", "succeeded", json.dumps(output, ensure_ascii=False))
             unit = KnowledgeUnit(
@@ -123,7 +207,7 @@ class VideoPipeline:
             return PipelineResponse(
                 status="succeeded", pipeline=self.pipeline_name, task_id=request.task_id,
                 run_id=run_id, output=output, artifact=artifact,
-                metadata={"provider": "moneyprinterturbo" if self.client is not None else "native",
+                metadata={"provider": "moneyprinterturbo" if self.client is not None else "openai-native",
                           "human_approval_required": False},
             )
         except Exception as exc:
@@ -133,5 +217,5 @@ class VideoPipeline:
                 pass
             return PipelineResponse(
                 status="failed", pipeline=self.pipeline_name, task_id=request.task_id,
-                run_id=run_id, failure=str(exc), metadata={"provider": "native"},
+                run_id=run_id, failure=str(exc), metadata={"provider": "openai-native"},
             )
