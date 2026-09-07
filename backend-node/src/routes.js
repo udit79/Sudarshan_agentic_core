@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import express from "express";
 import { authMiddleware, currentUser, googleCallback, logout, refreshSession, startGoogle } from "./auth.js";
+import { toCaseDocument } from "./case-payload.js";
 import { Case, Task, User } from "./models.js";
 import { cancelRun, getPythonHealth, resumeRun, streamRunEvents } from "./python-client.js";
 import { createTransformation, getTaskForUser, assertCaseOwnership, safeTask } from "./tasks.js";
@@ -31,7 +32,8 @@ router.post("/cases", async (req, res, next) => {
   try {
     const body = parse(caseSchema, req.body);
     const ownerId = req.auth.sub;
-    const created = await Case.create({ ...body, ownerId });
+    // Translate the public snake_case contract to the Mongoose camelCase model.
+    const created = await Case.create(toCaseDocument(body, ownerId));
     res.status(201).json({
       case_id: created.caseId,
       name: created.name,
