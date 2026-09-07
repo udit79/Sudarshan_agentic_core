@@ -288,7 +288,7 @@ The video agent drafts a scene-by-scene script based on memory context, and the 
 ```mermaid
 flowchart LR
     M[Bounded memory context] --> S[VideoPipeline]
-    S --> NATIVE[NativeVideoGenerator (FFmpeg + TTS)]
+    S --> NATIVE["NativeVideoGenerator (FFmpeg + TTS)"]
     NATIVE -->|succeeded| V[Native Video Artifact]
     V --> C[Case memory + frontend delivery]
 ```

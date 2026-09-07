@@ -101,6 +101,75 @@ function Get-EnvValue([string]$Name) {
     return [Environment]::GetEnvironmentVariable($Name, "Process")
 }
 
+function Resolve-MongoSrvUriForWindows {
+    $uri = Get-EnvValue "MONGODB_URI"
+    if ([string]::IsNullOrWhiteSpace($uri) -or $uri -notmatch '^mongodb\+srv://') {
+        return
+    }
+    if ($uri -notmatch '^mongodb\+srv://(?<authority>[^/]+)(?<path>/[^?]*)?(?:\?(?<query>.*))?$') {
+        throw "MONGODB_URI is not a valid MongoDB SRV connection string."
+    }
+
+    $authority = $Matches.authority
+    $path = $Matches.path
+    if ([string]::IsNullOrWhiteSpace($path)) { $path = "/" }
+    $query = $Matches.query
+    $atIndex = $authority.LastIndexOf("@")
+    $userinfo = ""
+    $mongoHost = $authority
+    if ($atIndex -ge 0) {
+        $userinfo = $authority.Substring(0, $atIndex)
+        $mongoHost = $authority.Substring($atIndex + 1)
+    }
+    if ($mongoHost -match ":\d+$") {
+        throw "MONGODB_URI SRV host must not include a port."
+    }
+
+    try {
+        $srvRecords = @(Resolve-DnsName -Name "_mongodb._tcp.$mongoHost" -Type SRV -ErrorAction Stop | Where-Object Type -eq "SRV")
+    }
+    catch {
+        throw "MongoDB Atlas SRV lookup failed through Windows DNS for $mongoHost. Check the active DNS/VPN connection. $($_.Exception.Message)"
+    }
+    try {
+        $txtRecords = @(Resolve-DnsName -Name $mongoHost -Type TXT -ErrorAction Stop | Where-Object Type -eq "TXT")
+    }
+    catch {
+        $txtRecords = @()
+    }
+    if ($srvRecords.Count -eq 0) {
+        throw "MongoDB Atlas returned no SRV hosts for $mongoHost."
+    }
+
+    $options = [ordered]@{}
+    foreach ($record in $txtRecords) {
+        foreach ($text in @($record.Strings)) {
+            foreach ($pair in ([string]$text -split "&")) {
+                if ($pair -match "^([^=]+)=(.*)$" -and -not $options.Contains($Matches[1])) {
+                    $options[$Matches[1]] = $Matches[2]
+                }
+            }
+        }
+    }
+    foreach ($pair in @([string]$query -split "&")) {
+        if ($pair -match "^([^=]+)=(.*)$") {
+            $options[$Matches[1]] = $Matches[2]
+        }
+    }
+    if (-not $options.Contains("tls") -and -not $options.Contains("ssl")) {
+        $options["tls"] = "true"
+    }
+
+    $seeds = ($srvRecords | Sort-Object Priority, Weight | ForEach-Object {
+        "$($_.NameTarget.TrimEnd('.')):$($_.Port)"
+    }) -join ","
+    $queryText = (($options.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "&")
+    $credentialPrefix = if ([string]::IsNullOrWhiteSpace($userinfo)) { "" } else { "$userinfo@" }
+    $convertedUri = "mongodb://$credentialPrefix$seeds$path`?$queryText"
+    [Environment]::SetEnvironmentVariable("MONGODB_URI", $convertedUri, "Process")
+    Write-Host "Resolved MongoDB Atlas SRV records through Windows DNS for Node.js."
+}
+
 function Assert-LocalConfiguration {
     $critical = @("MONGODB_URI", "JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET")
     $invalid = @($critical | Where-Object {
@@ -289,6 +358,7 @@ try {
     }
 
     if (-not $SkipNodeGateway) {
+        Resolve-MongoSrvUriForWindows
         Write-Host "Building MongoDB Atlas collections and indexes..."
         Invoke-Checked $npmCommand.Source @("run", "db:init", "--silent") $nodeGatewayRoot
     }
