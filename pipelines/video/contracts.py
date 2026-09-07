@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class VideoScene(BaseModel):
@@ -23,6 +23,21 @@ class VideoScene(BaseModel):
     audio_path: str | None = Field(default=None, max_length=2000)
     video_path: str | None = Field(default=None, max_length=2000)
 
+    @field_validator("scene_id", mode="before")
+    @classmethod
+    def coerce_scene_id(cls, v: Any) -> str:
+        return str(v) if v is not None else ""
+
+
+class VideoProviderOptions(BaseModel):
+    video_aspect: str | None = Field(default=None, max_length=32)
+    voice_name: str | None = Field(default=None, max_length=120)
+    voice_rate: float | None = Field(default=None, ge=0.1, le=5.0)
+    bgm_type: str | None = Field(default=None, max_length=120)
+    bgm_volume: float | None = Field(default=None, ge=0.0, le=1.0)
+    video_concat_mode: str | None = Field(default=None, max_length=32)
+    video_transition: str | None = Field(default=None, max_length=32)
+
 
 class VideoPackage(BaseModel):
     """A complete, provider-neutral video preparation package."""
@@ -35,7 +50,7 @@ class VideoPackage(BaseModel):
     video_terms: list[str] = Field(default_factory=list, max_length=100)
     audio_reference: str | None = Field(default=None, max_length=1000)
     video_source: str = Field(default="pexels", max_length=64)
-    provider_options: dict[str, Any] = Field(default_factory=dict)
+    provider_options: VideoProviderOptions = Field(default_factory=VideoProviderOptions)
 
     def provider_payload(self) -> dict[str, Any]:
         """Compile supported package fields into legacy worker options."""
@@ -67,5 +82,8 @@ class VideoPackage(BaseModel):
             # The reference must point to a file already uploaded into the
             # provider task directory; arbitrary host paths are not accepted.
             payload["custom_audio_file"] = self.audio_reference
-        payload.update(self.provider_options)
+        if isinstance(self.provider_options, VideoProviderOptions):
+            payload.update(self.provider_options.model_dump(exclude_none=True))
+        elif isinstance(self.provider_options, dict):
+            payload.update(self.provider_options)
         return payload

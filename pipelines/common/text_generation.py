@@ -94,6 +94,13 @@ class TextTransformationFlow(Flow[TaskState]):
         self.state.revision_scope = list(request.revision_scope)
         self.state.request_understanding = dict(request.metadata.get("request_understanding", {}))
         self.state.prompt_plan = dict(request.metadata.get("prompt_plan", {}))
+        self.state.pipeline_options = {
+            "request_understanding": request.metadata.get("request_understanding", {}),
+            "prompt_plan": request.metadata.get("prompt_plan", {}),
+            "resolved_memory_context": request.metadata.get("resolved_memory_context"),
+            "resolved_memory_records": request.metadata.get("resolved_memory_records", []),
+            **dict(request.metadata.get("pipeline_options", {})),
+        }
         self.state.max_attempts = self.max_attempts
         requested_run_id = request.metadata.get("run_id")
         if isinstance(requested_run_id, str) and requested_run_id.strip():
