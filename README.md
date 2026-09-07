@@ -1,168 +1,236 @@
-# Sudarshan Agentic Core — NTRO Intelligent Advisory Platform
+# Sudarshan Agentic Core
 
-The `memory` package is the Sudarshan-side memory unit. It accepts ingestion
-`KnowledgeUnit` objects, applies User/Case/Task scope policy, and delegates
-knowledge graph and semantic retrieval to Cognee. See
-[`memory/README.md`](memory/README.md) for setup and usage.
+<p align="center">
+  <img src="https://img.shields.io/badge/Smart%20India%20Hackathon-2026-ff6b00?style=for-the-badge" alt="Smart India Hackathon 2026">
+  <img src="https://img.shields.io/badge/Problem%20Statement-SIH26154-2457a6?style=for-the-badge" alt="SIH26154">
+  <img src="https://img.shields.io/badge/Adversarial%20Brains-6f42c1?style=for-the-badge" alt="Adversarial Brains">
+</p>
 
-## One-command setup
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.13%2B-3776AB?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/LangGraph-Control%20Plane-1f6feb" alt="LangGraph">
+  <img src="https://img.shields.io/badge/CrewAI-Agent%20Pipelines-6f42c1" alt="CrewAI">
+  <img src="https://img.shields.io/badge/OpenAI-Native%20Provider-412991?logo=openai&logoColor=white" alt="OpenAI">
+</p>
 
-From PowerShell, run the single bootstrap command:
+Sudarshan is a governed, memory-aware agentic platform for transforming
+case-grounded source material into validated communication artefacts. It is
+being developed for the Smart India Hackathon 2026 NTRO problem statement
+SIH26154.
+
+The platform ingests documents, images, presentations, video, or text; stores
+source-derived knowledge through User/Case/Task memory boundaries; understands
+the operator request; routes it to specialist pipelines; validates the result;
+and returns frontend-safe artefacts and progress events.
+
+> This is a competition/project implementation, not an official NTRO system.
+> Do not connect it to classified production data without approved identity,
+> storage, network, security, and operating controls.
+
+## What it delivers
+
+| Pipeline | Output |
+| --- | --- |
+| Advisory | Case-grounded advisory with quality review and human approval seam |
+| Executive summary | Structured decision-facing summary |
+| LinkedIn post | Professional draft with optional image asset |
+| Infographic | Validated AntV syntax and optional SVG |
+| Presentation/PPT | Native PowerPoint deck |
+| Video | Full package: script, storyboard, scene PNG/MP3/MP4 assets, manifest, final MP4 |
+
+The public presentation route is presentation. ppt is its legacy compatibility
+alias and should not be selected as a second pipeline.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    U[Operator or frontend] --> G[Node gateway]
+    G --> API[FastAPI application boundary]
+    H[DeepSeek Harness] -->|MCP or JSONL| APP[SudarshanApplication]
+    API --> APP
+    APP --> L[LangGraph control plane]
+    L --> RU[Request understanding]
+    RU --> RT[Pipeline router]
+    RT --> MR[Bounded memory recall]
+    MR --> PP[Structured prompt plan]
+    PP --> FAN[Pipeline fan-out or dependency waves]
+    FAN --> CREW[CrewAI specialist pipelines]
+    CREW --> Q[Schema validation and quality gates]
+    Q --> ART[Safe artefact response]
+    Q --> MEM[Validated memory write-back]
+    MEM --> C[(Cognee)]
+    G --> DB[(MongoDB Atlas)]
+```
+
+Sudarshan is a hybrid agentic workflow:
+
+- LangGraph owns routing, lifecycle, retries, checkpoints, fan-out/fan-in,
+  cancellation, approval boundaries, and delivery policy.
+- CrewAI owns specialist collaboration inside each pipeline.
+- MemoryManager owns Cognee access and User/Case/Task scope policy.
+- DeepSeek Harness owns session, MCP, and runtime integration.
+- The Node gateway owns browser authentication, ownership, quotas, and safe
+  delivery.
+- The frontend owns preview, editing, uploads, and progress display.
+
+Prompt planning occurs after routing. Pipeline collaboration is bounded by
+typed capability proposals, shared constraints, declared dependencies, and
+execution waves. The default coordinator does not create unrestricted
+LLM-to-LLM conversations or extra model calls.
+
+## Request lifecycle
+
+```text
+upload or operator request
+  -> authenticated application boundary
+  -> bounded User/Case recall
+  -> request understanding and clarification
+  -> pipeline routing
+  -> bounded User/Case/Task recall
+  -> structured prompt plan
+  -> CrewAI pipeline execution
+  -> schema validation and quality critic
+  -> renderer/provider adapter
+  -> safe result and progress events
+  -> validated Case/Task memory write-back
+```
+
+Writer/critic loops are bounded to two total attempts by default. Video passes
+critic issues and required revisions into its second planning attempt.
+
+## Native video path
+
+The default video implementation runs in-process:
+
+1. CrewAI creates evidence, narration, storyboard, and quality review.
+2. OpenAI Images creates scene images when configured.
+3. OpenAI TTS creates narration audio when configured.
+4. imageio-ffmpeg creates and joins local scene videos.
+5. the package is written to artifacts/videos/<run_id>/.
+
+MONEYPRINTERTURBO_BASE_URL is optional compatibility mode for an asynchronous
+worker. DeepSeek Harness calls only the application boundary; it never calls
+OpenAI, Cognee, or the native renderer directly.
+
+## Quick start
+
+### Requirements
+
+- Windows PowerShell 7
+- Python 3.13+
+- Node.js compatible with the lockfiles
+- MongoDB Atlas access for the Node gateway
+- Cognee endpoint credentials for live memory
+- OpenAI credentials for live model/media calls
+
+### Install and start
 
 ```powershell
+Copy-Item .env.example .env
+# Fill .env; never commit .env.
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
 ```
 
-This bootstraps `uv` through Python when it is missing, installs the locked
-Python dependencies, installs the pinned AntV infographic renderer, installs
-the frozen DeepSeek Harness workspace, and installs the Node/Express gateway
-dependencies. It requires Python 3.13+ and Node.js LTS/npm; pnpm is used when
-present or installed automatically.
-Runtime rendering is performed by the checked-in AntV bridge under
-`pipelines/infographic/antv_renderer/`.
+Default services:
 
-After setup, `startup.ps1` starts the Python orchestrator/pipelines API, the
-Node gateway, and the static frontend. Use `-NoStart` when only dependency and
-schema initialization is needed. `setup.ps1` remains a compatibility alias.
+| Service | URL |
+| --- | --- |
+| FastAPI | http://127.0.0.1:8000 |
+| Node gateway | http://127.0.0.1:8080 |
+| Static frontend | http://127.0.0.1:3000 |
 
-## Native Media Pipelines
+Useful options and manual service commands are in
+[docs/operations.md](docs/operations.md).
 
-The in-repo presentation pipeline generates native PPTX files. The ingestion process now includes a native **PPT Master** implementation that extracts structural markdown and slide transitions natively. No external service is required.
-
-Video generation defaults to a native **MoneyPrinterTurbo-inspired** architecture running in-process using `imageio-ffmpeg` and optional OpenAI TTS. Deployments that already operate the upstream MoneyPrinterTurbo worker can set `MONEYPRINTERTURBO_BASE_URL`; the same adapter then uses its asynchronous submit/status contract and preserves provider-pending state.
-
-## Start testing
-
-Copy `.env.example` to `.env` if needed, then add the MongoDB Atlas, Google
-OAuth, Cognee Cloud, and CrewAI/provider credentials. The example disables
-optional CrewAI telemetry by default. Run the focused unit suite with:
+## Verification
 
 ```powershell
-uv run pytest -q
+.\.venv\Scripts\python.exe -m pytest -q
+
+Push-Location backend-node
+npm test
+npm run check
+Pop-Location
+
+node --check frontend\script.js
+node --check frontend\api.js
+node --check frontend\login.js
 ```
 
-The test configuration intentionally targets the Sudarshan-owned suites and
-does not collect the vendored DeepSeek Harness test tree.
+The offline baseline is 90 Python tests passed with 1 skipped, 4 Node gateway
+tests passed, frontend JavaScript syntax checks passed, and 12 focused
+application-boundary integration tests passed. External MongoDB, Cognee,
+Google OAuth, OpenAI, and worker reachability require a separate live smoke
+test.
 
-Generated advisory, LinkedIn image, and infographic files are written below
-`artifacts/`, which is intentionally ignored by Git.
+## Documentation index
 
-Internal backend/frontend integration details are in
-[`docs/internal/pipeline-orchestration.md`](docs/internal/pipeline-orchestration.md).
-The backend handoff and HTTP/MCP contract are in
-[`docs/backend-integration.md`](docs/backend-integration.md).
-The frontend API, upload, polling/SSE, resume/cancel, TypeScript, and security
-guide is in [`docs/frontend-integration.md`](docs/frontend-integration.md).
+| Document | Use it for |
+| --- | --- |
+| [Operations](docs/operations.md) | setup, configuration, API list, testing, troubleshooting, deployment limits |
+| [Architecture](docs/internal/pipeline-orchestration.md) | graph, memory sequence, pipelines, model routing, diagrams |
+| [Backend integration](docs/backend-integration.md) | Python API, ingestion, MCP, status, resume, cancellation |
+| [Gateway integration](docs/gateway-integration.md) | OAuth, cases, transformations, tasks, quotas, MongoDB |
+| [Frontend integration](docs/frontend-integration.md) | browser calls, uploads, polling, SSE, rendering, security |
+| [Memory](memory/README.md) | Cognee adapter and User/Case/Task memory policy |
+| [Pipelines](pipelines/README.md) | pipeline contracts, video package, images, renderers |
+| [Harness integration](integrations/deepseek_harness/README.md) | MCP and JSONL boundary |
+| [Design review](docs/design-review.md) | corrections recommended for the submitted slides |
 
-## Running the API Server
+## Team and credits
 
-The system includes a FastAPI server equipped with SSE streaming, NTRO security middleware, and tamper-evident audit logging. Production deployments must provide approved at-rest encryption for the SQLite state stores.
+### Adversarial Brains
 
-```powershell
-uv run python -m api.server
-```
+- **Sarthak Singh — Team Leader** · [GitHub](https://github.com/keyboard-warrior-777)
+- **Udit Jain — Agentic system design and implementation; FigmaJam pipeline design** · [GitHub](https://github.com/udit79)
+- **Ayush Gupta — Backend and frontend; backend system design** · [GitHub](https://github.com/DevDripCodes)
+- **Abhishek Padi — Ingestion pipeline and testing** · [GitHub](https://github.com/GokalaIsCool)
+- **Gaurav — PPT and frontend ideas** · [GitHub](https://github.com/Gaurav123456789000)
+- **Asmee — Communication, frontend images, and Figma designs** · [GitHub](https://github.com/asmeesaxena0777-oss)
 
-The API will start at `http://localhost:8000`. It enforces `X-Operator-Id` headers on mutations and returns `X-Classification-Level` headers.
+Design board: [FigmaJam](https://www.figma.com/board/Wry8irwQqC5NayI5fDqyYH/SIH26154?t=tzArXaqZqowMYnAq-0).
 
-Real source ingestion is available at `POST /ingest` as an authenticated
-`multipart/form-data` upload. It extracts the file, persists the resulting
-knowledge unit through Cognee-backed `MemoryManager`, writes the NTRO audit
-entry, and returns a frontend-safe ingestion receipt. `main.py` is only the
-production API entry point; it no longer runs sample-data demos.
+## Design gallery
 
-## DeepSeek Harness integration
+The supplied presentation assets are stored in
+[docs/assets/presentation](docs/assets/presentation).
 
-The LangGraph orchestrator now provides the thin application boundary for
-routing, lifecycle state, approval interrupts, and progress events. The
-Harness should own session, tool, and runtime execution; CrewAI pipelines own
-agent collaboration; and MemoryManager owns memory policy. Do not make each
-pipeline depend directly on Harness internals.
+<details>
+<summary>Open the presentation gallery</summary>
 
-For a local headless Harness bridge, send one JSON request to:
+### Title page
 
-```powershell
-'{"query":"Create an executive summary","user_id":"u-1","case_id":"c-1","task_id":"t-1"}' |
-  .\.venv\Scripts\python.exe -m integrations.deepseek_harness.runner
-```
+![Sudarshan title page](docs/assets/presentation/01-title-page.png)
 
-In production, register the MCP overlay at
-`integrations/deepseek_harness/sudarshan.cordis.yml` or expose the same
-boundary through an authenticated backend service. MoneyPrinterTurbo is
-called by `integrations/providers/moneyprinterturbo/client.py` from the
-backend process; the Harness does not call it directly.
+### Proposed solution
 
-The MCP application boundary exposes four operations:
+![Sudarshan proposed solution](docs/assets/presentation/02-proposed-solution.png)
 
-- `run_sudarshan`: start a routed operation with a stable `task_id`.
-- `get_sudarshan_status`: poll frontend-safe stage and progress events.
-- `resume_sudarshan`: continue a clarification, approval, or revision.
-- `cancel_sudarshan`: request cooperative cancellation while preserving the
-  task audit trail.
+### Technical approach and memory
 
-The application owns a durable LangGraph checkpoint store, so a resume or
-status request does not create a second orchestration instance. Raw Cognee
-context, provider credentials, and model reasoning are not serialized into
-the Harness response.
+![Sudarshan technical approach](docs/assets/presentation/03-technical-approach-memory.png)
 
-## How the components interact
+### System architecture
 
-```mermaid
-flowchart LR
-    UI[Frontend / Backend] --> API[FastAPI API]
-    H[DeepSeek Harness] --> MCP[MCP adapter]
-    API --> APP[SudarshanApplication]
-    MCP --> APP
-    APP --> G[LangGraph router]
-    G --> R[Bounded User/Case/Task recall]
-    R --> PLAN[Request understanding + prompt plan]
-    PLAN --> FAN[Pipeline fan-out]
-    FAN --> A[Advisory]
-    FAN --> L[LinkedIn]
-    FAN --> S[Executive summary]
-    FAN --> P[PPT]
-    FAN --> I[Infographic]
-    FAN --> V[Video]
-    A --> Q[Validation / quality gate]
-    L --> Q
-    S --> Q
-    P --> Q
-    I --> Q
-    V --> Q
-    Q --> ART[Artifact + frontend-safe result]
-    Q --> MEM[Case/Task memory write-back]
-    MEM <--> C[(Cognee)]
-    API -. SSE status/events .-> UI
-```
+![Sudarshan system architecture](docs/assets/presentation/04-system-architecture.png)
 
-The runtime sequence is:
+### Feasibility and viability
 
-1. The frontend/backend submits a real source to `/ingest` or a generation
-   request to `/runs`. The Harness uses the same application boundary through
-   MCP tools.
-2. `SudarshanApplication` validates the request and delegates to the
-   LangGraph router.
-3. The router performs bounded, scope-aware memory recall, understands the
-   request, creates a validated prompt plan, and selects one or more pipeline
-   adapters.
-4. Selected pipelines run independently with their specialist CrewAI agents,
-   quality gates, and optional render/provider adapters.
-5. Results fan back into the parent run. Validated artifacts are written to
-   scoped memory, while the frontend receives only safe status, artifact, and
-   progress metadata.
+![Sudarshan feasibility and viability](docs/assets/presentation/05-feasibility-viability.png)
 
-## Agentic system or workflow?
+### Impact and benefits
 
-Sudarshan is a hybrid agentic workflow platform. LangGraph is the deterministic
-control plane: it owns routing, state, retries, fan-out/fan-in, checkpoints,
-approval interrupts, cancellation boundaries, and delivery policy. Inside that
-controlled workflow, CrewAI specialist agents perform agentic analysis,
-evidence review, drafting, criticism, and pipeline-specific decisions. The
-Harness supplies sessions, tools, and runtime integration; Cognee supplies
-scoped long-term memory.
+![Sudarshan impact and benefits](docs/assets/presentation/06-impact-benefits.png)
 
-Therefore it is more than a fixed workflow, but it is not an unrestricted
-autonomous agent. It is a governed agentic system designed for NTRO operations,
-where agent reasoning is bounded by typed contracts, memory access policy,
-quality gates, audit logging, and human approval where required. The full
-architecture and individual pipeline diagrams are in
-[`docs/internal/pipeline-orchestration.md`](docs/internal/pipeline-orchestration.md).
+### Research and references
+
+![Sudarshan research and references](docs/assets/presentation/07-research-references.png)
+
+</details>
+
+Use [docs/design-review.md](docs/design-review.md) to align the slides with the
+implemented routing order, memory boundaries, provider boundaries, and
+production claims.

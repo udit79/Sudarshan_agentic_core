@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pipelines.common.model_routing import resolve_model
 
 
 def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
     common = {"verbose": False, "allow_delegation": False, "tools": tools}
-    configured_llm = llm or os.getenv("CREWAI_MODEL")
-    if configured_llm:
-        common["llm"] = configured_llm
+
+    def agent_options(role: str) -> dict[str, Any]:
+        return {**common, "llm": resolve_model(role, override=llm)}
     return {
         "case_analyst": Agent(
             role="Case Visual-Content Analyst",
@@ -22,7 +22,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You identify relationships, sequences, comparisons, and hierarchies in case information. "
                 "You preserve provenance and never invent facts, labels, statistics, or official insignia."
             ),
-            **common,
+            **agent_options("infographic_analyst"),
         ),
         "syntax_writer": Agent(
             role="AntV Infographic Syntax Designer",
@@ -33,7 +33,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "(the Indian Government color palette). You must support and retain bilingual (English/Hindi) "
                 "labels from the case information if present."
             ),
-            **common,
+            **agent_options("infographic_writer"),
         ),
         "quality_critic": Agent(
             role="Infographic Quality and Provenance Reviewer",
@@ -42,6 +42,6 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You check syntax structure, source linkage, completeness, readability, and professional visual "
                 "tone before the renderer is called."
             ),
-            **common,
+            **agent_options("infographic_quality"),
         ),
     }

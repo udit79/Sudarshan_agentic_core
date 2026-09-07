@@ -60,7 +60,8 @@ flowchart LR
         DEC -- No --> ASK
         ASK --> FE
         FE -->|resume answer| UNDER
-        DEC -- Yes --> REC --> PLAN --> ROUTE --> FAN
+        DEC -- Yes --> ROUTE
+        ROUTE --> REC --> PLAN --> FAN
     end
 
     subgraph PIPE[Selected generation pipeline]
@@ -119,6 +120,17 @@ ingestion -> KnowledgeUnit -> MemoryManager.remember() -> Cognee
 user request -> bounded User/Case recall -> RequestUnderstandingAgent
              -> task-oriented User/Case/Task recall -> PromptCrafterAgent
              -> fan-out selected CrewAI pipelines -> fan-in results
+
+Selected pipelines also receive a deterministic collaborative workflow plan.
+Each pipeline contributes a versioned capability proposal, the coordinator
+merges shared classification, distribution, terminology, and provenance
+constraints, and the plan records parallel execution waves. Explicit
+dependencies may be requested with `metadata.pipeline_dependencies`; unknown
+nodes and dependency cycles are rejected. This is a typed coordination layer,
+not unrestricted agent-to-agent chat. It does not add an LLM call by default,
+so collaboration planning does not multiply model cost. A future model-backed
+pipeline crafter must return the same validated plan models and remain subject
+to the same dependency and policy checks.
 ```
 
 `RequestUnderstandingAgent` is deterministic by default. It receives bounded
@@ -282,9 +294,10 @@ flowchart LR
 ### Video pipeline
 
 The video pipeline defaults to a native architecture running fully in-process.
-OpenAI is the only supported model/media provider: the planner produces the
-story and storyboard, OpenAI Images produces one PNG per scene, and OpenAI TTS
-produces one MP3 per narrated scene. Local `imageio-ffmpeg` creates one MP4
+OpenAI is the only supported model/media provider: a CrewAI planning crew backed
+by OpenAI produces and reviews the story, script, and storyboard; OpenAI Images
+produces one PNG per scene; and OpenAI TTS produces one MP3 per narrated scene.
+Local `imageio-ffmpeg` creates one MP4
 segment per scene, concatenates the final MP4, and writes the complete package
 to `artifacts/videos/<run_id>/`.
 
@@ -294,13 +307,19 @@ card is used only when an image cannot be produced, and the manifest preserves
 the asset paths and rendered-scene count. This keeps the result inspectable and
 allows the frontend to deliver the whole package rather than only a final MP4.
 
+The video quality gate is bounded to two total planning attempts by default:
+the initial CrewAI run plus one retry. If the critic rejects the first package,
+its issues and required revisions are passed into the retry as structured
+feedback. A second rejection fails the planning stage; it does not loop
+indefinitely or start media rendering.
+
 When `MONEYPRINTERTURBO_BASE_URL` is explicitly configured, the adapter uses
 the legacy asynchronous worker contract and preserves provider-pending state.
 The default path does not call that worker or any stock-media service.
 
 ```mermaid
 flowchart LR
-    M[Bounded User Case Task memory] --> P[OpenAI video planner]
+    M[Bounded User Case Task memory] --> P[CrewAI video planning crew]
     P --> SB[Story and storyboard]
     SB --> IMG[OpenAI Images per scene]
     SB --> TTS[OpenAI TTS per scene]
@@ -355,12 +374,37 @@ For the current OpenAI-backed CrewAI setup, the local `.env` should contain:
 ```dotenv
 OPENAI_API_KEY=your-openai-api-key
 CREWAI_MODEL=openai/gpt-5.4
+CREWAI_FAST_MODEL=openai/gpt-5.4-mini
 OPENAI_IMAGE_MODEL=gpt-image-1
 ```
 
-`CREWAI_MODEL` is the text/reasoning model used by CrewAI agents. The image
-model is configured separately because image generation is an optional delivery
-asset, not the model used for structured CrewAI task outputs.
+`CREWAI_MODEL` is the strong model tier and `CREWAI_FAST_MODEL` is the efficient
+model tier. Role-based routing selects the tier according to task risk:
+
+| Work | Default model | Reason |
+| --- | --- | --- |
+| NTRO advisory analysis, provenance, writer, critic | `openai/gpt-5.4` | High-consequence evidence and release decisions |
+| Executive summary analysis, writer, critic | `openai/gpt-5.4` | Case-grounded synthesis and quality control |
+| LinkedIn extraction, writing, critic | `openai/gpt-5.4-mini` | Bounded, frontend-owned communication |
+| Infographic extraction and syntax | `openai/gpt-5.4-mini` | Structured transformation with deterministic renderer |
+| Infographic critic | `openai/gpt-5.4` | Catch unsupported or misleading visual claims |
+| PPT content analysis | `openai/gpt-5.4-mini` | Structured slide intake |
+| PPT writing and quality gate | `openai/gpt-5.4` | Decision-facing narrative and release quality |
+| Video evidence and storyboard | `openai/gpt-5.4-mini` | Bounded extraction and scene structuring |
+| Video script and package critic | `openai/gpt-5.4` | Narrative coherence, factuality, and release readiness |
+
+Role variables in `.env.example` can override individual assignments. This
+follows the official OpenAI model guidance: use GPT-5.4 for complex professional
+work and GPT-5.4 Mini for faster, high-volume work. Both selected models
+support structured outputs. See the [GPT-5.4 model](https://developers.openai.com/api/docs/models/gpt-5.4),
+[GPT-5.4 Mini model](https://developers.openai.com/api/docs/models/gpt-5.4-mini),
+and [GPT-5.4 guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.4).
+
+Prompt construction uses explicit outcomes, success criteria, constraints,
+bounded memory delimiters, and schema requirements. Strong-model quality gates
+also receive a verification contract and must return precise revisions; they do
+not receive hidden reasoning instructions or provider credentials. Image
+generation remains separate from CrewAI text planning.
 
 The graph uses `run_id` as its LangGraph `thread_id`. The caller must preserve
 that ID for reconnects and approval resumes. The SQLite factory is for local

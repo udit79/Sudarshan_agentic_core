@@ -1,4 +1,4 @@
-# Backend integration handoff
+# Backend integration contract
 
 This document is the contract between the backend, frontend, and the
 DeepSeek Harness integration. The Python application is the source of truth

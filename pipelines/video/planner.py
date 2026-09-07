@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, Callable
 
 from pipelines.video.contracts import VideoPackage
+from pipelines.common.memory_tools import TaskMemoryWriter
 
 
 class VideoPlanningError(RuntimeError):
@@ -38,6 +39,7 @@ class OpenAIVideoPlanner:
         query: str,
         memory_context: str,
         prompt_plan: dict[str, Any] | None = None,
+        task_writer: TaskMemoryWriter | None = None,
     ) -> VideoPackage:
         bounded_memory = (memory_context or "")[:30000]
         plan_text = json.dumps(prompt_plan or {}, ensure_ascii=False)[:12000]
@@ -87,4 +89,68 @@ mention models, prompts, tools, or internal workflow.
             raise VideoPlanningError(f"OpenAI video planning failed: {exc}") from exc
 
 
-__all__ = ["OpenAIVideoPlanner", "VideoPlanningError"]
+class CrewAIVideoPlanner:
+    """Use a CrewAI planning/review loop before native media rendering."""
+
+    def __init__(
+        self,
+        *,
+        llm: Any = None,
+        crew_factory: Callable[..., Any] | None = None,
+        max_attempts: int = 2,
+    ) -> None:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        self.llm = llm
+        self._crew_factory = crew_factory
+        self.max_attempts = max_attempts
+
+    def plan(
+        self,
+        *,
+        subject: str,
+        query: str,
+        memory_context: str,
+        prompt_plan: dict[str, Any] | None = None,
+        task_writer: TaskMemoryWriter | None = None,
+    ) -> VideoPackage:
+        try:
+            if self._crew_factory is None:
+                from pipelines.video.crew import VideoPlanningCrew
+
+                factory = VideoPlanningCrew
+            else:
+                factory = self._crew_factory
+            quality_feedback: list[str] = []
+            for attempt in range(1, self.max_attempts + 1):
+                attempt_plan = dict(prompt_plan or {})
+                if quality_feedback:
+                    attempt_plan["quality_feedback"] = quality_feedback[-20:]
+                result = factory(llm=self.llm).run(
+                    subject=subject,
+                    query=query,
+                    memory_context=memory_context,
+                    prompt_plan=attempt_plan,
+                    task_writer=task_writer,
+                )
+                quality = result.quality
+                if quality.approved:
+                    data = result.package.model_dump(mode="json")
+                    data["subject"] = subject[:500]
+                    return VideoPackage.model_validate(data)
+
+                quality_feedback = quality.issues + quality.required_revisions
+                if attempt == self.max_attempts:
+                    raise VideoPlanningError(
+                        "Video package quality gate rejected the draft after "
+                        f"{self.max_attempts} attempt(s): "
+                        + ("; ".join(quality_feedback) or "unspecified quality issue")
+                    )
+            raise VideoPlanningError("Video planner ended without a result")
+        except VideoPlanningError:
+            raise
+        except Exception as exc:
+            raise VideoPlanningError(f"CrewAI video planning failed: {exc}") from exc
+
+
+__all__ = ["OpenAIVideoPlanner", "CrewAIVideoPlanner", "VideoPlanningError"]

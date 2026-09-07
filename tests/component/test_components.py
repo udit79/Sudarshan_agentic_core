@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from crewai import TaskOutput
 from memory import AccessContext, MemoryManager
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.common.memory_tools import MemoryRuntime, TaskMemoryWriter
@@ -115,6 +116,36 @@ def test_task_memory_writer_uses_task_scope(recording_backend) -> None:
 
     assert recording_backend.writes[0]["node_sets"] == ["sudarshan:scope:task:task-1"]
     assert recording_backend.writes[0]["metadata"]["step"] == "prompt_crafting"
+
+
+def test_task_memory_writer_registers_and_runs_video_callbacks(recording_backend) -> None:
+    writer = TaskMemoryWriter(
+        MemoryRuntime(
+            manager=MemoryManager(recording_backend),
+            context=AccessContext(user_id="user-1", case_id="case-1", task_id="task-1"),
+            task_id="task-1",
+            case_id="case-1",
+            run_id="run-1",
+            pipeline_name="video",
+        )
+    )
+    output = TaskOutput(
+        description="video task",
+        expected_output="JSON",
+        raw="{}",
+        agent="test-agent",
+    )
+
+    with writer.activate():
+        for step in ("video_evidence", "video_script", "video_storyboard", "video_quality"):
+            writer.callback(step)(output)
+
+    assert [write["metadata"]["step"] for write in recording_backend.writes] == [
+        "video_evidence",
+        "video_script",
+        "video_storyboard",
+        "video_quality",
+    ]
 
 
 def test_progress_contract_accepts_clarification_waiting_state() -> None:

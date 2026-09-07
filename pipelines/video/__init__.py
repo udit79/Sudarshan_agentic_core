@@ -2,7 +2,7 @@
 
 from pipelines.video.pipeline import VideoPipeline
 from pipelines.video.contracts import VideoPackage, VideoScene
-from pipelines.video.planner import OpenAIVideoPlanner, VideoPlanningError
+from pipelines.video.planner import CrewAIVideoPlanner, OpenAIVideoPlanner, VideoPlanningError
 from integrations.providers.moneyprinterturbo.client import (
     MoneyPrinterTurboClient,
     MoneyPrinterTurboError,
@@ -17,5 +17,6 @@ __all__ = [
     "VideoPackage",
     "VideoScene",
     "OpenAIVideoPlanner",
+    "CrewAIVideoPlanner",
     "VideoPlanningError",
 ]

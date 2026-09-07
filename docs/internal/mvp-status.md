@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-09-07  
 > **Problem statement:** SIH 2026 — NTRO SIH26154  
-> **Test suite:** 78 passed, 1 skipped (deterministic, offline)
+> **Test suite:** 90 passed, 1 skipped (deterministic, offline)
 
 ---
 
@@ -54,7 +54,7 @@ Frontend (frontend/)
 | `.txt` | `extract.py` | Direct read |
 | `.pdf` | `extract_pdf.py` | PyMuPDF digital + OpenAI vision OCR for scanned pages |
 | `.pptx` | `extract_pptx.py` | python-pptx: slides, shapes, tables, speaker notes |
-| `.png / .jpg / .bmp / .tiff / .webp` | `extract_image.py` | OpenAI `gpt-4o-mini` → Gemini fallback |
+| `.png / .jpg / .bmp / .tiff / .webp` | `extract_image.py` | OpenAI vision transcription |
 | `.mp4 / .mov / .avi / .mkv / .webm` | `extract_video.py` | Whisper audio + OpenCV keyframe OCR |
 
 All formats → `to_knowledge_unit()` → `MemoryManager.remember()`.
@@ -71,6 +71,8 @@ Three scopes: **User** (preferences) → **Case** (facts, approved artefacts)
 - `RequestUnderstandingAgent` + `PromptCrafterAgent`
 - Clarification interrupt when query is ambiguous
 - Fan-out: up to 8 pipelines concurrently, each with isolated identity
+- Typed cross-pipeline collaboration plan with explicit dependency waves
+- Two total writer/critic attempts by default; video passes critic feedback into its retry
 - Approval interrupt / resume seam
 - Cooperative cancellation
 - SSE `ProgressEvent` at every stage
@@ -85,6 +87,7 @@ Three scopes: **User** (preferences) → **Case** (facts, approved artefacts)
 | `ExecutiveSummaryFlow` | `executive_summary` | No | Returned to frontend |
 | `InfographicFlow` | `infographic` | No | SVG via AntV renderer |
 | `PresentationFlow` | `presentation` | No | `.pptx` in `artifacts/presentations/` |
+| `VideoPipeline` | `video` | Provider-dependent | Full native package and final `.mp4` |
 
 Each pipeline: `schemas.py` (strict Pydantic) → `agents.py` → `tasks.py`
 → `crew.py` (subclasses `TextTransformationFlow`).
@@ -154,18 +157,18 @@ COGNEE_API_KEY=<key>
 COGNEE_TENANT_ID=<tenant>                 # Cloud only
 COGNEE_DATASET_NAME=sudarshan_memory
 
-# AI providers
-OPENAI_API_KEY=<key>                      # already set (ingestion + pipelines)
-GEMINI_API_KEY=<key>                      # already set (fallback)
-CREWAI_MODEL=openai/gpt-4o-mini
+# AI provider
+OPENAI_API_KEY=<key>                      # ingestion, planning, and media
+CREWAI_MODEL=openai/gpt-5.4
+CREWAI_FAST_MODEL=openai/gpt-5.4-mini
 CREWAI_DISABLE_TELEMETRY=true
 
 # Node gateway
-MONGODB_URI=mongodb+srv://...             # not yet set
-GOOGLE_CLIENT_ID=<id>                     # not yet set
-GOOGLE_CLIENT_SECRET=<secret>             # not yet set
-JWT_ACCESS_SECRET=<long-random>           # not yet set
-JWT_REFRESH_SECRET=<long-random>          # not yet set
+MONGODB_URI=mongodb+srv://...
+GOOGLE_CLIENT_ID=<id>
+GOOGLE_CLIENT_SECRET=<secret>
+JWT_ACCESS_SECRET=<long-random>
+JWT_REFRESH_SECRET=<long-random>
 FRONTEND_URL=http://localhost:3000
 PYTHON_API_BASE_URL=http://localhost:8000
 ```
@@ -179,14 +182,14 @@ PYTHON_API_BASE_URL=http://localhost:8000
 - [ ] MongoDB Atlas cluster (free tier) + connection URI
 - [ ] Google Cloud Console OAuth2 client (authorized redirect: `http://localhost:8080/api/v1/auth/google/callback`)
 - [ ] Fill `.env` with all values above
-- [ ] AntV renderer setup: `cd pipelines/infographic/antv_renderer && npm install`
+- [ ] Verify the AntV renderer setup on the target machine if infographic SVG output is required
 
 ### Known gaps (post-demo)
 - [ ] End-to-end integration tests with real credentials (currently all offline/deterministic)
 - [ ] HTTPS + `NODE_ENV=production` + WAF/edge for production hardening
 - [ ] Durable worker queue for fan-out (current: in-process threads, dev only)
 - [ ] Batch approval for multiple human-gate pipelines in one run
-- [ ] `git rm -r artifact-pipeline` — old dummy folder still in repo
+- [ ] Replace local SQLite state stores with approved durable encrypted stores for multi-instance production
 
 ---
 
@@ -222,13 +225,10 @@ uv run pytest -q
 
 | Area | Owner |
 |------|-------|
-| `ingestion_pipelines/` | Abhishek |
-| `pipelines/ppt/` | Abhishek |
-| `memory/` | Udit |
-| `pipelines/` (advisory, linkedin, exec summary, infographic) | Udit |
-| `pipelines/orchestrator/` | Udit |
-| `api/` | Udit |
-| `backend-node/` | Udit |
-| `integrations/` | Udit |
-| `frontend/` | Udit |
+| Team leadership | Sarthak Singh |
+| Agentic system design and implementation, FigmaJam pipeline design | Udit Jain |
+| Backend, frontend, backend system design | Ayush Gupta |
+| Ingestion pipeline and testing | Abhishek Padi |
+| PPT and frontend ideas | Gaurav |
+| Communication, frontend images, Figma designs | Asmee |
 | `deepseek-harness/` | Vendored — DeepSeek AI open source |

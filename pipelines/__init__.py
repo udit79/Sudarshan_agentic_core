@@ -1,5 +1,18 @@
 """Controlled, application-specific pipelines built on Sudarshan memory."""
 
+import warnings as _warnings
+
+
+# CrewAI 1.15.20 emits this narrowly scoped ImportWarning while importing its
+# custom ``crewai.rag`` module. Install the compatibility filter before the
+# package's eager pipeline imports run; pytest configuration loads too late
+# to cover imports performed by conftest.py.
+_warnings.filterwarnings(
+    "ignore",
+    message=r"Cannot set an attribute on 'crewai\.rag' for child module 'embeddings'",
+    category=ImportWarning,
+)
+
 from pipelines.advisory.crew import AdvisoryFlow
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.executive_summary.crew import ExecutiveSummaryFlow

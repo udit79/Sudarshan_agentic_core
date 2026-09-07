@@ -167,7 +167,7 @@ frontend. It installs:
 4. the Node/Express gateway through `npm ci`.
 
 `setup.ps1` remains as a compatibility alias. The current repository test
-baseline is `78 passed, 1 skipped`; the Node gateway also has four focused
+  baseline is `90 passed, 1 skipped`; the Node gateway also has four focused
 validation/token tests.
 
 ## 2. HTTP API endpoints
@@ -521,4 +521,4 @@ uv run pytest -q --basetemp .pytest-tmp-run -p no:cacheprovider
 git diff --check
 ```
 
-The current deterministic backend suite completes with `78 passed, 1 skipped`.
+The current deterministic backend suite completes with `90 passed, 1 skipped`.

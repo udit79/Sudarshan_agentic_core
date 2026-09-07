@@ -11,8 +11,16 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
 from integrations.deepseek_harness.application import get_application
+
+
+# MCP's generic settings model contains a forward reference to FastMCP in its
+# ``lifespan`` field. Rebuild it after the package has defined FastMCP and
+# before constructing the server, otherwise pydantic-settings emits an
+# incomplete-field warning on every process start.
+FastMCPSettings.model_rebuild()
 
 
 mcp = FastMCP(

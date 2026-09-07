@@ -114,6 +114,8 @@ class AdvisoryRequest:
             "revision_scope": list(self.revision_scope),
             "request_understanding": self.metadata.get("request_understanding", {}),
             "prompt_plan": self.metadata.get("prompt_plan", {}),
+            "collaboration_plan": self.metadata.get("collaboration_plan", {}),
+            "upstream_pipeline_results": self.metadata.get("upstream_pipeline_results", {}),
         }
 
 

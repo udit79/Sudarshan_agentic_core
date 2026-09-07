@@ -35,6 +35,11 @@ The available flows are:
 - `InfographicFlow`: quality review, validated AntV syntax, SVG rendering, and
   Case-memory write-back. The frontend receives the SVG artifact path and may
   preview, edit, or upload it.
+- `PresentationFlow`: quality review and native `.pptx` rendering. The public
+  `ppt` route is a compatibility alias for `presentation`.
+- `VideoPipeline`: CrewAI evidence/script/storyboard/critic planning followed
+  by native OpenAI image/TTS and local FFmpeg rendering, or explicit
+  MoneyPrinterTurbo compatibility mode.
 
 Updates to an existing output are modeled as revisions. The frontend creates a
 new task with `operation="revise"`, a `parent_artifact_id` or `parent_run_id`,
@@ -52,6 +57,13 @@ second recall uses the permitted User/Case/Task scopes and the bounded result
 is passed into each child flow's CrewAI tasks. Calling a flow directly remains supported
 for compatibility; in that mode the flow performs its own scoped recall.
 
+For multi-pipeline requests, the coordinator creates a typed collaboration
+plan containing each pipeline's capability proposal, shared constraints,
+declared dependencies, and execution waves. Pipelines can receive validated
+upstream results only when a dependency is explicitly declared. This is
+bounded coordination, not unrestricted LLM-to-LLM chat, and it adds no model
+call by default.
+
 The frontend can stop a run through the orchestrator's cancellation endpoint.
 Cancellation is cooperative: active graph boundaries observe it, record a
 Task-memory cancellation event, and return status `cancelled`. A provider call
@@ -61,8 +73,9 @@ already executing may finish before the worker observes the cancellation.
 
 The video pipeline accepts an optional `metadata.video_package` object. It can
 contain the complete transcript, validated script, ordered storyboard scenes,
-visual terms, and provider options. If no package is supplied, the OpenAI
-planner creates the story and storyboard from the bounded memory context.
+visual terms, and provider options. If no package is supplied, the video CrewAI
+planning crew creates and reviews the story, script, and storyboard from the
+bounded memory context before media rendering begins.
 
 The default native path uses OpenAI for script planning, scene images, and TTS;
 local FFmpeg writes a durable package under `artifacts/videos/<run_id>/`:
@@ -125,8 +138,8 @@ request = AdvisoryRequest(
 result = AdvisoryFlow(MemoryManager.from_env()).run(request)
 ```
 
-Configure the CrewAI provider/model through the environment expected by that
-provider and optionally set `CREWAI_MODEL`. Flow checkpoints are stored at
+Configure the OpenAI-backed CrewAI model tiers through `CREWAI_MODEL` and
+`CREWAI_FAST_MODEL`, with optional per-role overrides. Flow checkpoints are stored at
 `CREWAI_FLOW_DB_PATH` (default `artifacts/.state/flow_states.db`) so pending
 human approvals and retries are application-owned and durable. No API key is
 read or printed by the pipeline package. `CREWAI_DISABLE_TELEMETRY=true` is the

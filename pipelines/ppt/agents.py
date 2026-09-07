@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pipelines.common.model_routing import resolve_model
 
 
 def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
     """Create the three presentation specialists with a shared memory tool."""
 
     common = {"verbose": False, "allow_delegation": False, "tools": tools}
-    configured_llm = llm or os.getenv("CREWAI_MODEL")
-    if configured_llm:
-        common["llm"] = configured_llm
+
+    def agent_options(role: str) -> dict[str, Any]:
+        return {**common, "llm": resolve_model(role, override=llm)}
 
     return {
         "content_analyst": Agent(
@@ -29,7 +29,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You separate confirmed facts from assessments, identify key entities, "
                 "and surface intelligence gaps. You never invent facts, attribution, or policy."
             ),
-            **common,
+            **agent_options("presentation_analyst"),
         ),
         "presentation_writer": Agent(
             role="NTRO Briefing Presentation Writer",
@@ -43,7 +43,7 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "speaker notes. You keep language direct, neutral, and free of AI "
                 "self-reference, workflow commentary, or invented organizational authority."
             ),
-            **common,
+            **agent_options("presentation_writer"),
         ),
         "quality_critic": Agent(
             role="Presentation Quality Reviewer",
@@ -57,6 +57,6 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "notes. You reject placeholder text, unsupported claims, invented policy, "
                 "AI self-reference, or slides that are vague or unfocused."
             ),
-            **common,
+            **agent_options("presentation_quality"),
         ),
     }
