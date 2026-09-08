@@ -115,6 +115,33 @@ MONEYPRINTERTURBO_BASE_URL is optional compatibility mode for an asynchronous
 worker. DeepSeek Harness calls only the application boundary; it never calls
 OpenAI, Cognee, or the native renderer directly.
 
+## Frontend capabilities
+
+The reference frontend is gateway-first. It checks the Node gateway on port
+8080 and uses the direct FastAPI port 8000 only as a local development
+fallback. Gateway mode provides Google authentication, MongoDB-backed cases
+and task history, ownership checks, quotas, and authenticated artifact
+delivery.
+
+From the dashboard, an operator can:
+
+- attach supported source files (`txt`, `pdf`, common image formats, PPTX, and
+  common video formats) to the selected case;
+- submit executive summary, presentation, advisory report, infographic,
+  complete video package, or LinkedIn post pipelines;
+- follow SSE progress events and the polling fallback, including ingestion and
+  agent/pipeline stages;
+- stop an active run at the next safe orchestration boundary. Stop is
+  cooperative; it is not a provider pause or resumable checkpoint;
+- preview videos and rendered images and open/download PPTX, SVG, Markdown,
+  and other returned artifacts;
+- reload the page and recover task history from the authenticated gateway.
+
+If the development backend reports that `OPENAI_API_KEY` is not configured,
+the dashboard offers a one-time session setup dialog. The submitted key is
+held only in the running backend process and is never stored in browser
+storage. Production disables this development-only flow.
+
 ## Quick start
 
 ### Requirements

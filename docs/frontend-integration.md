@@ -53,6 +53,22 @@ SUDARSHAN_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 
 Do not use wildcard CORS with credentials in a deployed NTRO environment.
 
+The checked-in dashboard uses the Node gateway first (`http://localhost:8080`).
+If the gateway is unavailable but the FastAPI service is healthy, it switches
+to a local development mode against port 8000. FastAPI fallback is useful for
+pipeline development, but it does not provide Google OAuth, MongoDB-backed
+cases, gateway quotas, or authenticated remote task history.
+
+The browser flow is:
+
+1. authenticate and select or create a case;
+2. attach zero or more source files;
+3. upload each attachment to the ingestion endpoint before transformation;
+4. select one or more output cards and submit the request;
+5. subscribe to progress and retain the returned task/run identity;
+6. render the selected structured output and authenticated artifact;
+7. merge refreshed task history from the gateway after a page reload.
+
 ## Shared TypeScript types
 
 Keep these types in the frontend API client. They mirror the public response
@@ -183,6 +199,11 @@ memory, writes the audit event, and removes the temporary file. Display the
 receipt and refresh the case memory/run view; do not display raw extracted
 content from this response because it is intentionally not returned.
 
+The reference UI accepts text, PDF, PNG/JPEG/TIFF/BMP/WebP images,
+PPTX/PPTM/PPSX/PPSM/POTX/POTM presentations, and MP4/MOV/AVI/MKV/WebM video
+files. The backend still validates the extension and byte limit; the UI
+allow-list is not a security boundary.
+
 ## Starting a run
 
 ```ts
@@ -224,6 +245,11 @@ export async function createRun(
 An empty `requested_pipelines` lets the router select. Explicit names must be
 registered in `GET /pipelines`. Multiple names run as isolated child tasks and
 return through one parent run.
+
+The browser uses the gateway task ID for
+`/api/v1/tasks/{task_id}/events` and the FastAPI run ID for
+`/runs/{run_id}/events`. Do not substitute one for the other when opening the
+SSE stream.
 
 ## Progress: polling or SSE
 
@@ -267,6 +293,32 @@ Terminal statuses are `succeeded`, `partial`, `failed`, or `cancelled`.
 `pending` means an external provider is still working; it is not automatically
 an approval request. `waiting_for_input` and `waiting_for_approval` require a
 user action.
+
+### Artifact previews and download links
+
+For gateway mode, use the authenticated route below rather than exposing local
+filesystem paths:
+
+```text
+GET /api/v1/tasks/{task_id}/artifacts/{artifact_key}
+```
+
+For local FastAPI mode, the equivalent route is:
+
+```text
+GET /artifacts/{run_id}/{artifact_key}
+```
+
+The dashboard maps `video` to an HTML video player, `infographic` and image
+outputs to an image preview, and presentation/advisory outputs to an
+open/download action. It checks the pipeline response for an artifact before
+adding the preview; quality-rejected or failed pipelines show their failure
+message instead of generating a misleading 404 request.
+
+The video artifact is a package containing the narration script, storyboard,
+scene images, scene audio, scene MP4 segments, manifest, and final MP4. The
+presentation artifact is a native PPTX, and the infographic artifact is a
+rendered SVG when the AntV bridge completes successfully.
 
 ## Resume and cancel
 

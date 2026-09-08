@@ -73,7 +73,7 @@ python -m http.server 3000 --directory frontend
 | OpenAI media | OPENAI_API_KEY, OPENAI_IMAGE_MODEL, OPENAI_TTS_MODEL, OPENAI_TTS_VOICE | image, speech, video assets |
 | Python API | SUDARSHAN_API_HOST, SUDARSHAN_API_PORT, SUDARSHAN_CORS_ORIGINS | orchestrator service |
 | State and audit | LANGGRAPH_CHECKPOINT_DB_PATH, CREWAI_FLOW_DB_PATH, SUDARSHAN_AUDIT_DB_PATH | local durable state |
-| Gateway | MONGODB_URI, MONGODB_DB_NAME, PYTHON_API_BASE_URL | browser-facing backend |
+| Gateway | MONGODB_URI, MONGODB_DB_NAME, PYTHON_API_BASE_URL, PYTHON_API_TIMEOUT_MS, PYTHON_INGEST_TIMEOUT_MS | browser-facing backend and Python request/upload timeouts |
 | Google OAuth | GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALLBACK_URL | sign-in |
 | Browser security | JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, COOKIE_SECURE, CORS_ORIGINS | sessions and origin policy |
 | Optional worker | MONEYPRINTERTURBO_BASE_URL and related variables | legacy asynchronous video mode |
@@ -186,6 +186,36 @@ Native video requires OPENAI_API_KEY for images/TTS and local FFmpeg through
 imageio-ffmpeg. MONEYPRINTERTURBO_BASE_URL selects the asynchronous
 compatibility path. Provider pending means the worker is still running; it is
 not a human approval state.
+
+### Artifact preview says it is unavailable
+
+Check the task status before testing the artifact URL. Artifacts are released
+only after the pipeline's structured-output quality gate succeeds. A failed or
+quality-rejected pipeline legitimately has no artifact to serve. In gateway
+mode, use the authenticated task route and the parent gateway task ID:
+
+```text
+GET /api/v1/tasks/{task_id}/artifacts/{artifact_key}
+```
+
+For direct FastAPI development, use the orchestration run ID:
+
+```text
+GET /artifacts/{run_id}/{artifact_key}
+```
+
+If a video response reports success but the browser still shows nothing, hard
+refresh the frontend and confirm that the result contains video artifact
+metadata. The native video file is written below
+`artifacts/videos/<child_run_id>/`.
+
+### History is empty after a browser refresh
+
+Gateway task history is stored in MongoDB and loaded through `GET
+/api/v1/tasks`. Confirm that the user is authenticated, MongoDB is connected,
+and the browser is using the gateway rather than direct FastAPI fallback.
+Direct FastAPI mode intentionally does not provide persistent user task
+history.
 
 ## Deployment requirements
 

@@ -35,6 +35,7 @@ MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/sudarshan_gate
 MONGODB_DB_NAME=sudarshan_gateway
 PYTHON_API_BASE_URL=http://localhost:8000
 PYTHON_API_TIMEOUT_MS=30000
+PYTHON_INGEST_TIMEOUT_MS=180000
 FRONTEND_URL=http://localhost:3000
 GOOGLE_CLIENT_ID=<web-client-id>
 GOOGLE_CLIENT_SECRET=<web-client-secret>
@@ -75,6 +76,7 @@ and the static frontend together.
 | POST | /api/v1/auth/refresh | refresh cookie | rotate access/refresh session |
 | GET | /api/v1/auth/me | access cookie/token | current user |
 | POST | /api/v1/auth/logout | access cookie/token | revoke session |
+| POST | /api/v1/config/session | access cookie/token | development-only OpenAI session configuration |
 
 Tokens are delivered as HttpOnly cookies. Browser requests must use
 credentials: include. Frontend code must not read or persist refresh tokens.
@@ -91,6 +93,7 @@ window.location.assign(
 | --- | --- | --- | --- |
 | POST | /api/v1/cases | required | create a user-owned case |
 | GET | /api/v1/cases | required | list the current user's cases |
+| POST | /api/v1/ingest | required | upload a source into case memory |
 
 Every transformation verifies that the authenticated user owns the supplied
 case. A user cannot use another user's case_id.
@@ -139,8 +142,10 @@ Transformation tasks support:
 | Method | Route | Purpose |
 | --- | --- | --- |
 | GET | /api/v1/tasks/{task_id} | task projection |
+| GET | /api/v1/tasks | authenticated task history for the current user |
 | GET | /api/v1/tasks/{task_id}?wait=true | bounded long-poll |
 | GET | /api/v1/tasks/{task_id}/events | SSE progress proxy |
+| GET | /api/v1/tasks/{task_id}/artifacts/{artifact_key} | authenticated artifact delivery |
 | POST | /api/v1/tasks/{task_id}/resume | clarification or approval |
 | POST | /api/v1/tasks/{task_id}/cancel | cooperative cancellation |
 
@@ -150,6 +155,32 @@ response, poll the existing task before submitting a new request.
 Terminal statuses are succeeded, partial, failed, and cancelled. pending means
 an external provider is still working. waiting_for_input and
 waiting_for_approval require a user action.
+
+### History and artifact delivery
+
+`GET /api/v1/tasks` returns the authenticated user's persisted task
+projections. The reference frontend merges this server history with its local
+browser cache so a refresh does not remove completed tasks. The server remains
+the source of truth when the browser copy is absent.
+
+Artifacts are not served from arbitrary browser-supplied paths. The route
+`GET /api/v1/tasks/{task_id}/artifacts/{artifact_key}` resolves the artifact
+metadata stored in the task result, verifies that the file is inside the
+repository artifact root, verifies that it exists, and streams it. Supported
+keys include `presentation`, `infographic`, `video`, `linkedin_post`, and
+`advisory`.
+
+A failed or quality-rejected pipeline has no artifact to serve. The frontend
+displays the pipeline failure instead of presenting a misleading broken image,
+video player, or 404 link.
+
+### Development session configuration
+
+`POST /api/v1/config/session` accepts an authenticated `openai_api_key` when
+the gateway runs in development mode. It configures the Python process for the
+current session only. The key is not written to MongoDB, browser storage, or
+repository files. Production returns `403`; use deployment secret management
+instead.
 
 ## Browser security rules
 
