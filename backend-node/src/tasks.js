@@ -47,7 +47,11 @@ function resultFromStatus(status) {
 
 async function finalizeTask(task, pythonStatus, result) {
   if (!TERMINAL.has(pythonStatus.status)) return task;
-  const outputTokens = countResultTokens(result);
+  // A terminal orchestration status can legitimately omit the projection
+  // when a worker failed during final serialization. Preserve any partial
+  // result already stored on the gateway instead of replacing it with null.
+  const finalResult = result ?? task.result ?? null;
+  const outputTokens = countResultTokens(finalResult);
   const session = await Task.startSession();
   try {
     await session.withTransaction(async () => {
@@ -55,7 +59,7 @@ async function finalizeTask(task, pythonStatus, result) {
       if (!current) return;
       await finalizeQuota(current.userId, current.inputTokens, current.reservedTokens, outputTokens, session, current.reservedAt);
       current.status = pythonStatus.status;
-      current.result = result;
+      current.result = finalResult;
       current.error = pythonStatus.error || null;
       current.outputTokens = outputTokens;
       current.totalTokens = current.inputTokens + outputTokens;

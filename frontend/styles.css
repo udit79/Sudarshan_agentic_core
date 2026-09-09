@@ -1811,6 +1811,36 @@ body {
   text-decoration: none;
 }
 
+.pipeline-failure-notice {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(127, 29, 29, 0.16);
+  color: var(--text-secondary);
+}
+
+.pipeline-failure-notice strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #fca5a5;
+}
+
+.pipeline-failure-notice p {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
+.pipeline-failure-notice small {
+  color: #c4b5fd;
+}
+
+.pipeline-failure-notice ul {
+  margin: 10px 0 0 18px;
+  padding: 0;
+  line-height: 1.45;
+}
+
 .config-modal-backdrop {
   position: fixed;
   inset: 0;

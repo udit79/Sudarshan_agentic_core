@@ -15,7 +15,9 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "Analyze the operation {query} using only permitted memory context and the "
             "recall_sudarshan_memory tool. Identify confirmed facts, decision-relevant assessments, evidence, "
             "sources, and gaps. Context:\n{memory_context}\n"
-            "Central prompt plan:\n{prompt_plan}"
+            "Central prompt plan:\n{prompt_plan}\n"
+            "Classification, distribution, audience, and requested output formats are delivery metadata, not "
+            "source evidence. Keep them separate from the intelligence brief."
         ),
         expected_output="A validated IntelligenceBrief JSON object.",
         agent=agents["case_analyst"],
@@ -25,7 +27,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
     review = Task(
         description=(
             "Review the intelligence brief for provenance and support. Flag unsupported claims and required "
-            "caveats. Do not add facts. Return EvidenceReview JSON."
+            "caveats. Distinguish source facts, analytic judgments, and delivery metadata. Do not add facts. "
+            "Return EvidenceReview JSON."
         ),
         expected_output="A validated EvidenceReview JSON object.",
         agent=agents["case_analyst"],
@@ -38,7 +41,12 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "Write an executive summary for the case from the intelligence brief and evidence review. Include "
             "the most important findings, implications, recommended actions, evidence references, confidence, "
             "and intelligence gaps. Keep it concise, neutral, case-specific, and free of AI self-reference, "
-            "workflow commentary, unsupported authority, or invented facts. "
+            "workflow commentary, unsupported authority, or invented facts. Recommended actions must be "
+            "analytical actions grounded in the source brief; never use them for classification, distribution, "
+            "formatting, or other delivery instructions. Do not put requested output counts or pipeline names "
+            "in intelligence gaps. Link material implications and actions to evidence IDs or explicitly label "
+            "them as analytic judgments. If this is a retry, resolve every issue in the prior quality-gate "
+            "feedback below rather than repeating the rejected draft:\n{quality_feedback}\n"
             "Follow the central prompt plan where compatible with these rules:\n{prompt_plan}"
         ),
         expected_output="A validated ExecutiveSummaryOutput JSON object.",
@@ -51,7 +59,9 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
         description=(
             "Review the ExecutiveSummaryOutput. Approve only if it is decision-useful, evidence-linked, "
             "complete, concise, and free of unsupported claims, invented policy, AI language, and unresolved "
-            "placeholders. Return QualityReview JSON with precise issues if rejected."
+            "placeholders. Classification, distribution, and output-format requirements are administrative "
+            "metadata and must not be treated as source-derived recommended actions, implications, or gaps. "
+            "Return QualityReview JSON with precise issues if rejected."
         ),
         expected_output="A validated QualityReview JSON object.",
         agent=agents["quality_critic"],

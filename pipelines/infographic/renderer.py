@@ -20,7 +20,7 @@ class AntVInfographicRenderer:
         output_dir: str | Path = "artifacts/infographics",
         width: int = 1200,
         height: int = 675,
-        timeout_seconds: int = 20,
+        timeout_seconds: int | None = None,
     ) -> None:
         base_dir = Path(__file__).resolve().parent
         self.node_binary = node_binary or os.getenv("ANTV_NODE_BINARY", "node")
@@ -28,6 +28,14 @@ class AntVInfographicRenderer:
         self.output_dir = Path(output_dir)
         self.width = width
         self.height = height
+        if timeout_seconds is None:
+            raw_timeout = os.getenv("ANTV_RENDER_TIMEOUT_SECONDS", "60")
+            try:
+                timeout_seconds = int(raw_timeout)
+            except ValueError as exc:
+                raise ValueError("ANTV_RENDER_TIMEOUT_SECONDS must be an integer") from exc
+        if timeout_seconds < 1:
+            raise ValueError("timeout_seconds must be positive")
         self.timeout_seconds = timeout_seconds
 
     def __call__(self, syntax: str, *, artifact_name: str) -> str:

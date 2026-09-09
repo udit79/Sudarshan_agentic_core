@@ -284,10 +284,24 @@ class PromptCrafterAgent:
         task_instructions = [
             "Use only the supplied request and permitted memory context as factual inputs.",
             "Keep facts, assessments, assumptions, and information gaps explicitly separated.",
+            "Treat classification, distribution, audience, and requested output formats as delivery metadata, not as source evidence.",
+            "Never turn delivery metadata or workflow instructions into a factual claim, recommendation, implication, or intelligence gap.",
             "Preserve classification and distribution handling requirements.",
             "Do not invent NTRO policy, authority, statistics, sources, contacts, or official marks.",
             "Ensure that no internal AI terminology or prompt references appear in the final output.",
         ]
+        if understanding.requested_pipeline == "infographic":
+            task_instructions.extend([
+                "Use a presentation title that matches supported evidence; do not infer an event from an ambiguous source title.",
+                "Keep handling markings in a clearly separate metadata/header area and never present them as evidence.",
+                "Use parser-safe ASCII punctuation in renderer syntax and select a layout that matches the information structure.",
+            ])
+        elif understanding.requested_pipeline == "executive_summary":
+            task_instructions.extend([
+                "Recommended actions must be analytical actions grounded in the source brief, not handling or delivery instructions.",
+                "Do not mention requested pipeline counts or output formats in intelligence gaps; those belong to request metadata.",
+                "Link material implications and actions to evidence IDs or label them explicitly as analytic judgments.",
+            ])
         if request.operation == "revise":
             task_instructions.extend([
                 "Treat the recalled parent artifact as the baseline and preserve all unaffected sections.",
@@ -301,6 +315,7 @@ class PromptCrafterAgent:
         ]
         quality_constraints = [
             "Every material claim must be traceable to permitted memory or clearly labeled as an assessment.",
+            "Keep source-derived content separate from administrative delivery metadata and workflow requirements.",
             "Remove AI self-reference, prompt commentary, workflow commentary, and unresolved placeholders.",
             "Strictly adhere to the stated classification and distribution limits.",
         ]

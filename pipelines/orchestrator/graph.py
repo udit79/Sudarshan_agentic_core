@@ -169,12 +169,32 @@ def build_default_pipeline_registry(
             return None
         progress_run_id = str(request.metadata.get("progress_run_id", run_id))
         reporter = ProgressReporter(progress_sink, run_id=progress_run_id, task_id=request.task_id)
+        highest_agent_progress = 55
 
         def report(step: str, status: str) -> None:
+            nonlocal highest_agent_progress
+            # 55% used to be emitted for every successful CrewAI callback,
+            # making a healthy run look frozen while the individual agents
+            # were progressing. Keep the orchestration milestones (90/100)
+            # unchanged, but expose monotonic agent-level progress.
+            if status == "succeeded":
+                if step.endswith("case_analyst") or step.endswith("intelligence_analyst"):
+                    agent_progress = 60
+                elif step.endswith("evidence_review") or step.endswith("provenance_reviewer"):
+                    agent_progress = 66
+                elif step.endswith("syntax_writer") or step.endswith("presentation_writer") or step.endswith("post_writer") or step.endswith("advisory_writer") or step.endswith("summary_writer"):
+                    agent_progress = 74
+                elif step.endswith("quality_critic"):
+                    agent_progress = 82
+                else:
+                    agent_progress = 60
+            else:
+                agent_progress = 100
+            highest_agent_progress = max(highest_agent_progress, agent_progress)
             reporter.emit(
                 stage=f"agent.{step}",
                 status="succeeded" if status == "succeeded" else "failed",
-                progress=55 if status == "succeeded" else 100,
+                progress=highest_agent_progress,
                 message=f"Agent step {status}: {step}",
                 pipeline=str(request.metadata.get("pipeline", "")) or None,
                 error_code="AGENT_STEP_FAILED" if status != "succeeded" else None,

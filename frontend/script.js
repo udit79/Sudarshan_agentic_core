@@ -718,11 +718,20 @@ document.addEventListener("DOMContentLoaded", () => {
   function extractOutputForType(result, type) {
     if (!result) return null;
     let candidate = result[type];
+    // The Python status projection uses `responses`, while the gateway's
+    // persisted task normally flattens that map. Accept both shapes so a
+    // terminal failed run can still display its retained structured draft.
+    if (!candidate && result.responses && typeof result.responses === "object") {
+      candidate = result.responses[type];
+    }
+    if (!candidate && result.response && typeof result.response === "object") {
+      candidate = result.response;
+    }
     if (!candidate && type === "linkedin_post") candidate = result.linkedin || result.linkedin_post;
     if (!candidate && type === "presentation") candidate = result.ppt || result.presentation;
     if (!candidate && type === "executive_summary") candidate = result.brief || result.executive_summary;
     if (!candidate && result.pipeline === type) candidate = result;
-    if (!candidate && (result.title || result.executive_summary || result.slides || result.storyboard || result.post_text)) {
+    if (!candidate && (result.title || result.executive_summary || result.slides || result.storyboard || result.post_text || result.syntax)) {
       candidate = result;
     }
     if (!candidate) return null;
@@ -785,6 +794,47 @@ document.addEventListener("DOMContentLoaded", () => {
     const payload = extractOutputForType(task.result, activeTabType) || task.result;
     renderFormatView(activeTabType, payload);
     renderArtifactPreview(activeTabType, payload);
+    renderFailureNotice(task, activeTabType);
+  }
+
+  function renderFailureNotice(task, type) {
+    if (task?.status !== "failed" || !elements.richOutputContainer) return;
+    const response = extractResponseForType(task.result, type);
+    const quality = response?.metadata?.quality_review || {};
+    const issues = [
+      ...(Array.isArray(quality.issues) ? quality.issues : []),
+      ...(Array.isArray(quality.required_revisions) ? quality.required_revisions : []),
+    ];
+    const notice = document.createElement("div");
+    notice.className = "result-error-box pipeline-failure-notice";
+
+    const heading = document.createElement("strong");
+    heading.textContent = `${formatName(type)} was retained as a failed draft`;
+    notice.appendChild(heading);
+
+    const failure = document.createElement("p");
+    failure.textContent = response?.failure || task.error || "The pipeline did not pass its quality gate.";
+    notice.appendChild(failure);
+
+    const usage = response?.metadata?.failed_state || {};
+    const tokenUsage = task.usage || {};
+    const usageText = Number.isFinite(Number(tokenUsage.total_tokens))
+      ? ` · Usage ${Number(tokenUsage.total_tokens).toLocaleString()} tokens`
+      : "";
+    const details = document.createElement("small");
+    details.textContent = `Attempt ${usage.attempt || response?.attempts || "?"}/${usage.max_attempts || "?"} · Token budget ${usage.token_budget || "not reported"}${usageText}`;
+    notice.appendChild(details);
+
+    if (issues.length) {
+      const list = document.createElement("ul");
+      issues.slice(0, 8).forEach((issue) => {
+        const item = document.createElement("li");
+        item.textContent = String(issue);
+        list.appendChild(item);
+      });
+      notice.appendChild(list);
+    }
+    elements.richOutputContainer.prepend(notice);
   }
 
   function renderArtifactPreview(type, data) {
@@ -801,6 +851,9 @@ document.addEventListener("DOMContentLoaded", () => {
         : type === "presentation"
           ? artifact.path
           : (output?.image?.asset_uri || artifact.path || output?.artifact_path);
+    const hasLocalInfographicSyntax = type === "infographic"
+      && typeof output?.syntax === "string"
+      && output.syntax.trim().startsWith("infographic");
     const artifactId = api.activeMode === "fastapi"
       ? (currentTaskData.run_id || currentTaskData.task_id)
       : currentTaskData.task_id;
@@ -814,7 +867,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Failed or syntax-only pipelines must not render a broken image/video URL.
     // Keep the pipeline failure visible instead of presenting a misleading 404.
-    if (!artifactPath) {
+    // A syntax-only infographic is rendered lazily by the gateway's local
+    // renderer. Keep requesting the artifact URL instead of stopping here.
+    if (!artifactPath && !hasLocalInfographicSyntax) {
       const message = document.createElement("p");
       message.className = "result-message";
       message.textContent = response?.failure
@@ -858,6 +913,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!candidate && result.responses && typeof result.responses === "object") {
       candidate = result.responses[type];
     }
+    if (!candidate && result.response && typeof result.response === "object") {
+      candidate = result.response;
+    }
     if (!candidate && type === "linkedin_post") candidate = result.linkedin || result.linkedin_post;
     if (!candidate && type === "presentation") candidate = result.ppt || result.presentation;
     if (!candidate && result.pipeline === type) candidate = result;
@@ -870,7 +928,10 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.richOutputContainer.replaceChildren();
 
     if (!data) {
-      elements.richOutputContainer.innerHTML = `<p class="result-message">No rendered payload available for ${formatName(type)}.</p>`;
+      const terminalMessage = currentTaskData?.status === "failed"
+        ? `${formatName(type)} finished with a terminal failure, but the gateway returned no structured draft. Check the backend logs for task ${currentTaskData.task_id || "unknown"}.`
+        : `No rendered payload available for ${formatName(type)} yet.`;
+      elements.richOutputContainer.innerHTML = `<p class="result-message">${terminalMessage}</p>`;
       return;
     }
 

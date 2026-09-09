@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Protocol
 
 from crewai import TaskOutput
@@ -56,6 +56,8 @@ class MemoryRuntime:
     top_k: int = 12
     token_budget: int = 6000
     pipeline_name: str = "ntro_advisory"
+    query: str = ""
+    prompt_plan: dict[str, Any] = field(default_factory=dict)
 
 
 class RecallSudarshanMemoryTool(BaseTool):
@@ -240,6 +242,18 @@ def infographic_evidence_review_callback(output: TaskOutput) -> TaskOutput:
 
 
 def infographic_syntax_writer_callback(output: TaskOutput) -> TaskOutput:
+    writer = _ACTIVE_TASK_WRITER.get()
+    structured = getattr(output, "pydantic", None)
+    if writer is not None and structured is not None:
+        from pipelines.infographic.normalization import normalize_infographic_output
+
+        repaired = normalize_infographic_output(
+            structured,
+            query=writer.runtime.query,
+        )
+        output.pydantic = repaired
+        output.json_dict = repaired.model_dump(mode="json")
+        output.raw = repaired.model_dump_json()
     return _record_task_output("infographic_syntax_writer", output)
 
 

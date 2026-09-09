@@ -16,6 +16,10 @@ class InfographicFlow(TextTransformationFlow):
     """Generate, validate, and render a case-grounded AntV infographic."""
 
     pipeline_name = "infographic"
+    # A rejected but schema-valid AntV draft is still useful for local
+    # demonstration and debugging. It is rendered only as a failed draft;
+    # it is never written back as approved case output.
+    render_failed_draft = True
     agent_factory = staticmethod(build_agents)
     task_factory = staticmethod(build_tasks)
     output_model = InfographicOutput

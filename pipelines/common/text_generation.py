@@ -44,6 +44,11 @@ class TextTransformationFlow(Flow[TaskState]):
     task_factory: TaskFactory | None = None
     output_model: type[BaseModel] | None = None
     quality_model: type[BaseModel] | None = None
+    # Subclasses may opt into local preview rendering for a valid structured
+    # draft that failed the quality gate. The response remains ``failed`` and
+    # the frontend must label the artifact as a draft; this is only a preview
+    # path and never case-writes rejected content.
+    render_failed_draft = False
 
     def __init__(
         self,
@@ -120,14 +125,13 @@ class TextTransformationFlow(Flow[TaskState]):
             self._result = self._failure_response()
         if self._result:
             return self._result
-        return PipelineResponse(
-            status="failed",
-            pipeline=self.pipeline_name,
-            task_id=request.task_id,
-            run_id=self.state.run_id,
-            failure="flow completed without a terminal response",
-            attempts=self.state.attempt,
-        )
+        # CrewAI can finish a routed flow without invoking the terminal
+        # listener (for example after a rejected retry). Preserve the actual
+        # quality-gate failure instead of replacing it with an opaque message.
+        self.state.status = "failed"
+        self.state.failure = self.state.failure or "flow completed without a terminal response"
+        self._result = self._failure_response()
+        return self._result
 
     def _request(self) -> AdvisoryRequest:
         return AdvisoryRequest(
@@ -168,6 +172,8 @@ class TextTransformationFlow(Flow[TaskState]):
             top_k=self.state.top_k,
             token_budget=self.state.token_budget,
             pipeline_name=self.pipeline_name,
+            query=request.query,
+            prompt_plan=dict(self.state.prompt_plan),
         )
 
     @start()
@@ -225,6 +231,11 @@ class TextTransformationFlow(Flow[TaskState]):
                 verbose=False,
             )
             with writer.activate():
+                quality_feedback = (
+                    self.state.failure[-12000:]
+                    if self.state.attempt > 1 and self.state.failure
+                    else "No previous quality-gate feedback; produce the first draft against the stated requirements."
+                )
                 crew.kickoff(inputs={
                     "query": self.state.query,
                     "memory_context": self.state.memory_context,
@@ -236,6 +247,7 @@ class TextTransformationFlow(Flow[TaskState]):
                     "pipeline_options": self.state.pipeline_options,
                     "prompt_plan": self.state.prompt_plan,
                     "request_understanding": self.state.request_understanding,
+                    "quality_feedback": quality_feedback,
                 })
             output = self.output_model.model_validate(getattr(tasks["output"].output, "pydantic", None))  # type: ignore[union-attr]
             quality = self.quality_model.model_validate(getattr(tasks["quality"].output, "pydantic", None))  # type: ignore[union-attr]
@@ -363,12 +375,45 @@ class TextTransformationFlow(Flow[TaskState]):
         return self._result
 
     def _failure_response(self) -> PipelineResponse:
+        output = self.state.output
+        if output and self.render_failed_draft:
+            try:
+                draft = self.output_model.model_validate(output)  # type: ignore[union-attr]
+                rendered_draft = self.enrich_output(draft)
+                output = rendered_draft.model_dump(mode="json")
+                self.state.output = output
+            except Exception as exc:
+                self.state.record(
+                    "draft_render",
+                    "failed",
+                    summary="Rejected draft could not be rendered locally",
+                    error=str(exc),
+                )
+        failed_state = {
+            "status": self.state.status,
+            "attempt": self.state.attempt,
+            "max_attempts": self.state.max_attempts,
+            "failure": self.state.failure,
+            "quality_review": self.state.quality_review or {},
+            "token_budget": self.state.token_budget,
+        }
         return PipelineResponse(
             status="failed",
             pipeline=self.pipeline_name,
             task_id=self.state.task_id,
             run_id=self.state.run_id,
+            # Preserve the last structured draft even when the quality gate
+            # rejects it. This lets the gateway persist the failed state and
+            # lets the frontend show the draft and exact review feedback.
+            output=output,
+            artifact=self.state.artifact,
             failure=self.state.failure or "text transformation pipeline failed",
             attempts=self.state.attempt,
-            metadata={"events": len(self.state.events), "memory_records": len(self.state.memory_records)},
+            metadata={
+                "events": len(self.state.events),
+                "memory_records": len(self.state.memory_records),
+                "rendered_as_failed_draft": bool(output and self.render_failed_draft and self.state.artifact),
+                "quality_review": self.state.quality_review or {},
+                "failed_state": failed_state,
+            },
         )

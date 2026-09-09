@@ -30,9 +30,23 @@ class InfographicOutput(BaseModel):
     artifact_path: str | None = None
     render_error: str | None = None
 
-    @field_validator("syntax", "title", "alt_text")
+    @field_validator("syntax", "title", "alt_text", mode="before")
     @classmethod
-    def reject_unresolved_content(cls, value: str) -> str:
+    def normalize_and_reject_unresolved_content(cls, value: str) -> str:
+        if not isinstance(value, str):
+            return value
+        # AntV's DSL is parsed as source text. Curly quotation marks inside a
+        # quoted DSL value can produce an invalid token stream, so use safe
+        # ASCII punctuation before the quality critic and renderer see it.
+        value = (
+            value.replace("\u201c", "'")
+            .replace("\u201d", "'")
+            .replace("\u2018", "'")
+            .replace("\u2019", "'")
+            .replace("\u2013", "-")
+            .replace("\u2014", "-")
+            .replace("\u00a0", " ")
+        )
         lowered = value.lower()
         if "[insert" in lowered or "tbd" in lowered:
             raise ValueError("infographic content cannot contain unresolved placeholders")

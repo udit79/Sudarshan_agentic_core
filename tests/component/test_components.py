@@ -80,6 +80,18 @@ def test_prompt_crafter_produces_bounded_memory_delimited_plan() -> None:
     assert len(plan.prompt_text) <= 60000
 
 
+def test_prompt_crafter_separates_delivery_metadata_from_content() -> None:
+    request = make_request(
+        query="Create an executive summary and infographic",
+        metadata={"pipelines": ["executive_summary", "infographic"]},
+    )
+    understanding = RequestUnderstandingAgent().run(request)
+    plan = PromptCrafterAgent().run(request, understanding, "verified fact")
+
+    assert "delivery metadata, not as source evidence" in plan.prompt_text
+    assert "Recommended actions must be analytical actions" in plan.prompt_text
+
+
 def test_revision_request_is_structured_and_preserves_parent_link() -> None:
     request = AdvisoryRequest(
         query="Regenerate only the opening paragraph",

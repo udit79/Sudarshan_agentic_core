@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import express from "express";
 import path from "node:path";
@@ -15,7 +16,12 @@ const artifactRoot = path.resolve(repoRoot, "artifacts");
 
 function artifactCandidates(task, artifactKey) {
   const result = task.result && typeof task.result === "object" ? task.result : {};
-  const response = result[artifactKey] || result[artifactKey === "presentation" ? "ppt" : artifactKey];
+  const response = result[artifactKey]
+    || result.responses?.[artifactKey]
+    || result[artifactKey === "presentation" ? "ppt" : artifactKey]
+    || (result.response?.pipeline === artifactKey ? result.response : null)
+    || (result.response?.pipeline === "presentation" && artifactKey === "presentation" ? result.response : null)
+    || (result.pipeline === artifactKey ? result : null);
   const output = response?.output || {};
   const artifact = response?.artifact || {};
   const candidates = [];
@@ -32,6 +38,105 @@ function resolveArtifactPath(candidate) {
   const resolved = path.resolve(repoRoot, candidate);
   if (resolved !== artifactRoot && !resolved.startsWith(`${artifactRoot}${path.sep}`)) return null;
   return resolved;
+}
+
+function infographicResponse(task) {
+  const result = task.result && typeof task.result === "object" ? task.result : {};
+  return result.infographic
+    || result.responses?.infographic
+    || (result.response?.pipeline === "infographic" ? result.response : null)
+    || (result.pipeline === "infographic" ? result : null)
+    || null;
+}
+
+function safeSyntaxText(value, limit = 220) {
+  return String(value ?? "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/["'`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit)
+    .replace(/[ ,;:]+$/, "");
+}
+
+function rendererSafeInfographicSyntax(output) {
+  const original = typeof output?.syntax === "string" ? output.syntax : "";
+  const evidence = Array.isArray(output?.evidence) ? output.evidence : [];
+  const complexLayout = /^\s*infographic\s*\{/i.test(original) || original.length > 12000;
+  if (!complexLayout || !evidence.length) return original;
+
+  const items = [["Brief", safeSyntaxText(output.title || "Sudarshan Infographic")]];
+  for (const item of evidence) {
+    const id = safeSyntaxText(item.evidence_id || "Evidence", 40);
+    const claim = safeSyntaxText(item.claim || "Verified observation", 120);
+    let detail = safeSyntaxText(item.evidence_summary || item.claim || "Verified observation");
+    if (item.source_reference) detail += ` | Source: ${safeSyntaxText(item.source_reference, 80)}`;
+    if (Array.isArray(item.limitations) && item.limitations.length) {
+      detail += ` | Gap: ${safeSyntaxText(item.limitations.join("; "), 80)}`;
+    }
+    items.push([`[${id}] ${claim}`, detail]);
+  }
+  const caveat = Array.isArray(output?.caveats) ? output.caveats[0] : "";
+  if (caveat) items.push(["Caveat", safeSyntaxText(caveat)]);
+  return [
+    "infographic list-grid-simple",
+    "data",
+    "  lists",
+    ...items.flatMap(([label, desc]) => [
+      `    - label ${safeSyntaxText(label)}`,
+      `      desc ${safeSyntaxText(desc)}`,
+    ]),
+  ].join("\n");
+}
+
+async function renderInfographicDraft(task) {
+  const response = infographicResponse(task);
+  const output = response?.output;
+  const syntax = rendererSafeInfographicSyntax(output);
+  if (!syntax.trim().startsWith("infographic")) return null;
+
+  const rendererScript = path.resolve(repoRoot, "pipelines", "infographic", "antv_renderer", "render.mjs");
+  const outputDir = path.resolve(repoRoot, "artifacts", "infographics");
+  await fs.promises.mkdir(outputDir, { recursive: true });
+  const payload = JSON.stringify({
+    syntax,
+    outputDir,
+    artifactName: `failed-draft-${task.taskId}`,
+    width: 1200,
+    height: 675,
+  });
+
+  return new Promise((resolve) => {
+    const child = spawn(process.env.ANTV_NODE_BINARY || "node", [rendererScript], {
+      cwd: path.dirname(rendererScript),
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve(null);
+    }, Number(process.env.ANTV_RENDER_TIMEOUT_SECONDS || 60) * 1000);
+    child.once("error", () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return resolve(null);
+      try {
+        const rendered = JSON.parse(stdout);
+        const candidate = resolveArtifactPath(rendered.path);
+        resolve(candidate && fs.existsSync(candidate) ? candidate : null);
+      } catch {
+        resolve(null);
+      }
+    });
+    child.stdin.end(payload);
+  });
 }
 
 router.get("/auth/google", startGoogle);
@@ -94,8 +199,9 @@ router.get("/tasks/:taskId/artifacts/:artifactKey", async (req, res, next) => {
     const candidate = artifactCandidates(task, key)
       .map(resolveArtifactPath)
       .find((filePath) => filePath && fs.existsSync(filePath));
-    if (!candidate) return res.status(404).json({ error: "Artifact is not available for this task" });
-    return res.sendFile(candidate);
+    const fallback = !candidate && key === "infographic" ? await renderInfographicDraft(task) : null;
+    if (!candidate && !fallback) return res.status(404).json({ error: "Artifact is not available for this task" });
+    return res.sendFile(candidate || fallback);
   } catch (error) {
     return next(error);
   }

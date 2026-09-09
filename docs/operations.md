@@ -178,7 +178,17 @@ application, and the account has a verified email. Inspect the gateway log and
 
 Run the pinned installation in pipelines/infographic/antv_renderer/ or rerun
 startup.ps1. The Python pipeline validates syntax before the Node SSR bridge
-receives it.
+receives it. The bridge has a 60-second cold-start budget by default because
+the first Node SSR render can take more than 20 seconds on Windows. Override
+it with `ANTV_RENDER_TIMEOUT_SECONDS` if the host is slower; a renderer timeout
+is distinct from a quality-gate rejection.
+
+The pipeline converts complex JSON-like model layouts to the built-in
+`list-grid-simple` AntV template before rendering. This keeps the title, every
+evidence ID, source reference, known limitation, and required caveat visible
+when a model emits a layout that AntV cannot reliably parse. If a rejected
+draft still contains valid syntax, the gateway can render it locally as a
+clearly marked draft preview without another model/API call.
 
 ### Video is pending or uses title-card fallbacks
 
@@ -208,6 +218,15 @@ If a video response reports success but the browser still shows nothing, hard
 refresh the frontend and confirm that the result contains video artifact
 metadata. The native video file is written below
 `artifacts/videos/<child_run_id>/`.
+
+### A pipeline fails but the draft is needed for diagnosis
+
+Terminal failures for the executive-summary and infographic pipelines retain
+the last structured draft, quality-review issues, attempt counters, token
+budget, and gateway token usage. The frontend displays that failed draft in
+its normal output tab together with the quality-gate notice; it does not treat
+the draft as a released artifact. This makes a failed run inspectable without
+silently bypassing the quality gate.
 
 ### History is empty after a browser refresh
 
