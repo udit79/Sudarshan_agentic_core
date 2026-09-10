@@ -76,6 +76,7 @@ class SudarshanApplication:
         self.cache_store = CacheStore(
             os.getenv("SUDARSHAN_CACHE_DB_PATH", "artifacts/.state/skill_cache.db")
         )
+        self.cache_store.cleanup_expired()
         self.evidence_index = EvidenceIndex(
             os.getenv(
                 "SUDARSHAN_EVIDENCE_INDEX_DB_PATH",

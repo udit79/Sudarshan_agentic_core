@@ -93,3 +93,25 @@ def test_cache_claim_prevents_stampede_and_reclaims_expired_lease() -> None:
     assert store.try_claim(key, owner="worker-2", lease_seconds=1) == "worker-2"
     assert store.release_claim(key, "worker-1") is False
     assert store.release_claim(key, "worker-2") is True
+
+
+def test_cache_cleanup_removes_expired_entries_and_abandoned_claims() -> None:
+    store = CacheStore(":memory:")
+    key = fingerprint()
+    claim_owner = store.try_claim(key, owner="worker-abandoned", lease_seconds=10)
+    assert claim_owner == "worker-abandoned"
+    entry = store.put(
+        fingerprint=key,
+        skill_id="visual.flowchart",
+        skill_version="1.0.0",
+        artifact_ids=["artifact-expired"],
+        quality_report_id="quality-expired",
+        quality_status="passed",
+        ttl_seconds=10,
+    )
+
+    receipt = store.cleanup_expired(now=entry.created_at + 11)
+
+    assert receipt == {"cache_entries": 1, "cache_claims": 1}
+    assert store.get(key, now=entry.created_at + 11) is None
+    assert store.try_claim(key, owner="worker-new", lease_seconds=10) == "worker-new"

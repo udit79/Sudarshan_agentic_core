@@ -3390,7 +3390,9 @@ Optional vision-provider stages now use a bounded, opt-in retry seam; each
 attempt charges the stage budget again, transient failures may retry with a
 bounded backoff, and auth/budget/invalid-request failures go directly to the
 existing fallback path. Shared retry reservations, distributed leases, and
-abandoned-artifact cleanup remain deployment work.
+abandoned-artifact file cleanup remain deployment work. Skill-cache startup
+cleanup now removes expired references and abandoned generation claims without
+deleting source or artifact files.
 
 `T38` now has a deterministic local evaluation slice in
 `ingestion_pipelines/evaluation.py`. It runs the same reviewed query cases

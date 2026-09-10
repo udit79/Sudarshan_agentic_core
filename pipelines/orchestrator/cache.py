@@ -254,6 +254,32 @@ class CacheStore:
             self._connection.commit()
             return cursor.rowcount == 1
 
+    def cleanup_expired(self, *, now: float | None = None) -> dict[str, int]:
+        """Remove expired references and abandoned generation claims.
+
+        This never deletes artifact files. Artifact retention and garbage
+        collection require an artifact-manifest/object-store policy and stay
+        outside this cache metadata store.
+        """
+
+        current = time() if now is None else float(now)
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                entries = self._connection.execute(
+                    "DELETE FROM cache_entries WHERE expires_at IS NOT NULL AND expires_at <= ?",
+                    (current,),
+                )
+                claims = self._connection.execute(
+                    "DELETE FROM cache_claims WHERE expires_at <= ?",
+                    (current,),
+                )
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+        return {"cache_entries": int(entries.rowcount), "cache_claims": int(claims.rowcount)}
+
     def close(self) -> None:
         with self._lock:
             self._connection.close()

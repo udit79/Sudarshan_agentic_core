@@ -124,7 +124,9 @@ profile use the same Sudarshan application boundary.
   human-correction time. It is an offline evaluation slice, not production
   benchmark evidence. Optional vision-provider stages now have a bounded,
   opt-in retry seam that re-charges each attempt and preserves fallback
-  behavior for non-retryable failures.
+  behavior for non-retryable failures. Skill-cache startup cleanup now removes
+  expired cache references and abandoned generation claims without deleting
+  artifact files.
 
 ### Backend work still required
 
@@ -188,7 +190,7 @@ sequenceDiagram
 The current local verification snapshot is:
 
 ```text
-Python: 210 passed, 1 skipped
+Python: 211 passed, 1 skipped
 T28 reliability focus: 21 passed
 Frontend projection/cursor tests: 3 passed
 Node gateway tests: 9 passed
