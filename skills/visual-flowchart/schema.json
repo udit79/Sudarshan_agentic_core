@@ -1,0 +1,1 @@
+{"input":{"type":"FlowchartRequest","required":["purpose","nodes","edges"]},"output":{"type":"FlowchartIR","required":["nodes","edges","layout_metrics","svg_preview"]}}

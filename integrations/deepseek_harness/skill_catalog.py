@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from pipelines.orchestrator.contracts import RunPolicy, SkillManifest
+from skills.workspace import SkillWorkspace
 
 
 SKILL_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -101,12 +102,22 @@ def build_skill_manifests() -> dict[str, SkillManifest]:
             risk_class=str(definition["risk_class"]),
             coordination={"pipeline": definition["pipeline"]},
         )
+    # The versioned workspace is authoritative for packaged skills. Keep the
+    # definitions above as a compatibility fallback while teams migrate old
+    # or locally generated packages.
+    manifests.update(SkillWorkspace().manifests())
     return manifests
 
 
 def skill_pipeline(skill_id: str) -> str | None:
     definition = SKILL_DEFINITIONS.get(skill_id)
-    return str(definition["pipeline"]) if definition and definition["pipeline"] else None
+    if definition and definition["pipeline"]:
+        return str(definition["pipeline"])
+    package = SkillWorkspace().get(skill_id)
+    if package is not None:
+        pipeline = package.manifest.coordination.get("pipeline")
+        return str(pipeline) if pipeline else None
+    return None
 
 
 def canonical_skill_id(value: str) -> str:

@@ -1,0 +1,1 @@
+{"cases":[{"id":"unconnected-node","action":"block","repair":"fix graph IR"},{"id":"edge-crossing","action":"repair","repair":"rerun layout"},{"id":"text-overflow","action":"repair","repair":"shorten label or resize"}]}

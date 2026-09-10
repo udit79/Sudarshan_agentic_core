@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import os
+
 from crewai import Agent, Task
 
 from pipelines.advisory.schemas import IntelligenceBrief
 from pipelines.common.memory_tools import TaskMemoryWriter
-from pipelines.ppt.schemas import PresentationOutput, PresentationQualityReview
+from pipelines.ppt.schemas import DeckPlan, PresentationOutput, PresentationQualityReview
 
 
 def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str, Task]:
     """Build a sequential, typed crew with deterministic task callbacks."""
+
+    if os.getenv("SUDARSHAN_PPT_FLOW", "legacy").strip().lower() == "staged":
+        return build_staged_tasks(agents, writer)
 
     analysis = Task(
         description=(
@@ -67,3 +72,80 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
     )
 
     return {"analysis": analysis, "output": output, "quality": quality}
+
+
+def build_staged_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str, Task]:
+    """Build the staged PPT path behind an explicit feature flag.
+
+    The final output remains ``PresentationOutput`` for compatibility with the
+    existing flow. The plan and visual-routing tasks produce typed IR before
+    the writer converts it into that legacy delivery model.
+    """
+
+    grounding = Task(
+        description=(
+            "Ground the briefing in permitted memory for {query}. Return confirmed facts, "
+            "assessments, evidence IDs, confidence, and gaps. Never invent unsupported claims.\n"
+            "Permitted memory context:\n{memory_context}\nCentral prompt plan:\n{prompt_plan}"
+        ),
+        expected_output="A validated IntelligenceBrief JSON object.",
+        agent=agents["content_analyst"],
+        output_pydantic=IntelligenceBrief,
+        callback=writer.callback("ppt_grounding"),
+    )
+    plan = Task(
+        description=(
+            "Create a DeckPlan from the grounded intelligence. Give every slide one message, "
+            "choose a layout archetype, include evidence bindings, and create a SlideTask for "
+            "visual.flowchart when process/dependency structure is central. Do not emit PPTX XML."
+        ),
+        expected_output="A validated DeckPlan JSON object.",
+        agent=agents["deck_planner"],
+        context=[grounding],
+        output_pydantic=DeckPlan,
+        callback=writer.callback("ppt_deck_planner"),
+    )
+    visual_routing = Task(
+        description=(
+            "Review the DeckPlan and return the same typed plan with explicit visual routing. "
+            "Use visual.flowchart only for meaningful graph structure; keep the child input and "
+            "output references typed and bounded. Do not create renderer-specific markup."
+        ),
+        expected_output="A validated DeckPlan with deterministic visual task references.",
+        agent=agents["visual_router"],
+        context=[plan],
+        output_pydantic=DeckPlan,
+        callback=writer.callback("ppt_visual_router"),
+    )
+    output = Task(
+        description=(
+            "Convert the grounded intelligence and routed DeckPlan into a complete validated "
+            "PresentationOutput. Preserve evidence bindings, one message per slide, speaker "
+            "notes, uncertainty, and gaps. Use only typed child artifact references for visuals. "
+            "The classification is {classification_level}; distribution is {distribution}."
+        ),
+        expected_output="A complete validated PresentationOutput JSON object.",
+        agent=agents["presentation_writer"],
+        context=[grounding, plan, visual_routing],
+        output_pydantic=PresentationOutput,
+        callback=writer.callback("ppt_slide_content"),
+    )
+    quality = Task(
+        description=(
+            "Review the staged PresentationOutput and its plan. Check evidence bindings, one "
+            "message per slide, visual routing, placeholders, overflow risks, agenda alignment, "
+            "gaps, and unsupported claims. Return precise slide-level repair IDs."
+        ),
+        expected_output="A validated PresentationQualityReview JSON object.",
+        agent=agents["quality_critic"],
+        context=[plan, visual_routing, output],
+        output_pydantic=PresentationQualityReview,
+        callback=writer.callback("ppt_staged_quality_critic"),
+    )
+    return {
+        "grounding": grounding,
+        "plan": plan,
+        "visual_routing": visual_routing,
+        "output": output,
+        "quality": quality,
+    }

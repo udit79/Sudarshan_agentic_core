@@ -1,0 +1,14 @@
+{
+  "skill_id": "visual.flowchart",
+  "version": "1.0.0",
+  "purpose": "Create an editable, renderer-neutral flowchart IR for parent skills.",
+  "input_schema": "FlowchartRequest",
+  "output_artifact_types": ["diagram.ir", "svg"],
+  "required_capabilities": ["render.diagram"],
+  "allowed_tools": ["diagram.layout", "artifact.write"],
+  "quality_gates": ["schema", "graph", "visual"],
+  "risk_class": "RESTRICTED",
+  "model_policy": {"delegation": "bounded", "temperature": 0.1},
+  "budget_policy": {"max_model_tokens": 3500, "max_wall_time_ms": 120000, "max_parallel_children": 1},
+  "coordination": {"pipeline": null, "parent_usable": true}
+}

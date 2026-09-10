@@ -1,0 +1,1 @@
+{"input":{"type":"AdvisoryRequest"},"output":{"type":"StoryboardPackage","required":["scenes","timeline","qa"]},"scene_contract":{"idempotent":true,"ordered":true}}

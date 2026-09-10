@@ -1,0 +1,1 @@
+{"input":{"type":"AdvisoryRequest"},"output":{"type":"LinkedInDraft","required":["post","claim_bindings","humanizer_report"]},"publish":{"separate_approval":true}}

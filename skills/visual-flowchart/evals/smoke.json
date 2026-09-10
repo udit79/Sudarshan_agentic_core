@@ -1,0 +1,1 @@
+{"case_id":"simple-process","input":{"nodes":3,"edges":2},"assertions":["reachable","bounded","editable_preview"]}

@@ -1,0 +1,14 @@
+{
+  "skill_id": "presentation.case-brief",
+  "version": "1.0.0",
+  "purpose": "Create a grounded, editable intelligence briefing deck.",
+  "input_schema": "AdvisoryRequest",
+  "output_artifact_types": ["pptx", "slide-preview"],
+  "required_capabilities": ["render.presentation"],
+  "allowed_tools": ["memory.recall", "diagram.layout", "artifact.write"],
+  "quality_gates": ["schema", "evidence", "render", "overflow"],
+  "risk_class": "RESTRICTED",
+  "model_policy": {"delegation": "bounded", "temperature": 0.2},
+  "budget_policy": {"max_model_tokens": 6000, "max_wall_time_ms": 300000, "max_parallel_children": 2},
+  "coordination": {"pipeline": "presentation", "children": ["visual.flowchart"]}
+}

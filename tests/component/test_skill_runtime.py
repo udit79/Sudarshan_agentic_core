@@ -4,6 +4,8 @@ from threading import Event
 from time import sleep
 
 from pipelines.common.contracts import PipelineResponse
+from pipelines.orchestrator.budget import BudgetController
+from pipelines.orchestrator.cache import CacheStore
 from pipelines.orchestrator.contracts import RunPolicy, SkillCall, SkillManifest
 from pipelines.orchestrator.skill_runtime import RunContext, SkillRuntime
 from pipelines.orchestrator.types import PipelineAdapter
@@ -126,3 +128,78 @@ def test_runtime_timeout_is_bounded_and_parent_cancellation_is_cooperative() -> 
     cancelled = runtime.invoke(call(), parent_context=context(cancel_event=cancel_event))
     assert cancelled.status == "cancelled"
     assert cancelled.failure_code == "PARENT_CANCELLED"
+
+
+def test_runtime_reserves_and_commits_provider_usage() -> None:
+    controller = BudgetController()
+
+    def runner(request):
+        return PipelineResponse(
+            status="succeeded",
+            pipeline="visual.flowchart",
+            task_id=request.task_id,
+            run_id=request.task_id,
+            output={"ok": True},
+            metadata={
+                "usage": {
+                    "provider": "test",
+                    "model": "test-model",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "tool_calls": 1,
+                    "latency_ms": 25,
+                    "is_estimate": True,
+                }
+            },
+        )
+
+    runtime = SkillRuntime(
+        {"visual.flowchart": PipelineAdapter("visual.flowchart", runner)},
+        {"visual.flowchart": manifest()},
+        budget_controller=controller,
+    )
+    result = runtime.invoke(
+        call(policy=RunPolicy(max_model_tokens=1000, max_wall_time_ms=500, max_tool_calls=2)),
+        parent_context=context(policy=RunPolicy(max_model_tokens=1000, max_wall_time_ms=500, max_tool_calls=2)),
+    )
+
+    assert result.status == "succeeded"
+    snapshot = controller.snapshot("run-1")
+    assert snapshot.used_model_tokens == 150
+    assert snapshot.used_tool_calls == 1
+    assert snapshot.active_concurrency == 0
+
+
+def test_runtime_reuses_only_quality_passed_artifact_from_cache() -> None:
+    invocations = []
+
+    def runner(request):
+        invocations.append(request)
+        return PipelineResponse(
+            status="succeeded",
+            pipeline="visual.flowchart",
+            task_id=request.task_id,
+            run_id=request.task_id,
+            output={"ok": True},
+            artifact={"artifact_ids": ["artifact-cached"]},
+            metadata={
+                "quality_status": "passed",
+                "quality_report_id": "quality-cached",
+            },
+        )
+
+    events = []
+    runtime = SkillRuntime(
+        {"visual.flowchart": PipelineAdapter("visual.flowchart", runner)},
+        {"visual.flowchart": manifest()},
+        cache_store=CacheStore(":memory:"),
+        event_sink=lambda name, payload: events.append((name, payload)),
+    )
+    first = runtime.invoke(call(), parent_context=context())
+    second = runtime.invoke(call(), parent_context=context())
+
+    assert first.status == "succeeded"
+    assert second.status == "succeeded"
+    assert second.artifact_ids == ["artifact-cached"]
+    assert len(invocations) == 1
+    assert [name for name, _ in events].count("skill.cache_hit") == 1

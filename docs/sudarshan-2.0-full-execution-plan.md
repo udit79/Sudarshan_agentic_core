@@ -3099,7 +3099,7 @@ These papers should be treated according to evidence strength: arXiv papers and 
 
 ### 25.1 Audit verdict
 
-The architecture remains internally coherent, but implementation is a phased migration rather than a completed target system. The repository now has verified local slices for T00–T07, most of T08, and the first T09 frontend boundary: common contracts, replayable events, artifact access, asynchronous Harness/API admission, Node projections, durable local queueing, worker leases, retries, cancellation, timeout seams, canonical frontend projections, and resumable SSE cursors. The target still adds the full parent/child dashboard migration, typed child skill runtime, dependency DAG, budgets, shared cache, skill workspace, staged PPT/video/infographic/LinkedIn pipelines, usage accounting, distributed scheduling, and production evaluation.
+The architecture remains internally coherent, but implementation is a phased migration rather than a completed target system. The repository now has verified local slices for T00–T07, most of T08, T09, T10, T11, T12, T13, and the exact local portion of T14: common contracts, replayable events, artifact access, asynchronous Harness/API admission, Node projections, durable local queueing, worker leases, retries, cancellation, timeout seams, canonical frontend projections, typed child execution, persisted DAG admission, budget reservations, verified artifact caching, and resumable SSE cursors. The target still adds shared cache coordination, the skill workspace, staged PPT/video/infographic/LinkedIn pipelines, provider-normalized usage, distributed scheduling, and production evaluation.
 
 Therefore:
 
@@ -3243,12 +3243,17 @@ Completed on the `Sudarshan2.0` branch:
 - First `T11` DAG slice: `pipelines/orchestrator/dag.py` validates dependency graphs, persists node/run state in SQLite, admits independent nodes for bounded parallel claims, blocks failed descendants with typed reasons, emits node lifecycle events, and bounds repair loops at the node policy.
 - T11 scheduler-integration slice: `api/dag_scheduler.py` bridges ready DAG nodes to leased `LocalRunScheduler` jobs, returns node results to the persisted DAG, admits newly unlocked dependents, and keeps node execution bounded by the existing worker pool.
 - First `T12` Harness adapter slice: `integrations/deepseek_harness/skill_catalog.py` defines canonical versioned manifests and aliases; MCP now exposes safe skill discovery, manifest lookup, local typed child invocation, and durable skill-job submission. Skill-job results persist only typed `SkillResult` references in the scheduler, never raw model output.
+- First `T13` budget slice: `pipelines/orchestrator/budget.py` provides hard reservations and usage commits for model tokens, tool calls, wall time, cost, and concurrency; `SkillRuntime` enforces the ledger and MCP exposes safe usage counters through `get_sudarshan_usage`.
+- First `T14` cache slice: `pipelines/orchestrator/cache.py` provides exact fingerprinting, verified-artifact-only entries, TTL expiry, privacy-filtered metadata, and stampede leases; `SkillRuntime` validates access first, reuses only quality-passed artifacts, and never treats cache failure as artifact failure.
+- First `T15` skill-workspace slice: `skills/` provides validated versioned packages with compact manifests, lazy `SKILL.md` bodies, schemas, policy, failure cases, and smoke eval fixtures; the Harness catalog consumes workspace manifests while preserving legacy fallback definitions.
+- First `T16` presentation-IR slice: `pipelines/ppt/schemas.py` adds renderer-neutral `DeckPlan`, `SlideSpec`, `SlideTask`, `SlideContentIR`, `VisualIR`, evidence bindings, normalized layout boxes, and targeted `RepairPatch` contracts while keeping the legacy `PresentationOutput` renderer path compatible.
+- First `T17` staged-PPT slice: `SUDARSHAN_PPT_FLOW=staged` selects grounding, deck planning, visual routing, slide content, and quality tasks with named persisted callbacks; legacy mode remains the default and staged output is still converted to `PresentationOutput`.
 
 Verification after this slice:
 
 ```text
 Focused contract/progress/status/artifact/prompt/security/MCP/skill-runtime test suites: passed
-Broader Python/pipeline/component/system/API suite after this slice: 132 passed, 1 skipped, 3 warnings (repository-local pytest basetemp)
+Broader Python/pipeline/component/system/API suite before this slice: 136 passed, 1 skipped, 3 warnings (repository-local pytest basetemp)
 Node gateway syntax check and test suite: passed, 9 tests
 Frontend projection/cursor tests: passed, 3 tests; frontend JavaScript syntax checks: passed
 Typed child-runtime and contract tests: passed, 16 tests
@@ -3261,6 +3266,11 @@ git diff --check: passed
 `T10` is in progress. The in-process adapter wrapper is locally verified; T12 must expose the same runtime through Harness subagents/jobs without moving scheduler truth into Harness history.
 `T11` is in progress. The persisted DAG and local scheduler bridge are verified; remaining work is failure-injection coverage, restart reconciliation for in-flight node jobs, and distributed-store semantics before multi-host deployment.
 `T12` is in progress. Native Harness/MCP adapters and background skill-job projection are locally verified; `visual.flowchart` remains discovery-only until its executable adapter is registered, and Harness subagent/job interoperability still needs live external-client coverage.
+`T13` is in progress. The in-process child budget ledger and usage projection are verified; provider-specific usage instrumentation, top-level run aggregation, persistence across worker restarts, and distributed reservations remain open.
+`T14` is locally implemented and targeted-tested. Exact cache fingerprints, verified-only writes, expiry, privacy-filtered metadata, stampede leases, runtime cache hits, and policy/authorization invalidation are covered locally; shared cache storage, event-driven invalidation, cache metrics, and semantic cache reuse remain open.
+`T15` is locally implemented and verified. Seven packaged skills now have manifests, lazy bodies, schemas, policies, failure cases, and smoke fixtures; signed distribution, package ownership, compatibility migration, and user-install security remain open.
+`T16` is locally implemented and targeted-tested. The typed presentation boundary supports flowchart child routing and rejects unresolved placeholders/renderer payloads; renderer conversion, slide image QA, visual regression, and legacy-to-IR migration remain open.
+`T17` is locally implemented and targeted-tested. The staged task graph and feature flag are present with legacy compatibility; real IR-to-child execution, renderer integration, matched evaluations, and promotion gates remain open.
 
 ## Sources
 

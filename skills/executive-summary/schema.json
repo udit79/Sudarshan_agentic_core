@@ -1,0 +1,1 @@
+{"input":{"type":"AdvisoryRequest"},"output":{"type":"ExecutiveSummary","required":["known","uncertain","decisions","risks","next_steps","evidence"]}}

@@ -1,0 +1,1 @@
+{"classification":"RESTRICTED","required_approvals":["publish"],"side_effects":["write_artifact","publish"],"allowed_memory_scopes":["task","case"]}

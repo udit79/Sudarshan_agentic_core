@@ -1,0 +1,1 @@
+{"cases":[{"id":"density-too-high","action":"repair","repair":"reduce visual elements"},{"id":"unsupported-claim","action":"block","repair":"bind evidence"},{"id":"contrast-fail","action":"repair","repair":"apply accessible theme"}]}

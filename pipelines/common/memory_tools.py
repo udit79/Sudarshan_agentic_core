@@ -155,6 +155,11 @@ class TaskMemoryWriter:
             "infographic_syntax_writer": infographic_syntax_writer_callback,
             "infographic_quality_critic": infographic_quality_critic_callback,
             "ppt_content_analyst": ppt_content_analyst_callback,
+            "ppt_grounding": ppt_grounding_callback,
+            "ppt_deck_planner": ppt_deck_planner_callback,
+            "ppt_visual_router": ppt_visual_router_callback,
+            "ppt_slide_content": ppt_slide_content_callback,
+            "ppt_staged_quality_critic": ppt_staged_quality_critic_callback,
             "ppt_presentation_writer": ppt_presentation_writer_callback,
             "ppt_quality_critic": ppt_quality_critic_callback,
         }
@@ -263,6 +268,26 @@ def infographic_quality_critic_callback(output: TaskOutput) -> TaskOutput:
 
 def ppt_content_analyst_callback(output: TaskOutput) -> TaskOutput:
     return _record_task_output("ppt_content_analyst", output)
+
+
+def ppt_grounding_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("ppt_grounding", output)
+
+
+def ppt_deck_planner_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("ppt_deck_planner", output)
+
+
+def ppt_visual_router_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("ppt_visual_router", output)
+
+
+def ppt_slide_content_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("ppt_slide_content", output)
+
+
+def ppt_staged_quality_critic_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("ppt_staged_quality_critic", output)
 
 
 def ppt_presentation_writer_callback(output: TaskOutput) -> TaskOutput:

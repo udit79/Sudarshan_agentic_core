@@ -1,0 +1,1 @@
+{"cases":[{"id":"scene-provider-timeout","action":"retry","repair":"retry scene only"},{"id":"missing-evidence","action":"block","repair":"request source"},{"id":"composition-gap","action":"repair","repair":"rebuild timeline"}]}

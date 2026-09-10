@@ -207,6 +207,14 @@ def get_sudarshan_health() -> dict[str, Any]:
 
 
 @mcp.tool(
+    name="get_sudarshan_usage",
+    description="Read safe token, tool, wall-time, cost, and concurrency budget counters for a skill run.",
+)
+def get_sudarshan_usage(run_id: str) -> dict[str, Any]:
+    return get_application().usage(run_id)
+
+
+@mcp.tool(
     name="list_sudarshan_skills",
     description=(
         "List canonical Sudarshan skills and their safe capabilities. Use this "

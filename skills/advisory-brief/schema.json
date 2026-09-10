@@ -1,0 +1,1 @@
+{"input":{"type":"AdvisoryRequest"},"output":{"type":"Advisory","required":["claims","assessments","risks","recommendations","evidence"]}}

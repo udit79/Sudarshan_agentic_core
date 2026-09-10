@@ -1,0 +1,14 @@
+{
+  "skill_id": "advisory.brief",
+  "version": "1.0.0",
+  "purpose": "Create a formal case advisory with provenance and uncertainty markers.",
+  "input_schema": "AdvisoryRequest",
+  "output_artifact_types": ["advisory"],
+  "required_capabilities": ["write.advisory"],
+  "allowed_tools": ["memory.recall", "artifact.write"],
+  "quality_gates": ["schema", "evidence", "policy"],
+  "risk_class": "RESTRICTED",
+  "model_policy": {"delegation": "bounded", "temperature": 0.2},
+  "budget_policy": {"max_model_tokens": 6000, "max_wall_time_ms": 300000, "max_parallel_children": 2},
+  "coordination": {"pipeline": "advisory"}
+}

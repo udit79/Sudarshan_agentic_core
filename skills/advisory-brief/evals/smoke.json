@@ -1,0 +1,1 @@
+{"case_id":"case-advisory","input_ref":"synthetic_smoke_case","assertions":["classification_preserved","confidence_labeled","policy_gate"]}

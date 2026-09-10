@@ -1,0 +1,14 @@
+{
+  "skill_id": "executive.summary",
+  "version": "1.0.0",
+  "purpose": "Produce a concise, evidence-linked intelligence summary.",
+  "input_schema": "AdvisoryRequest",
+  "output_artifact_types": ["brief"],
+  "required_capabilities": ["write.brief"],
+  "allowed_tools": ["memory.recall", "artifact.write"],
+  "quality_gates": ["schema", "evidence"],
+  "risk_class": "RESTRICTED",
+  "model_policy": {"delegation": "bounded", "temperature": 0.2},
+  "budget_policy": {"max_model_tokens": 3500, "max_wall_time_ms": 180000, "max_parallel_children": 1},
+  "coordination": {"pipeline": "executive_summary"}
+}

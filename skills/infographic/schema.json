@@ -1,0 +1,1 @@
+{"input":{"type":"AdvisoryRequest"},"output":{"type":"VisualSummary","required":["scene_ir","svg","evidence_bindings"]},"child_calls":["visual.flowchart"]}

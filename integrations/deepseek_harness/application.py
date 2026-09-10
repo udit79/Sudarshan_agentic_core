@@ -20,6 +20,8 @@ from pipelines.common.contracts import AdvisoryRequest
 from pipelines.common.audit_logger import get_audit_logger
 from api.scheduler import LocalRunScheduler
 from pipelines.orchestrator import (
+    BudgetController,
+    CacheStore,
     PipelineAdapter,
     RunContext,
     RunEvent,
@@ -54,6 +56,10 @@ class SudarshanApplication:
             checkpointer=create_sqlite_checkpointer(),
         )
         self.skill_manifests = build_skill_manifests()
+        self.budget_controller = BudgetController()
+        self.cache_store = CacheStore(
+            os.getenv("SUDARSHAN_CACHE_DB_PATH", "artifacts/.state/skill_cache.db")
+        )
         runtime_adapters: dict[str, PipelineAdapter] = {}
         for skill_id, manifest in self.skill_manifests.items():
             pipeline = skill_pipeline(skill_id)
@@ -68,6 +74,8 @@ class SudarshanApplication:
             runtime_adapters,
             self.skill_manifests,
             event_sink=self._publish_skill_event,
+            budget_controller=self.budget_controller,
+            cache_store=self.cache_store,
         )
         self._run_contexts: dict[str, dict[str, str]] = {}
         self._run_context_lock = Lock()
@@ -204,6 +212,14 @@ class SudarshanApplication:
         payload["available"] = canonical in self.skill_runtime._adapters
         payload["pipeline"] = skill_pipeline(canonical)
         return payload
+
+    def usage(self, run_id: str) -> dict[str, Any]:
+        """Return safe budget and usage counters for a registered skill run."""
+
+        try:
+            return self.budget_controller.usage(run_id)
+        except Exception:
+            return {"run_id": run_id, "status": "not_registered"}
 
     def submit_skill(
         self,

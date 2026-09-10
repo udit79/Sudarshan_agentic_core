@@ -1,0 +1,1 @@
+{"cases":[{"id":"unsupported-claim","action":"block","repair":"request evidence binding"},{"id":"visual-overflow","action":"repair","repair":"target slide layout"},{"id":"child-timeout","action":"retry","repair":"retry bounded child"}]}

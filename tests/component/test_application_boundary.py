@@ -23,6 +23,7 @@ def test_harness_exposes_lifecycle_tools() -> None:
         "cancel_sudarshan",
         "get_sudarshan_status",
         "get_sudarshan_artifact",
+        "get_sudarshan_usage",
     } <= names
 
 

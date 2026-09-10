@@ -1,0 +1,14 @@
+{
+  "skill_id": "infographic",
+  "version": "1.0.0",
+  "purpose": "Transform scoped evidence into a validated visual summary.",
+  "input_schema": "AdvisoryRequest",
+  "output_artifact_types": ["svg", "png"],
+  "required_capabilities": ["render.infographic"],
+  "allowed_tools": ["memory.recall", "diagram.layout", "artifact.write"],
+  "quality_gates": ["schema", "evidence", "visual"],
+  "risk_class": "RESTRICTED",
+  "model_policy": {"delegation": "bounded", "temperature": 0.2},
+  "budget_policy": {"max_model_tokens": 5000, "max_wall_time_ms": 300000, "max_parallel_children": 2},
+  "coordination": {"pipeline": "infographic", "children": ["visual.flowchart"]}
+}

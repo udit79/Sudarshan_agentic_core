@@ -37,6 +37,18 @@ from pipelines.orchestrator.dag import (
     DAGRunState,
     DependencyDAG,
 )
+from pipelines.orchestrator.budget import (
+    BudgetController,
+    BudgetExceededError,
+    BudgetReservation,
+    BudgetSnapshot,
+)
+from pipelines.orchestrator.cache import (
+    CacheEntry,
+    CacheStore,
+    build_cache_fingerprint,
+    stable_hash,
+)
 from pipelines.orchestrator.types import (
     OrchestrationResult,
     PipelineAdapter,
@@ -78,6 +90,14 @@ __all__ = [
     "DAGNodeState",
     "DAGRunState",
     "DependencyDAG",
+    "BudgetController",
+    "BudgetExceededError",
+    "BudgetReservation",
+    "BudgetSnapshot",
+    "CacheEntry",
+    "CacheStore",
+    "build_cache_fingerprint",
+    "stable_hash",
     "UsageRecord",
     "load_pipeline_plugins",
     "PipelineOrchestrator",

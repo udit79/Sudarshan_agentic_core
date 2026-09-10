@@ -1,0 +1,1 @@
+{"cases":[{"id":"unsupported-claim","action":"block","repair":"remove or bind claim"},{"id":"humanizer-fail","action":"repair","repair":"rewrite targeted sentence"},{"id":"publish-without-approval","action":"block","repair":"request approval"}]}

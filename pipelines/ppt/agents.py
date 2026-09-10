@@ -49,6 +49,33 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
             ),
             **common,
         ),
+        "deck_planner": Agent(
+            role="Briefing Deck Planner",
+            goal=(
+                "Turn grounded case intelligence into a coherent slide plan with one message "
+                "per slide and explicit visual archetypes."
+            ),
+            backstory=(
+                "You plan editable briefing structures before rendering. You choose a flowchart "
+                "only when process or dependency structure is materially useful, and keep every "
+                "planned visual tied to evidence. "
+                f"{NTRO_AGENT_GUARDRAILS}"
+            ),
+            **common,
+        ),
+        "visual_router": Agent(
+            role="Presentation Visual Router",
+            goal=(
+                "Route each planned slide to the smallest appropriate visual specialist and "
+                "return typed task references rather than renderer-specific markup."
+            ),
+            backstory=(
+                "You route flowcharts, charts, tables, and narrative slides to bounded skills. "
+                "You never fabricate evidence and never emit PowerPoint XML. "
+                f"{NTRO_AGENT_GUARDRAILS}"
+            ),
+            **common,
+        ),
         "quality_critic": Agent(
             role="Presentation Quality Reviewer",
             goal=(
