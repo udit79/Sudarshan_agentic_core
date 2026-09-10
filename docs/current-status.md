@@ -117,7 +117,12 @@ profile use the same Sudarshan application boundary.
   metrics include queue-wait telemetry. Shared indexing, full provider-usage
   reconciliation, and distributed ingestion remain open in T36–T38. The
   ingestion receipt now separates preflight token estimates from provider
-  response usage when available.
+  response usage when available. T38 now has a deterministic multimodal
+  benchmark and promotion gate comparing flat-text retrieval with typed
+  evidence and recording extraction coverage, evidence recall/faithfulness,
+  tokens, cost, P50/P95 latency, cache hits, queue wait, repairs, and
+  human-correction time. It is an offline evaluation slice, not production
+  benchmark evidence.
 
 ### Backend work still required
 
@@ -140,10 +145,11 @@ These are real engineering gaps, not cosmetic follow-ups:
 7. Finish cross-skill execution: executable LinkedIn visual-child
    reconciliation, full PPT child routing/assembly, and external MCP-client
    lifecycle smoke tests.
-8. Implement the T34–T38 ingestion workstream: typed modality evidence,
-   modality provenance, structure-aware indexing,
-   Cognee projection, cache/budget controls, security, and multimodal retrieval
-   evaluation.
+8. Complete the T34–T38 ingestion workstream in production-like infrastructure:
+   shared evidence/object storage, modality provenance, structure-aware
+   indexing, Cognee projection, cache/budget controls, security, and benchmark
+   runs on reviewed real or sanitized sources. The local T38 evaluator is
+   ready, but it is not a substitute for these runs.
 9. Run T29 matched evaluations across legacy/staged pipelines for quality,
    groundedness, tokens, cost, latency, cache savings, retries, and human
    correction time; then complete T30 release/rollback sign-off.

@@ -38,6 +38,17 @@ from ingestion_pipelines.runtime import (
     IngestionUsageRecorder,
     build_ingestion_stage_fingerprint,
 )
+from ingestion_pipelines.evaluation import (
+    BenchmarkCase,
+    BenchmarkMetrics,
+    BenchmarkObservation,
+    BenchmarkReport,
+    BenchmarkSignals,
+    PromotionDecision,
+    PromotionThresholds,
+    evaluate_promotion,
+    run_multimodal_benchmark,
+)
 
 __all__ = [
     "IngestedDocument",
@@ -75,4 +86,13 @@ __all__ = [
     "IngestionStageCacheEntry",
     "IngestionUsageRecorder",
     "build_ingestion_stage_fingerprint",
+    "BenchmarkCase",
+    "BenchmarkMetrics",
+    "BenchmarkObservation",
+    "BenchmarkReport",
+    "BenchmarkSignals",
+    "PromotionDecision",
+    "PromotionThresholds",
+    "evaluate_promotion",
+    "run_multimodal_benchmark",
 ]

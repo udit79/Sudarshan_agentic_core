@@ -48,3 +48,13 @@ For focused work:
 # API/application boundary
 .\.venv\Scripts\python.exe -m pytest api/tests tests/system -q --basetemp .pytest-tmp-system
 ```
+
+The deterministic T38 ingestion benchmark can be run with:
+
+```powershell
+uv run pytest -q tests/component/test_multimodal_evaluation.py
+```
+
+It compares flat-text retrieval with typed, source-mapped evidence. Production
+promotion must use the same report shape with reviewed sanitized corpora and
+measured runtime signals; synthetic fixtures are only a regression harness.

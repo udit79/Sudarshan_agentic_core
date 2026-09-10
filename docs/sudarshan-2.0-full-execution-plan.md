@@ -3387,6 +3387,19 @@ preflight estimates from actual image/PDF provider response usage when
 available, and the local scheduler already records
 `queue_wait_ms` per job and average/maximum queue wait in health metrics.
 
+`T38` now has a deterministic local evaluation slice in
+`ingestion_pipelines/evaluation.py`. It runs the same reviewed query cases
+through a flat-text compatibility baseline and the scoped typed-evidence
+index, preserving exact evidence IDs and source locations for recall and
+faithfulness scoring. The report records extraction coverage, evidence and
+document recall, P50/P95 latency, estimated/actual tokens, cost, cache-hit
+rate, queue wait, repair rate, and human-correction time, then applies an
+explicit promotion decision. Synthetic PDF, PPTX, infographic, and long-video
+fixtures cover table, visual, partial-failure, paraphrase, and cross-skill
+retrieval cases. This does not close production T38: the benchmark still needs
+sanitized real corpora, shared storage, concurrent-worker measurements, and a
+reviewed release record.
+
 ### T23 research alignment
 
 The implementation adopts the relevant design principles from the repositories
