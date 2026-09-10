@@ -104,6 +104,7 @@ class LocalRunScheduler:
                     error TEXT,
                     created_at REAL NOT NULL,
                     started_at REAL,
+                    queue_wait_ms REAL,
                 updated_at REAL NOT NULL,
                     lease_until REAL,
                     retry_at REAL,
@@ -112,6 +113,15 @@ class LocalRunScheduler:
                 );
                 CREATE INDEX IF NOT EXISTS idx_run_queue_status
                     ON run_queue(status, created_at);
+                CREATE TABLE IF NOT EXISTS run_queue_events (
+                    run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    message TEXT,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY(run_id, sequence)
+                );
                 """
             )
             columns = {
@@ -126,11 +136,23 @@ class LocalRunScheduler:
                 )
             if "skill_result_json" not in columns:
                 connection.execute("ALTER TABLE run_queue ADD COLUMN skill_result_json TEXT")
+            if "queue_wait_ms" not in columns:
+                connection.execute("ALTER TABLE run_queue ADD COLUMN queue_wait_ms REAL")
 
     @staticmethod
     def _request_hash(payload: Mapping[str, Any]) -> str:
         encoded = json.dumps(dict(payload), sort_keys=True, ensure_ascii=False, default=str)
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _identity_payload(cls, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Exclude process-local ingestion paths from idempotency fingerprints."""
+
+        if payload.get("job_type") != "ingestion":
+            return payload
+        identity = dict(payload)
+        identity.pop("file_path", None)
+        return identity
 
     @staticmethod
     def _queue_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -172,6 +194,31 @@ class LocalRunScheduler:
                 (now, now),
             )
 
+    def _record_event(
+        self,
+        run_id: str,
+        event_type: str,
+        status: str,
+        message: str = "",
+    ) -> None:
+        now = time.time()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) AS sequence FROM run_queue_events WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            sequence = int(row["sequence"]) + 1
+            connection.execute(
+                """
+                INSERT INTO run_queue_events
+                (run_id, sequence, event_type, status, message, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, sequence, str(event_type), str(status), str(message)[:2000], now),
+            )
+            connection.commit()
+
     def _queued_ids(self) -> list[str]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -201,9 +248,15 @@ class LocalRunScheduler:
             "requested_pipelines": list(payload.get("requested_pipelines") or []),
             "skill_id": metadata.get("skill_id"),
             "skill_version": metadata.get("skill_version"),
+            "job_type": str(payload.get("job_type", "run")),
+            "source_reference": payload.get("source_reference"),
+            "source_hash": payload.get("source_hash"),
+            "media_type": payload.get("media_type"),
+            "modality": payload.get("modality"),
             "skill_result": skill_result,
             "created_at": float(row["created_at"]),
             "started_at": row["started_at"],
+            "queue_wait_ms": row["queue_wait_ms"],
             "updated_at": float(row["updated_at"]),
             "dead_letter": bool(row["dead_letter"]),
         }
@@ -224,7 +277,7 @@ class LocalRunScheduler:
             raise ValueError("task_id and case_id are required")
         now = time.time()
         queue_payload = self._queue_payload(payload)
-        request_hash = self._request_hash(queue_payload)
+        request_hash = self._request_hash(self._identity_payload(queue_payload))
         with self._lock, self._connect() as connection:
             existing = connection.execute(
                 "SELECT * FROM run_queue WHERE run_id = ?", (run_id,)
@@ -232,7 +285,9 @@ class LocalRunScheduler:
             if existing:
                 if str(existing["request_hash"]) != request_hash:
                     raise SchedulerConflictError("run_id was already used for a different request")
-                return self._row_state(existing)
+                state = self._row_state(existing)
+                state["idempotent_replay"] = True
+                return state
             connection.execute(
                 """
                 INSERT INTO run_queue
@@ -251,6 +306,7 @@ class LocalRunScheduler:
                     now,
                 ),
             )
+        self._record_event(run_id, "admitted", "queued", "Job admitted to the durable queue.")
         self._executor.submit(self._worker, run_id)
         return self.status(run_id) or {}
 
@@ -271,17 +327,27 @@ class LocalRunScheduler:
             if row["status"] == "running" and row["lease_until"] and float(row["lease_until"]) >= now:
                 connection.commit()
                 return None
+            queue_wait_ms = max(0.0, (now - float(row["created_at"])) * 1000)
             connection.execute(
                 """
                 UPDATE run_queue
                 SET status = 'running', attempt = attempt + 1,
-                    started_at = COALESCE(started_at, ?), updated_at = ?, lease_until = ?
+                    started_at = COALESCE(started_at, ?),
+                    queue_wait_ms = COALESCE(queue_wait_ms, ?),
+                    updated_at = ?, lease_until = ?
                 WHERE run_id = ?
                 """,
-                (now, now, lease_until, run_id),
+                (now, queue_wait_ms, now, lease_until, run_id),
             )
             connection.commit()
-            return connection.execute("SELECT * FROM run_queue WHERE run_id = ?", (run_id,)).fetchone()
+            claimed = connection.execute("SELECT * FROM run_queue WHERE run_id = ?", (run_id,)).fetchone()
+        self._record_event(
+            run_id,
+            "started",
+            "running",
+            f"Worker lease acquired after {int(queue_wait_ms)}ms queue wait.",
+        )
+        return claimed
 
     def _renew_lease(self, run_id: str) -> bool:
         """Extend a healthy worker lease without changing logical run state."""
@@ -335,6 +401,7 @@ class LocalRunScheduler:
                     run_id,
                 ),
             )
+        self._record_event(run_id, "completed", status, error or status)
 
     def _release_retry(self, run_id: str) -> None:
         if self._closed.is_set():
@@ -350,6 +417,7 @@ class LocalRunScheduler:
                 (now, run_id),
             )
         if cursor.rowcount == 1 and not self._closed.is_set():
+            self._record_event(run_id, "requeued", "queued", "Retry backoff elapsed; job requeued.")
             self._executor.submit(self._worker, run_id)
 
     def _schedule_retry(self, run_id: str, error: str) -> None:
@@ -364,6 +432,7 @@ class LocalRunScheduler:
                 """,
                 (error, retry_at, time.time(), run_id),
             )
+        self._record_event(run_id, "retrying", "retrying", "Transient execution failure; retry scheduled.")
         timer = Timer(self.retry_backoff_seconds, self._release_retry, args=(run_id,))
         timer.daemon = True
         timer.start()
@@ -485,6 +554,10 @@ class LocalRunScheduler:
             rows = connection.execute(
                 "SELECT status, dead_letter, COUNT(*) AS count FROM run_queue GROUP BY status, dead_letter"
             ).fetchall()
+            wait_row = connection.execute(
+                "SELECT AVG(queue_wait_ms) AS average_wait, MAX(queue_wait_ms) AS maximum_wait "
+                "FROM run_queue WHERE queue_wait_ms IS NOT NULL"
+            ).fetchone()
         counts: dict[str, int] = {}
         dead_letter_count = 0
         for row in rows:
@@ -505,12 +578,36 @@ class LocalRunScheduler:
             "max_workers": self.max_workers,
             "lease_ms": int(self.lease_seconds * 1000),
             "max_attempts": self.max_attempts,
+            "average_queue_wait_ms": int(float(wait_row["average_wait"] or 0)),
+            "maximum_queue_wait_ms": int(float(wait_row["maximum_wait"] or 0)),
         }
 
     def status(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM run_queue WHERE run_id = ?", (str(run_id),)).fetchone()
         return self._row_state(row) if row else None
+
+    def events(self, run_id: str, *, after_sequence: int = 0) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT sequence, event_type, status, message, created_at
+                FROM run_queue_events
+                WHERE run_id = ? AND sequence > ?
+                ORDER BY sequence
+                """,
+                (str(run_id), int(after_sequence)),
+            ).fetchall()
+        return [
+            {
+                "sequence": int(row["sequence"]),
+                "event_type": str(row["event_type"]),
+                "status": str(row["status"]),
+                "message": str(row["message"] or ""),
+                "created_at": float(row["created_at"]),
+            }
+            for row in rows
+        ]
 
     def cancel(self, run_id: str) -> dict[str, Any] | None:
         now = time.time()
@@ -519,10 +616,12 @@ class LocalRunScheduler:
             if signal is not None:
                 signal.set()
         with self._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 "UPDATE run_queue SET status = 'cancelled', updated_at = ?, lease_until = NULL, retry_at = NULL WHERE run_id = ? AND status IN ('queued', 'retrying')",
                 (now, str(run_id)),
             )
+        if cursor.rowcount == 1:
+            self._record_event(str(run_id), "cancelled", "cancelled", "Cancellation requested before worker execution.")
         return self.status(run_id)
 
     def close(self) -> None:

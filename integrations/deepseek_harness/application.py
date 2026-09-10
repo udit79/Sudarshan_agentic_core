@@ -9,13 +9,25 @@ SSE/WebSocket bridge owned by the backend.
 from __future__ import annotations
 
 from threading import Event, Lock
+import hashlib
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 import time
 from uuid import uuid4
 from typing import Any, Mapping
 
-from memory import MemoryManager
+from memory import AccessContext, MemoryManager
+from ingestion_pipelines import (
+    EvidenceBlock,
+    IngestedDocument,
+    IngestionBudget,
+    IngestionBudgetController,
+    IngestionStageCache,
+    IngestionUsageRecorder,
+    build_ingestion_stage_fingerprint,
+)
+from ingestion_pipelines.evidence_index import EvidenceIndex
 from pipelines.common.contracts import AdvisoryRequest
 from pipelines.common.audit_logger import get_audit_logger
 from api.scheduler import LocalRunScheduler
@@ -64,6 +76,20 @@ class SudarshanApplication:
         self.cache_store = CacheStore(
             os.getenv("SUDARSHAN_CACHE_DB_PATH", "artifacts/.state/skill_cache.db")
         )
+        self.evidence_index = EvidenceIndex(
+            os.getenv(
+                "SUDARSHAN_EVIDENCE_INDEX_DB_PATH",
+                "artifacts/.state/evidence_index.db",
+            )
+        )
+        self.ingestion_budget_controller = IngestionBudgetController()
+        self.ingestion_usage = IngestionUsageRecorder()
+        self.ingestion_stage_cache = IngestionStageCache(
+            os.getenv(
+                "SUDARSHAN_INGESTION_STAGE_CACHE_DB_PATH",
+                "artifacts/.state/ingestion_stage_cache.db",
+            )
+        )
         runtime_adapters: dict[str, PipelineAdapter] = {}
         for skill_id, manifest in self.skill_manifests.items():
             pipeline = skill_pipeline(skill_id)
@@ -91,6 +117,18 @@ class SudarshanApplication:
             max_attempts=int(os.getenv("SUDARSHAN_MAX_ATTEMPTS", "1")),
             retry_backoff_ms=int(os.getenv("SUDARSHAN_RETRY_BACKOFF_MS", "250")),
             execution_timeout_ms=int(os.getenv("SUDARSHAN_EXECUTION_TIMEOUT_MS", "0")),
+        )
+        self.ingestion_scheduler = LocalRunScheduler(
+            self._run_ingestion_job,
+            db_path=os.getenv(
+                "SUDARSHAN_INGESTION_QUEUE_DB_PATH",
+                "artifacts/.state/ingestion_queue.db",
+            ),
+            max_workers=int(os.getenv("SUDARSHAN_MAX_CONCURRENT_INGESTIONS", "2")),
+            lease_ms=int(os.getenv("SUDARSHAN_INGESTION_LEASE_MS", "900000")),
+            max_attempts=int(os.getenv("SUDARSHAN_INGESTION_MAX_ATTEMPTS", "2")),
+            retry_backoff_ms=int(os.getenv("SUDARSHAN_INGESTION_RETRY_BACKOFF_MS", "500")),
+            execution_timeout_ms=int(os.getenv("SUDARSHAN_INGESTION_TIMEOUT_MS", "0")),
         )
 
     def _prepare_request(
@@ -248,6 +286,129 @@ class SudarshanApplication:
         data["metadata"] = metadata
         data["requested_pipelines"] = [pipeline]
         return self.submit(data, operator_id=operator_id or str(data.get("user_id", "")))
+
+    def _run_ingestion_job(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        operator_id: str,
+        cancel_event: Event | None = None,
+    ) -> dict[str, Any]:
+        """Execute one admitted ingestion job without exposing source paths."""
+
+        if cancel_event is not None and cancel_event.is_set():
+            return {"status": "cancelled", "error": "ingestion cancelled before extraction"}
+        result = self.ingest_path(
+            str(payload["file_path"]),
+            source_reference=str(payload["source_reference"]),
+            operator_id=operator_id,
+            user_id=str(payload["user_id"]),
+            case_id=str(payload["case_id"]),
+            task_id=str(payload["task_id"]),
+            classification_level=str(payload.get("classification_level", "RESTRICTED")),
+            ingestion_id=str(payload.get("ingestion_id", payload.get("run_id", ""))) or None,
+            source_hash=str(payload.get("source_hash", "")) or None,
+            budget=payload.get("budget"),
+        )
+        if cancel_event is not None and cancel_event.is_set():
+            return {"status": "cancelled", "error": "ingestion cancelled after extraction"}
+        return {"status": "succeeded", "skill_result": result}
+
+    def submit_ingestion(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        operator_id: str,
+    ) -> dict[str, Any]:
+        """Admit source extraction asynchronously with idempotent identity."""
+
+        from pipelines.common.ntro_policy import require_classification
+
+        data = dict(payload)
+        user_id = str(data.get("user_id", "")).strip()
+        case_id = str(data.get("case_id", "")).strip()
+        task_id = str(data.get("task_id", "")).strip()
+        file_path = str(data.get("file_path", "")).strip()
+        source_reference = str(data.get("source_reference", "")).strip()
+        source_hash = str(data.get("source_hash", "")).strip()
+        if not all((user_id, case_id, task_id, file_path, source_reference, source_hash)):
+            raise ValueError("ingestion requires file_path, source_reference, source_hash, user_id, case_id, and task_id")
+        if operator_id.strip() != user_id:
+            raise PermissionError("user_id must match the authenticated operator")
+        data["job_type"] = "ingestion"
+        data["classification_level"] = require_classification(
+            str(data.get("classification_level", "RESTRICTED"))
+        )
+        data["distribution"] = str(data.get("distribution", "Authorized NTRO personnel"))
+        data["user_id"] = user_id
+        data["case_id"] = case_id
+        data["task_id"] = task_id
+        budget = self._ingestion_budget(data.get("budget"), modality=str(data.get("modality", "")))
+        data["budget"] = budget.model_dump(mode="json")
+        idempotency_key = str(data.get("idempotency_key", "")).strip()
+        if not idempotency_key:
+            identity = f"{user_id}|{case_id}|{task_id}|{source_hash}"
+            idempotency_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        ingestion_id = f"ing-{idempotency_key}"
+        data["ingestion_id"] = ingestion_id
+        state = self.ingestion_scheduler.submit(
+            ingestion_id,
+            data,
+            operator_id=operator_id.strip(),
+        )
+        return {
+            "status": state.get("status", "queued"),
+            "ingestion_id": ingestion_id,
+            "deduplicated": bool(state.get("idempotent_replay", False)),
+            "task_id": task_id,
+            "source_reference": source_reference,
+            "source_hash": source_hash,
+            "media_type": data.get("media_type"),
+            "modality": data.get("modality"),
+            "classification_level": data["classification_level"],
+            "budget": data["budget"],
+        }
+
+    def ingestion_status(self, ingestion_id: str) -> dict[str, Any]:
+        state = self.ingestion_scheduler.status(str(ingestion_id))
+        if state is None:
+            return {"ingestion_id": str(ingestion_id), "status": "not_found"}
+        status = str(state.get("status", "queued"))
+        quality_status = {
+            "succeeded": "ready",
+            "partial": "partial",
+            "failed": "failed",
+        }.get(status, "pending")
+        result = state.get("skill_result")
+        return {
+            "ingestion_id": state["run_id"],
+            "task_id": state["task_id"],
+            "case_id": state["case_id"],
+            "status": status,
+            "quality_status": quality_status,
+            "source_reference": state.get("source_reference"),
+            "source_hash": state.get("source_hash"),
+            "media_type": state.get("media_type"),
+            "modality": state.get("modality"),
+            "classification_level": state.get("classification_level", "RESTRICTED"),
+            "attempt": state.get("attempt", 0),
+            "queue_wait_ms": state.get("queue_wait_ms"),
+            "error": state.get("error"),
+            "dead_letter": bool(state.get("dead_letter", False)),
+            "result": result,
+            "events": self.ingestion_scheduler.events(str(ingestion_id)),
+            "created_at": state.get("created_at"),
+            "updated_at": state.get("updated_at"),
+        }
+
+    def cancel_ingestion(self, ingestion_id: str, task_id: str) -> dict[str, Any]:
+        current = self.ingestion_status(ingestion_id)
+        if current.get("status") == "not_found":
+            return current
+        if current.get("task_id") != task_id:
+            raise PermissionError("task_id does not match the ingestion")
+        cancelled = self.ingestion_scheduler.cancel(ingestion_id)
+        return self.ingestion_status(ingestion_id) if cancelled else current
 
     def invoke_skill(
         self,
@@ -695,6 +856,7 @@ class SudarshanApplication:
             "pipelines": pipelines,
             "routing_engine": "langgraph",
             "scheduler": self.scheduler.metrics(),
+            "ingestion_scheduler": self.ingestion_scheduler.metrics(),
             "configuration": {
                 "openai_api_key": bool(os.getenv("OPENAI_API_KEY", "").strip()),
                 "cognee_api_key": bool(os.getenv("COGNEE_API_KEY", "").strip()),
@@ -730,6 +892,101 @@ class SudarshanApplication:
             "download_uri": manifest.uri,
             "integrity_verified": True,
         }
+
+    def _evidence_context(
+        self,
+        user_id: str,
+        case_id: str,
+        task_id: str | None = None,
+    ) -> AccessContext:
+        return AccessContext(
+            user_id=str(user_id).strip(),
+            case_id=str(case_id).strip(),
+            task_id=str(task_id).strip() if task_id else None,
+        )
+
+    def search_text_evidence(
+        self,
+        query: str,
+        *,
+        user_id: str,
+        case_id: str,
+        task_id: str | None = None,
+        top_k: int = 10,
+        classification_level: str = "RESTRICTED",
+    ) -> list[dict[str, Any]]:
+        return self.evidence_index.search_text(
+            query,
+            self._evidence_context(user_id, case_id, task_id),
+            top_k=top_k,
+            classification_level=classification_level,
+        )
+
+    def search_visual_evidence(
+        self,
+        query: str,
+        *,
+        user_id: str,
+        case_id: str,
+        task_id: str | None = None,
+        top_k: int = 10,
+        classification_level: str = "RESTRICTED",
+    ) -> list[dict[str, Any]]:
+        return self.evidence_index.search_visual(
+            query,
+            self._evidence_context(user_id, case_id, task_id),
+            top_k=top_k,
+            classification_level=classification_level,
+        )
+
+    def search_table_evidence(
+        self,
+        query: str,
+        *,
+        user_id: str,
+        case_id: str,
+        task_id: str | None = None,
+        top_k: int = 10,
+        classification_level: str = "RESTRICTED",
+    ) -> list[dict[str, Any]]:
+        return self.evidence_index.search_table(
+            query,
+            self._evidence_context(user_id, case_id, task_id),
+            top_k=top_k,
+            classification_level=classification_level,
+        )
+
+    def search_video_segment_evidence(
+        self,
+        query: str,
+        *,
+        user_id: str,
+        case_id: str,
+        task_id: str | None = None,
+        top_k: int = 10,
+        classification_level: str = "RESTRICTED",
+    ) -> list[dict[str, Any]]:
+        return self.evidence_index.search_video_segment(
+            query,
+            self._evidence_context(user_id, case_id, task_id),
+            top_k=top_k,
+            classification_level=classification_level,
+        )
+
+    def get_evidence(
+        self,
+        evidence_id: str,
+        *,
+        user_id: str,
+        case_id: str,
+        task_id: str | None = None,
+        classification_level: str = "RESTRICTED",
+    ) -> dict[str, Any]:
+        return self.evidence_index.get_evidence(
+            evidence_id,
+            self._evidence_context(user_id, case_id, task_id),
+            classification_level=classification_level,
+        )
 
     def remember_context(self, user_id: str, case_id: str, context: str) -> None:
         """Persist User/Case-scoped session context."""
@@ -769,6 +1026,85 @@ class SudarshanApplication:
         )
         return str(recalled.context.text or "")
 
+    @staticmethod
+    def _ingestion_budget(value: Any, *, modality: str) -> IngestionBudget:
+        """Return a bounded default without making existing uploads fail."""
+
+        if value is not None:
+            return IngestionBudget.model_validate(value)
+        is_video = modality.lower() == "video"
+        return IngestionBudget(
+            token_budget=int(os.getenv("SUDARSHAN_INGESTION_TOKEN_BUDGET", "12000")),
+            parser_units=1,
+            ocr_calls=int(os.getenv("SUDARSHAN_INGESTION_OCR_CALLS", "64")),
+            vision_calls=int(os.getenv("SUDARSHAN_INGESTION_VISION_CALLS", "64" if is_video else "16")),
+            summary_tokens=int(os.getenv("SUDARSHAN_INGESTION_SUMMARY_TOKENS", "8192")),
+            embedding_tokens=int(os.getenv("SUDARSHAN_INGESTION_EMBEDDING_TOKENS", "8000")),
+            max_fan_out=int(os.getenv("SUDARSHAN_INGESTION_MAX_FAN_OUT", "64")),
+            wall_time_seconds=int(os.getenv("SUDARSHAN_INGESTION_WALL_TIME_SECONDS", "300")),
+        )
+
+    @staticmethod
+    def _file_hash(file_path: str) -> str:
+        digest = hashlib.sha256()
+        with open(file_path, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return f"sha256:{digest.hexdigest()}"
+
+    @staticmethod
+    def _cached_document_payload(document: IngestedDocument) -> dict[str, Any]:
+        return {
+            "id": document.id,
+            "source_path": document.source_path,
+            "raw_text": document.raw_text,
+            "doc_type": document.doc_type,
+            "ingested_at": document.ingested_at,
+            "user_id": document.user_id,
+            "case_id": document.case_id,
+            "task_id": document.task_id,
+            "evidence_blocks": [block.model_dump(mode="json") for block in document.evidence_blocks],
+            "relationships": [item.model_dump(mode="json") for item in document.relationships],
+            "chunks": [item.model_dump(mode="json") for item in document.chunks],
+        }
+
+    @staticmethod
+    def _document_from_cache(
+        payload: Mapping[str, Any],
+        *,
+        source_reference: str,
+        user_id: str,
+        case_id: str,
+        task_id: str,
+    ) -> IngestedDocument:
+        from ingestion_pipelines.contracts import EvidenceChunk, EvidenceRelationship
+
+        return IngestedDocument(
+            id=str(payload["id"]),
+            source_path=source_reference,
+            raw_text=str(payload.get("raw_text", "")),
+            doc_type=str(payload["doc_type"]),
+            ingested_at=str(payload["ingested_at"]),
+            user_id=user_id,
+            case_id=case_id,
+            task_id=task_id,
+            evidence_blocks=[EvidenceBlock.model_validate(item) for item in payload.get("evidence_blocks", [])],
+            relationships=[EvidenceRelationship.model_validate(item) for item in payload.get("relationships", [])],
+            chunks=[EvidenceChunk.model_validate(item) for item in payload.get("chunks", [])],
+        )
+
+    @staticmethod
+    def _budget_receipt(snapshot: Any) -> dict[str, Any]:
+        return {
+            "ingestion_id": snapshot.ingestion_id,
+            "stage_units": dict(snapshot.stage_units),
+            "stage_tokens": dict(snapshot.stage_tokens),
+            "fan_out_used": snapshot.fan_out_used,
+            "total_tokens": snapshot.total_tokens,
+            "usage_is_estimate": True,
+            "limits": snapshot.budget.model_dump(mode="json"),
+        }
+
     def ingest_path(
         self,
         file_path: str,
@@ -779,6 +1115,9 @@ class SudarshanApplication:
         case_id: str,
         task_id: str,
         classification_level: str = "RESTRICTED",
+        ingestion_id: str | None = None,
+        source_hash: str | None = None,
+        budget: IngestionBudget | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Perform real source extraction and persist it through MemoryManager."""
 
@@ -787,15 +1126,134 @@ class SudarshanApplication:
         from pipelines.common.ntro_policy import require_classification
 
         classification = require_classification(classification_level)
+        resolved_ingestion_id = ingestion_id or f"direct-{uuid4().hex}"
+        resolved_source_hash = source_hash or self._file_hash(file_path)
+        resolved_budget = self._ingestion_budget(
+            budget,
+            modality=Path(file_path).suffix.lower().lstrip("."),
+        )
+        self.ingestion_budget_controller.register(resolved_ingestion_id, resolved_budget)
+        scope = {"user_id": user_id, "case_id": case_id, "task_id": task_id}
+        fingerprint = build_ingestion_stage_fingerprint(
+            source_hash=resolved_source_hash,
+            stage="parser",
+            stage_version="ingestion-pipeline@2",
+            configuration_hash=os.getenv("SUDARSHAN_INGESTION_CONFIGURATION_HASH", "local-default"),
+            model_policy=os.getenv("SUDARSHAN_INGESTION_MODEL_POLICY", "local-first"),
+            scope={**scope, "classification_level": classification},
+        )
+        cached = self.ingestion_stage_cache.get(
+            fingerprint,
+            scope=scope,
+            classification_level=classification,
+        )
+        cache_status = "hit" if cached is not None else "miss"
         audit = get_audit_logger()
         try:
-            document = ingest_file(
-                file_path,
-                user_id=user_id,
-                case_id=case_id,
-                task_id=task_id,
-                memory_manager=self.orchestrator.memory_manager,
-                source_reference=source_reference,
+            if cached is not None:
+                document = self._document_from_cache(
+                    cached.payload,
+                    source_reference=source_reference,
+                    user_id=user_id,
+                    case_id=case_id,
+                    task_id=task_id,
+                )
+            else:
+                self.ingestion_budget_controller.charge(
+                    resolved_ingestion_id,
+                    "parser",
+                    units=1,
+                    fan_out=1,
+                )
+
+                def charge_stage(stage: str, units: int, tokens: int, fan_out: int) -> object:
+                    if tokens:
+                        self.ingestion_usage.record_estimate(
+                            resolved_ingestion_id,
+                            stage=stage,
+                            tokens=tokens,
+                        )
+                    return self.ingestion_budget_controller.charge(
+                        resolved_ingestion_id,
+                        stage,  # type: ignore[arg-type]
+                        units=units,
+                        tokens=tokens,
+                        fan_out=fan_out,
+                    )
+
+                def record_usage(
+                    stage: str,
+                    provider: str,
+                    model: str,
+                    input_tokens: int,
+                    output_tokens: int,
+                    is_estimate: bool,
+                ) -> object:
+                    return self.ingestion_usage.record(
+                        resolved_ingestion_id,
+                        stage=stage,
+                        provider=provider,
+                        model=model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        is_estimate=is_estimate,
+                    )
+
+                document = ingest_file(
+                    file_path,
+                    user_id=user_id,
+                    case_id=case_id,
+                    task_id=task_id,
+                    source_reference=source_reference,
+                    stage_charger=charge_stage,
+                    usage_recorder=record_usage,
+                )
+                evidence_count = len(document.evidence_blocks)
+                if evidence_count > 1:
+                    self.ingestion_budget_controller.charge(
+                        resolved_ingestion_id,
+                        "parser",
+                        units=0,
+                        fan_out=evidence_count - 1,
+                    )
+                self.ingestion_stage_cache.put(
+                    fingerprint=fingerprint,
+                    source_hash=resolved_source_hash,
+                    stage="parser",
+                    stage_version="ingestion-pipeline@2",
+                    scope=scope,
+                    classification_level=classification,
+                    payload=self._cached_document_payload(document),
+                    ttl_seconds=float(os.getenv("SUDARSHAN_INGESTION_CACHE_TTL_SECONDS", "86400")),
+                )
+            index_receipt = self.evidence_index.index_document(
+                document,
+                classification_level=classification,
+            )
+            memory_receipt = self.evidence_index.project_to_memory(
+                document,
+                self.orchestrator.memory_manager,
+                classification_level=classification,
+            )
+            fallback_reasons = sorted(
+                {
+                    str(reason)
+                    for block in document.evidence_blocks
+                    for reason in (
+                        [block.metadata.get("fallback_reason")]
+                        if block.metadata.get("fallback_reason")
+                        else list(block.metadata.get("fallbacks") or [])
+                    )
+                    if reason
+                }
+            )
+            fallback_count = sum(
+                1
+                for block in document.evidence_blocks
+                if block.metadata.get("ocr_fallback")
+            ) + sum(
+                len(set(block.metadata.get("fallbacks") or []))
+                for block in document.evidence_blocks
             )
         except Exception as exc:
             audit.log(
@@ -817,7 +1275,7 @@ class SudarshanApplication:
             classification=classification,
         )
         return {
-            "status": "succeeded",
+            "status": "partial" if fallback_count else "succeeded",
             "document_id": document.id,
             "source_reference": source_reference,
             "doc_type": document.doc_type,
@@ -826,7 +1284,20 @@ class SudarshanApplication:
             "task_id": task_id,
             "classification_level": classification,
             "content_characters": len(document.raw_text),
-            "memory_persisted": True,
+            "memory_persisted": bool(memory_receipt.get("projected", False)),
+            "evidence_indexed": bool(index_receipt.get("indexed", False)),
+            "evidence_count": int(index_receipt.get("evidence_count", 0)),
+            "chunk_count": int(index_receipt.get("chunk_count", 0)),
+            "relationship_count": int(index_receipt.get("relationship_count", 0)),
+            "evidence_memory_id": memory_receipt.get("memory_id"),
+            "cache_status": cache_status,
+            "cache_fingerprint": fingerprint,
+            "fallback_count": fallback_count,
+            "fallbacks": fallback_reasons,
+            "budget": self._budget_receipt(
+                self.ingestion_budget_controller.snapshot(resolved_ingestion_id)
+            ),
+            "usage": self.ingestion_usage.snapshot(resolved_ingestion_id),
             "ingested_at": document.ingested_at,
         }
 

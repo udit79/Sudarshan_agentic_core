@@ -73,6 +73,44 @@ def test_scheduler_persists_admission_and_rejects_run_id_reuse(tmp_path) -> None
         scheduler.close()
 
 
+def test_scheduler_ingestion_identity_ignores_private_staging_path(tmp_path) -> None:
+    calls: list[str] = []
+
+    def execute(payload, *, operator_id):
+        calls.append(str(payload["file_path"]))
+        return {"status": "succeeded"}
+
+    scheduler = LocalRunScheduler(execute, db_path=tmp_path / "queue.db", max_workers=1)
+    try:
+        first = {
+            "job_type": "ingestion",
+            "file_path": "private/staging/one.mp4",
+            "source_reference": "brief.mp4",
+            "source_hash": "sha256:abc",
+            "media_type": "video/mp4",
+            "modality": "video",
+            "user_id": "operator-1",
+            "case_id": "case-1",
+            "task_id": "task-video",
+            "classification_level": "RESTRICTED",
+        }
+        scheduler.submit("ing-video", first, operator_id="operator-1")
+        completed = _wait_for(scheduler, "ing-video", {"succeeded"})
+        duplicate = dict(first, file_path="private/staging/two.mp4")
+        accepted = scheduler.submit("ing-video", duplicate, operator_id="operator-1")
+
+        assert completed["status"] == "succeeded"
+        assert accepted["status"] == "succeeded"
+        assert calls == ["private/staging/one.mp4"]
+        assert [event["status"] for event in scheduler.events("ing-video")] == [
+            "queued",
+            "running",
+            "succeeded",
+        ]
+    finally:
+        scheduler.close()
+
+
 def test_scheduler_cancels_a_queued_job_before_worker_admission(tmp_path) -> None:
     release_first = threading.Event()
     started_first = threading.Event()
@@ -94,6 +132,35 @@ def test_scheduler_cancels_a_queued_job_before_worker_admission(tmp_path) -> Non
         assert cancelled["status"] == "cancelled"
         assert _wait_for(scheduler, "run-1", {"succeeded"})["status"] == "succeeded"
         assert scheduler.status("run-2")["status"] == "cancelled"
+    finally:
+        release_first.set()
+        scheduler.close()
+
+
+def test_scheduler_records_queue_wait_telemetry(tmp_path) -> None:
+    first_started = threading.Event()
+    release_first = threading.Event()
+
+    def execute(payload, *, operator_id):
+        if payload["task_id"] == "task-first":
+            first_started.set()
+            release_first.wait(2)
+        return {"status": "succeeded"}
+
+    scheduler = LocalRunScheduler(execute, db_path=tmp_path / "queue.db", max_workers=1)
+    try:
+        scheduler.submit("run-first", _payload("task-first"), operator_id="operator-1")
+        assert first_started.wait(1)
+        scheduler.submit("run-second", _payload("task-second"), operator_id="operator-1")
+        time.sleep(0.03)
+        release_first.set()
+
+        assert _wait_for(scheduler, "run-first", {"succeeded"})["status"] == "succeeded"
+        second = _wait_for(scheduler, "run-second", {"succeeded"})
+        assert float(second["queue_wait_ms"]) >= 20
+        started_events = [event for event in scheduler.events("run-second") if event["event_type"] == "started"]
+        assert started_events and "queue wait" in started_events[0]["message"]
+        assert scheduler.metrics()["maximum_queue_wait_ms"] >= 20
     finally:
         release_first.set()
         scheduler.close()

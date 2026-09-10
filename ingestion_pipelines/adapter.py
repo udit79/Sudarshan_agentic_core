@@ -33,8 +33,28 @@ def to_knowledge_unit(doc: IngestedDocument) -> KnowledgeUnit:
         unit_id=doc.id,
         content=content,
         source=source,
-        metadata={"doc_type": doc.doc_type},
-        provenance={"source_path": doc.source_path, "ingested_at": doc.ingested_at},
+        metadata={
+            "doc_type": doc.doc_type,
+            "evidence_ids": [block.evidence_id for block in doc.evidence_blocks],
+            "chunk_ids": [chunk.chunk_id for chunk in doc.chunks],
+        },
+        provenance={
+            "source_path": doc.source_path,
+            "ingested_at": doc.ingested_at,
+            "source_map_complete": (
+                bool(doc.evidence_blocks)
+                and len(doc.evidence_blocks)
+                == sum(len(chunk.evidence_ids) for chunk in doc.chunks)
+                and {
+                    block.evidence_id for block in doc.evidence_blocks
+                }
+                == {
+                    evidence_id
+                    for chunk in doc.chunks
+                    for evidence_id in chunk.evidence_ids
+                }
+            ),
+        },
         created_at=datetime.fromisoformat(doc.ingested_at),
     )
 

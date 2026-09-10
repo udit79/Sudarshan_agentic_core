@@ -3326,11 +3326,66 @@ T28 reliability tests: passed, 21 focused tests; full Python suite after T28: 17
 `T27` has a locally implemented and tested first slice. Trusted child identity propagation, trust-tier and publish-approval enforcement, source prompt-injection markers, recursive secret redaction, hashed audit query records, and credential-filtered cache metadata are covered; signed package verification, OS/container sandboxing, distributed authorization, CI secret scanning, and multi-worker attack tests remain open.
 `T28` has a locally implemented and tested first slice. Scheduler timeout/retry/dead-letter/lease behavior, duplicate submission, DAG child failure, renderer failure, progress reconnect, restarted-bridge dependent admission, and partial video recovery are covered locally; kill-9/host-loss tests, shared multi-worker leases, distributed idempotency, and abandoned-artifact reconciliation remain open.
 
-`T31–T38` are the next planned ingestion workstream. They are not complete in
-the current repository. The existing synchronous ingestion path remains the
-compatibility baseline until typed evidence, asynchronous status, source
-security, structure-aware indexing, Cognee projection, cache/budget controls,
-and multimodal evaluation are implemented and promoted together.
+`T31` is implemented as the first contract slice: strict manifest, evidence,
+location, extraction-event, quality-report, budget, fixture, and compatibility
+tests are present. `T32` has a locally implemented source-safety slice:
+supported-file extension and magic validation, bounded byte limits, SHA-256
+source fingerprints, classification/scope propagation, safe source references,
+bounded PPTX archive inspection, path-traversal rejection, and
+instruction-like source marker categories are covered before extraction.
+`T33` has a locally implemented first slice. `/ingestions` stages a bounded,
+source-safe upload, persists an ingestion job in a dedicated local SQLite
+queue, returns an ingestion handle, exposes status and cancellation, and
+supports lease recovery, retry/dead-letter, cooperative cancellation, and
+source-hash idempotency. `/ingest` remains the synchronous compatibility
+projection. Typed modality evidence, temporal video blocks, structure-aware
+indexing, Cognee projection, cache/budget controls, and multimodal evaluation
+remain in `T34–T38`; distributed queue/object storage is still a deployment
+follow-up.
+
+`T34` now has a local typed-evidence slice across all compatibility modalities.
+Text and image sources produce retrievable blocks; PDF and PPTX delimiter
+adapters preserve page/slide locations and OCR metadata; video emits typed
+`video_scene`, `audio_transcript`, and `video_ocr` blocks with stable
+source-hash IDs, timestamp ranges, scene parent links, parser provenance, and
+confidence. Legacy outputs are rendered or retained from the same evidence
+boundary. Adaptive scene detection, derived keyframe artifacts, explicit
+fallback events, and cross-modality evidence persistence remain open.
+
+`T35` is complete as a deterministic local compiler slice. It recursively
+compiles explicit parent/contains edges, validated evidence-reference edges,
+video temporal-next edges, page/slide sequence edges, and source-mapped chunks
+with heading paths and token estimates. Video scene parents therefore provide
+a reusable boundary for ASR/OCR retrieval instead of forcing each downstream
+skill to rediscover temporal grouping. Shared persistence, semantic enrichment,
+indexes, and retrieval APIs remain in `T36–T38`.
+
+`T36` now has a locally implemented evidence-index slice. `EvidenceIndex`
+atomically persists typed blocks, structure-aware chunks, and relationships in
+scoped SQLite tables; its text, visual, table, video-segment, and exact-evidence
+lookups enforce User/Case/Task scope and classification access. The application
+and MCP surfaces expose these lookups without allowing skills to call Cognee
+directly. A bounded, provenance-bearing summary is projected through
+`MemoryManager`, while exact source content remains in the evidence index.
+This is intentionally not a production claim: shared object storage,
+distributed/vector/visual retrieval, retention/deletion, semantic enrichment,
+and concurrent-worker benchmarks remain in T36–T38.
+
+`T37` now has a locally wired control slice. The asynchronous ingestion worker
+normalizes an `IngestionBudget`, charges parser/fan-out work before extraction,
+records observed OCR/vision work, and returns safe cache/budget receipts.
+`IngestionBudgetController` also supports summary and embedding token charges
+for adapters. `build_ingestion_stage_fingerprint` includes source,
+stage/parser version, configuration, model policy, scope, and upstream
+fingerprints. `IngestionStageCache` stores JSON-safe derived payloads with exact
+User/Case/Task and classification matching plus TTL cleanup; a matching
+parser-stage entry skips extraction. The remaining T37 work is provider usage
+reconciliation and adaptive retry of failed optional stages, queue-wait and
+usage projection beyond the scheduler receipt, distributed cache leases, and
+abandoned-artifact cleanup. The local usage ledger already separates
+preflight estimates from actual image/PDF provider response usage when
+available, and the local scheduler already records
+`queue_wait_ms` per job and average/maximum queue wait in health metrics.
 
 ### T23 research alignment
 

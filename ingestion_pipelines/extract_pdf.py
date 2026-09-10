@@ -14,6 +14,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
+from typing import Callable
 
 from ingestion_pipelines.config import load_env
 
@@ -24,7 +25,12 @@ _TRANSCRIPTION_PROMPT = (
 )
 
 
-def _ocr_page_image_bytes(img_bytes: bytes, page_num: int) -> str:
+def _ocr_page_image_bytes(
+    img_bytes: bytes,
+    page_num: int,
+    *,
+    usage_recorder: Callable[[str, str, str, int, int, bool], object] | None = None,
+) -> str:
     """Transcribe a scanned page with OpenAI's vision-capable model."""
     load_env()
     openai_key = os.environ.get("OPENAI_API_KEY")
@@ -53,12 +59,27 @@ def _ocr_page_image_bytes(img_bytes: bytes, page_num: int) -> str:
             ],
             max_tokens=4096,
         )
+        if usage_recorder is not None:
+            usage = getattr(response, "usage", None)
+            usage_recorder(
+                "vision",
+                "openai",
+                "gpt-4o-mini",
+                int(getattr(usage, "prompt_tokens", 0) or 0),
+                int(getattr(usage, "completion_tokens", 0) or 0),
+                False,
+            )
         return response.choices[0].message.content or ""
 
     return "(Scanned page - OCR unavailable: OPENAI_API_KEY is not configured)"
 
 
-def extract_text_from_pdf(file_path: str) -> str:
+def extract_text_from_pdf(
+    file_path: str,
+    *,
+    stage_charger: Callable[[str, int, int, int], object] | None = None,
+    usage_recorder: Callable[[str, str, str, int, int, bool], object] | None = None,
+) -> str:
     """Extracts text from multi-page PDFs using hybrid digital + vision extraction."""
     path = Path(file_path)
     if not path.exists():
@@ -110,9 +131,21 @@ def extract_text_from_pdf(file_path: str) -> str:
     # Process scanned pages concurrently if any were found
     if scanned_tasks:
         print(f"   [PDF Processing] Transcribing {len(scanned_tasks)} scanned page(s) concurrently via Vision...", flush=True)
+        load_env()
+        vision_available = bool(
+            os.environ.get("OPENAI_API_KEY")
+            and not os.environ.get("OPENAI_API_KEY", "").startswith("replace-")
+        )
+        if stage_charger is not None and vision_available:
+            stage_charger("vision", len(scanned_tasks), 4096 * len(scanned_tasks), 0)
         with ThreadPoolExecutor(max_workers=min(5, len(scanned_tasks))) as executor:
             future_to_page = {
-                executor.submit(_ocr_page_image_bytes, img_bytes, p_num): p_num
+                executor.submit(
+                    _ocr_page_image_bytes,
+                    img_bytes,
+                    p_num,
+                    usage_recorder=usage_recorder,
+                ): p_num
                 for p_num, img_bytes in scanned_tasks
             }
             for future in future_to_page:

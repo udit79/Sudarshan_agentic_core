@@ -105,8 +105,19 @@ profile use the same Sudarshan application boundary.
 - DeepSeek Harness web composition through replaceable Sudarshan brand and
   theme plugins; generated preview credentials and session state are ignored.
 - Current source upload and extraction compatibility path for text, PDF, PPTX,
-  image, and video. The typed asynchronous evidence compiler is designed and
-  ticketed but is not yet implemented.
+  image, and video. T31 contracts, T32 source safety, and the T33 local
+  asynchronous admission slice, and T34 typed-evidence adapters for text,
+  PDF, PPTX, image, and video are implemented; the T35 deterministic
+  structure/chunk compiler, the T36 local evidence-index/projection slice, and
+  the T37 budget/fingerprint-cache boundary are also implemented locally. The
+  asynchronous ingestion worker now receives a normalized budget, skips a
+  matching scoped parser-stage cache entry, and returns safe cache/budget
+  receipts. Optional image/PDF/video provider failures now preserve explicit
+  fallback metadata and can finish as `PARTIAL`. Scheduler status and health
+  metrics include queue-wait telemetry. Shared indexing, full provider-usage
+  reconciliation, and distributed ingestion remain open in T36–T38. The
+  ingestion receipt now separates preflight token estimates from provider
+  response usage when available.
 
 ### Backend work still required
 
@@ -129,8 +140,8 @@ These are real engineering gaps, not cosmetic follow-ups:
 7. Finish cross-skill execution: executable LinkedIn visual-child
    reconciliation, full PPT child routing/assembly, and external MCP-client
    lifecycle smoke tests.
-8. Implement the T31–T38 ingestion workstream: typed evidence contracts,
-   asynchronous manifests/jobs, modality provenance, structure-aware indexing,
+8. Implement the T34–T38 ingestion workstream: typed modality evidence,
+   modality provenance, structure-aware indexing,
    Cognee projection, cache/budget controls, security, and multimodal retrieval
    evaluation.
 9. Run T29 matched evaluations across legacy/staged pipelines for quality,

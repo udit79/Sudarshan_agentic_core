@@ -28,8 +28,9 @@ mcp = FastMCP(
         "resume_sudarshan for clarification or approval decisions, and "
         "cancel_sudarshan for cooperative cancellation. The tools route "
         "through the application orchestrator and return validated output "
-        "or an actionable state. Do not request or expose memory-provider "
-        "credentials."
+        "or an actionable state. Use the scoped evidence search tools for "
+        "source-grounded retrieval; do not re-ingest files or request raw "
+        "memory-provider credentials."
     ),
 )
 
@@ -327,6 +328,114 @@ def remember_sudarshan_context(user_id: str, case_id: str, context: str) -> str:
 def recall_sudarshan_context(user_id: str, case_id: str, query: str) -> str:
     """Recall session memory."""
     return get_application().recall_session_context(user_id, case_id, query)
+
+
+@mcp.tool(
+    name="search_sudarshan_text_evidence",
+    description="Search scoped text, PDF-page, and PPTX-slide evidence without re-ingesting the source.",
+)
+def search_sudarshan_text_evidence(
+    query: str,
+    user_id: str,
+    case_id: str,
+    task_id: str | None = None,
+    top_k: int = 10,
+    classification_level: str = "RESTRICTED",
+) -> list[dict[str, Any]]:
+    return get_application().search_text_evidence(
+        query,
+        user_id=user_id,
+        case_id=case_id,
+        task_id=task_id,
+        top_k=top_k,
+        classification_level=classification_level,
+    )
+
+
+@mcp.tool(
+    name="search_sudarshan_visual_evidence",
+    description="Search scoped image and video visual evidence with provenance and locations.",
+)
+def search_sudarshan_visual_evidence(
+    query: str,
+    user_id: str,
+    case_id: str,
+    task_id: str | None = None,
+    top_k: int = 10,
+    classification_level: str = "RESTRICTED",
+) -> list[dict[str, Any]]:
+    return get_application().search_visual_evidence(
+        query,
+        user_id=user_id,
+        case_id=case_id,
+        task_id=task_id,
+        top_k=top_k,
+        classification_level=classification_level,
+    )
+
+
+@mcp.tool(
+    name="search_sudarshan_table_evidence",
+    description="Search scoped table evidence and return source-linked records.",
+)
+def search_sudarshan_table_evidence(
+    query: str,
+    user_id: str,
+    case_id: str,
+    task_id: str | None = None,
+    top_k: int = 10,
+    classification_level: str = "RESTRICTED",
+) -> list[dict[str, Any]]:
+    return get_application().search_table_evidence(
+        query,
+        user_id=user_id,
+        case_id=case_id,
+        task_id=task_id,
+        top_k=top_k,
+        classification_level=classification_level,
+    )
+
+
+@mcp.tool(
+    name="search_sudarshan_video_segment",
+    description="Search scoped timestamped video scenes, ASR, and OCR evidence.",
+)
+def search_sudarshan_video_segment(
+    query: str,
+    user_id: str,
+    case_id: str,
+    task_id: str | None = None,
+    top_k: int = 10,
+    classification_level: str = "RESTRICTED",
+) -> list[dict[str, Any]]:
+    return get_application().search_video_segment_evidence(
+        query,
+        user_id=user_id,
+        case_id=case_id,
+        task_id=task_id,
+        top_k=top_k,
+        classification_level=classification_level,
+    )
+
+
+@mcp.tool(
+    name="get_sudarshan_evidence",
+    description="Fetch one authorized evidence block with provenance and relationships.",
+)
+def get_sudarshan_evidence(
+    evidence_id: str,
+    user_id: str,
+    case_id: str,
+    task_id: str | None = None,
+    classification_level: str = "RESTRICTED",
+) -> dict[str, Any]:
+    return get_application().get_evidence(
+        evidence_id,
+        user_id=user_id,
+        case_id=case_id,
+        task_id=task_id,
+        classification_level=classification_level,
+    )
 
 
 if __name__ == "__main__":

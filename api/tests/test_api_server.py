@@ -123,6 +123,37 @@ def test_ingest_endpoint_accepts_real_source_upload_and_returns_memory_receipt()
     assert response.json()["memory_persisted"] is True
 
 
+def test_async_ingestion_admits_video_without_waiting_for_extraction(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeApplication:
+        def submit_ingestion(self, payload, *, operator_id):
+            calls.append((payload, operator_id))
+            return {
+                "status": "queued",
+                "ingestion_id": "ing-demo",
+                "source_reference": payload["source_reference"],
+                "source_hash": payload["source_hash"],
+                "modality": payload["modality"],
+                "deduplicated": False,
+            }
+
+    monkeypatch.setenv("SUDARSHAN_INGESTION_STAGING_DIR", str(tmp_path))
+    with patch("api.server.get_application", return_value=FakeApplication()):
+        response = client.post(
+            "/ingestions",
+            headers={"x-operator-id": "operator-1", "Idempotency-Key": "video-1"},
+            data={"case_id": "case-1", "task_id": "task-video"},
+            files={"file": ("brief.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4")},
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert calls and calls[0][1] == "operator-1"
+    assert calls[0][0]["modality"] == "video"
+    assert calls[0][0]["source_hash"].startswith("sha256:")
+
+
 def test_artifact_manifest_and_download_routes_use_stable_artifact_id(tmp_path, monkeypatch):
     root = tmp_path / "artifacts"
     source = root / "presentations" / "brief.pptx"

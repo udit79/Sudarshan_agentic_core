@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 TEXT_EXTENSIONS = {".txt"}
 PDF_EXTENSIONS = {".pdf"}
@@ -31,7 +32,12 @@ def extract_text_from_txt(file_path: str) -> str:
         return f.read()
 
 
-def extract_text(file_path: str) -> tuple[str, str]:
+def extract_text(
+    file_path: str,
+    *,
+    stage_charger: Callable[[str, int, int, int], object] | None = None,
+    usage_recorder: Callable[[str, str, str, int, int, bool], object] | None = None,
+) -> tuple[str, str]:
     """Validates, then dispatches to the right extractor.
     Returns (raw_text, doc_type).
     """
@@ -43,10 +49,20 @@ def extract_text(file_path: str) -> tuple[str, str]:
         return extract_text_from_txt(file_path), "text"
     if ext in PDF_EXTENSIONS:
         from ingestion_pipelines.extract_pdf import extract_text_from_pdf
-        return extract_text_from_pdf(file_path), "pdf"
+        kwargs = {}
+        if stage_charger is not None:
+            kwargs["stage_charger"] = stage_charger
+        if usage_recorder is not None:
+            kwargs["usage_recorder"] = usage_recorder
+        return extract_text_from_pdf(file_path, **kwargs), "pdf"
     if ext in IMAGE_EXTENSIONS:
         from ingestion_pipelines.extract_image import extract_text_from_image
-        return extract_text_from_image(file_path), "image"
+        kwargs = {}
+        if stage_charger is not None:
+            kwargs["stage_charger"] = stage_charger
+        if usage_recorder is not None:
+            kwargs["usage_recorder"] = usage_recorder
+        return extract_text_from_image(file_path, **kwargs), "image"
     if ext in PPTX_EXTENSIONS:
         from ingestion_pipelines.extract_pptx import extract_text_from_pptx
         return extract_text_from_pptx(file_path), "pptx"

@@ -1,0 +1,23 @@
+{
+  "ingestion_id": "ing-1",
+  "document_id": "doc-1",
+  "source_reference": "brief.pdf",
+  "source_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "media_type": "application/pdf",
+  "modality": "pdf",
+  "user_id": "operator-1",
+  "case_id": "case-1",
+  "task_id": "task-1",
+  "classification_level": "RESTRICTED",
+  "status": "accepted",
+  "extractor_version": "pdf-layout@2.0.0",
+  "model_policy": "local-first",
+  "configuration_hash": "config-1",
+  "budget": {
+    "token_budget": 12000,
+    "ocr_calls": 20,
+    "vision_calls": 4,
+    "embedding_tokens": 8000,
+    "wall_time_seconds": 300
+  }
+}

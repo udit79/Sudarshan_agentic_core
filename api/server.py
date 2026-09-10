@@ -19,6 +19,7 @@ from api.artifacts import ArtifactNotFound, ArtifactPreviewUnavailable, Artifact
 from api.scheduler import SchedulerConflictError
 from integrations.deepseek_harness.application import get_application
 from api.sse import event_generator
+from ingestion_pipelines import SourceSafetyError, inspect_source
 from ingestion_pipelines.extract import SUPPORTED_EXTENSIONS
 from pipelines.common.ntro_policy import require_classification, require_classification_access
 from pipelines.common.contracts import AdvisoryRequest
@@ -59,7 +60,15 @@ app.add_middleware(NTROSecurityMiddleware)
 app.add_middleware(AuditMiddleware)
 
 
-async def _save_upload(upload: UploadFile, *, max_bytes: int) -> tuple[str, str]:
+async def _save_upload(
+    upload: UploadFile,
+    *,
+    max_bytes: int,
+    classification_level: str = "RESTRICTED",
+    user_id: str | None = None,
+    case_id: str | None = None,
+    task_id: str | None = None,
+) -> tuple[str, str]:
     """Stream an upload to a private temporary file with a hard size limit."""
 
     source_reference = Path(upload.filename or "upload").name
@@ -80,6 +89,18 @@ async def _save_upload(upload: UploadFile, *, max_bytes: int) -> tuple[str, str]
                 if total > max_bytes:
                     raise HTTPException(status_code=413, detail="Uploaded file exceeds the configured size limit")
                 handle.write(chunk)
+        inspect_source(
+            temp_path,
+            source_reference=source_reference,
+            max_bytes=max_bytes,
+            classification_level=classification_level,
+            user_id=user_id,
+            case_id=case_id,
+            task_id=task_id,
+        )
+    except SourceSafetyError as exc:
+        Path(temp_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
     except Exception:
         Path(temp_path).unlink(missing_ok=True)
         raise
@@ -254,7 +275,17 @@ async def ingest_source(
         classification_level or request.headers.get("x-classification-level", "RESTRICTED")
     )
     max_bytes = int(os.getenv("SUDARSHAN_MAX_INGEST_BYTES", str(50 * 1024 * 1024)))
-    temp_path, source_reference = await _save_upload(file, max_bytes=max_bytes)
+    try:
+        temp_path, source_reference = await _save_upload(
+            file,
+            max_bytes=max_bytes,
+            classification_level=classification,
+            user_id=resolved_user_id,
+            case_id=resolved_case_id,
+            task_id=resolved_task_id,
+        )
+    except HTTPException:
+        raise
     try:
         try:
             return await asyncio.to_thread(
@@ -276,6 +307,120 @@ async def ingest_source(
             ) from exc
     finally:
         Path(temp_path).unlink(missing_ok=True)
+
+
+@app.post("/ingestions", status_code=202)
+async def submit_ingestion(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str | None = Form(None),
+    case_id: str | None = Form(None),
+    task_id: str | None = Form(None),
+    classification_level: str | None = Form(None),
+):
+    """Admit source extraction and return without waiting for OCR/video work."""
+
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    resolved_user_id = (user_id or operator_id).strip()
+    resolved_case_id = (case_id or request.headers.get("x-case-id", "")).strip()
+    if resolved_user_id != operator_id:
+        raise HTTPException(status_code=403, detail="user_id must match the authenticated operator")
+    if not resolved_case_id:
+        raise HTTPException(status_code=422, detail="case_id is required for NTRO ingestion")
+
+    resolved_task_id = (task_id or f"ingest-{uuid4()}").strip()
+    classification = require_classification(
+        classification_level or request.headers.get("x-classification-level", "RESTRICTED")
+    )
+    max_bytes = int(os.getenv("SUDARSHAN_MAX_INGEST_BYTES", str(50 * 1024 * 1024)))
+    temp_path: str | None = None
+    staged_path: Path | None = None
+    try:
+        temp_path, source_reference = await _save_upload(
+            file,
+            max_bytes=max_bytes,
+            classification_level=classification,
+            user_id=resolved_user_id,
+            case_id=resolved_case_id,
+            task_id=resolved_task_id,
+        )
+        inspection = inspect_source(
+            temp_path,
+            source_reference=source_reference,
+            max_bytes=max_bytes,
+            classification_level=classification,
+            user_id=resolved_user_id,
+            case_id=resolved_case_id,
+            task_id=resolved_task_id,
+        )
+        staging_root = Path(
+            os.getenv(
+                "SUDARSHAN_INGESTION_STAGING_DIR",
+                str(ARTIFACT_ROOT / ".state" / "ingestion_sources"),
+            )
+        )
+        staging_root.mkdir(parents=True, exist_ok=True)
+        staged_path = staging_root / f"{uuid4().hex}{Path(source_reference).suffix.lower()}"
+        Path(temp_path).replace(staged_path)
+        temp_path = None
+        idempotency_key = request.headers.get("idempotency-key", "").strip()
+        result = await asyncio.to_thread(
+            get_application().submit_ingestion,
+            {
+                "file_path": str(staged_path),
+                "source_reference": inspection.source_reference,
+                "source_hash": inspection.source_hash,
+                "media_type": inspection.media_type,
+                "modality": inspection.modality,
+                "user_id": resolved_user_id,
+                "case_id": resolved_case_id,
+                "task_id": resolved_task_id,
+                "classification_level": classification,
+                "idempotency_key": idempotency_key,
+            },
+            operator_id=operator_id,
+        )
+        if result.get("deduplicated") and staged_path is not None:
+            staged_path.unlink(missing_ok=True)
+        return result
+    except SchedulerConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Source ingestion admission failed") from exc
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
+
+
+@app.get("/ingestions/{ingestion_id}")
+async def get_ingestion(request: Request, ingestion_id: str):
+    """Return safe asynchronous ingestion status and its result receipt."""
+
+    result = await asyncio.to_thread(get_application().ingestion_status, ingestion_id)
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="Ingestion not found")
+    return result
+
+
+@app.post("/ingestions/{ingestion_id}/cancel")
+async def cancel_ingestion(request: Request, ingestion_id: str, task_id: str = Query(...)):
+    """Request cooperative cancellation for queued or running extraction."""
+
+    try:
+        result = await asyncio.to_thread(
+            get_application().cancel_ingestion,
+            ingestion_id,
+            task_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="Ingestion not found")
+    return result
 
 
 @app.post("/runs")

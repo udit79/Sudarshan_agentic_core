@@ -11,6 +11,7 @@ def test_ingest_txt_file():
     assert doc.user_id == "user1"
     assert doc.case_id == "case1"
     assert doc.task_id == "task1"
+    assert doc.evidence_blocks[0].modality == "text_document"
 
 
 def test_ingest_pptx_file():
@@ -19,6 +20,7 @@ def test_ingest_pptx_file():
     assert "Sudarshan Defense Briefing" in doc.raw_text
     assert "[Speaker Notes]:" in doc.raw_text
     assert "Welcome senior leadership" in doc.raw_text
+    assert [block.location.slide for block in doc.evidence_blocks] == [1, 2, 3]
 
     unit = to_knowledge_unit(doc)
     assert unit.source.source_type is SourceType.PPTX
@@ -30,6 +32,7 @@ def test_ingest_pdf_file():
     assert doc.doc_type == "pdf"
     assert "--- Page 1 ---" in doc.raw_text
     assert "Enqueue" in doc.raw_text
+    assert doc.evidence_blocks[0].location.page == 1
 
     unit = to_knowledge_unit(doc)
     assert unit.source.source_type is SourceType.PDF

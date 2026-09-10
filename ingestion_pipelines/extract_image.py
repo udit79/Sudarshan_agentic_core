@@ -10,8 +10,10 @@ import base64
 import mimetypes
 import os
 from pathlib import Path
+from typing import Callable
 
 from ingestion_pipelines.config import load_env
+from ingestion_pipelines.runtime import IngestionBudgetExceededError
 
 _MIME_MAP: dict[str, str] = {
     ".jpg": "image/jpeg",
@@ -44,7 +46,12 @@ def _encode_image_b64(file_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def extract_text_from_image_openai(file_path: str) -> str:
+def extract_text_from_image_openai(
+    file_path: str,
+    *,
+    stage_charger: Callable[[str, int, int, int], object] | None = None,
+    usage_recorder: Callable[[str, str, str, int, int, bool], object] | None = None,
+) -> str:
     """Fast vision transcription using OpenAI gpt-4o-mini (~1.5–3s latency)."""
     try:
         from openai import OpenAI
@@ -59,6 +66,8 @@ def extract_text_from_image_openai(file_path: str) -> str:
     client = OpenAI(api_key=api_key)
     mime = _mime_type(file_path)
     b64_data = _encode_image_b64(file_path)
+    if stage_charger is not None:
+        stage_charger("vision", 1, 4096, 0)
 
     print(f"   [Vision OCR] Calling OpenAI gpt-4o-mini for '{Path(file_path).name}' (~1-3s)...", flush=True)
 
@@ -81,16 +90,40 @@ def extract_text_from_image_openai(file_path: str) -> str:
         ],
         max_tokens=4096,
     )
+    if usage_recorder is not None:
+        usage = getattr(response, "usage", None)
+        usage_recorder(
+            "vision",
+            "openai",
+            "gpt-4o-mini",
+            int(getattr(usage, "prompt_tokens", 0) or 0),
+            int(getattr(usage, "completion_tokens", 0) or 0),
+            False,
+        )
     print("   [Vision OCR] Completed transcription via OpenAI.", flush=True)
     return response.choices[0].message.content or ""
 
 
-def extract_text_from_image(file_path: str) -> str:
+def extract_text_from_image(
+    file_path: str,
+    *,
+    stage_charger: Callable[[str, int, int, int], object] | None = None,
+    usage_recorder: Callable[[str, str, str, int, int, bool], object] | None = None,
+) -> str:
     """Transcribe an image through the configured OpenAI vision model."""
     load_env()
     openai_key = os.environ.get("OPENAI_API_KEY")
 
     if openai_key and not openai_key.startswith("replace-"):
-        return extract_text_from_image_openai(file_path)
+        try:
+            return extract_text_from_image_openai(
+                file_path,
+                stage_charger=stage_charger,
+                usage_recorder=usage_recorder,
+            )
+        except Exception as err:
+            if isinstance(err, IngestionBudgetExceededError):
+                raise
+            return f"(Image OCR unavailable: provider error [{type(err).__name__}])"
 
-    raise RuntimeError("OPENAI_API_KEY is not configured in your .env file.")
+    return "(Image OCR unavailable: OPENAI_API_KEY is not configured)"

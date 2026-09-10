@@ -78,7 +78,10 @@ operator header. Classification is normalized to one of `UNCLASSIFIED`,
 | --- | --- | --- | --- |
 | GET | `/health` | service and registry check | `200` |
 | GET | `/pipelines` | discover registered pipeline names | `200` |
-| POST | `/ingest` | upload a real source into scoped memory | `201` |
+| POST | `/ingest` | synchronously upload a source into scoped memory (compatibility) | `201` |
+| POST | `/ingestions` | asynchronously admit a bounded source extraction job | `202` |
+| GET | `/ingestions/{ingestion_id}` | read frontend-safe ingestion status/receipt | `200` |
+| POST | `/ingestions/{ingestion_id}/cancel?task_id=...` | request cooperative extraction cancellation | `200` |
 | POST | `/runs` | queue an advisory/generation run | `202` |
 | GET | `/runs/{run_id}` | read frontend-safe status | `200` |
 | GET | `/runs/{run_id}/telemetry` | read safe token/cache/wait/quality/artifact aggregates | `200` |
@@ -104,11 +107,13 @@ entry, deletes the temporary file, and returns a receipt with
 `memory_persisted=true`. There is no demo or sample-data ingestion path in the
 production entry point.
 
-The target ingestion path is asynchronous and evidence-first. It registers an
-immutable source, returns an `ingestion_id`, and runs modality extraction,
-structure enrichment, indexing, Cognee projection, and quality checks through
-the ingestion job queue. The compatibility receipt remains supported while
-the new status/event contract is introduced. See
+The target ingestion path is asynchronous and evidence-first. `POST
+/ingestions` registers a bounded staged source, returns an `ingestion_id`, and
+runs the current extractor through a dedicated durable local queue. It already
+provides lease recovery, retry/dead-letter, cancellation, and source-hash
+idempotency. Typed modality extraction, structure enrichment, indexing, Cognee
+projection, and quality checks are the next T34–T38 stages. The compatibility
+receipt remains supported while the new status/event contract is introduced. See
 [Ingestion architecture](ingestion-architecture.md) for the canonical
 `IngestionManifest`, `EvidenceBlock`, cache key, quality gate, and plugin
 requirements. Do not make the Harness or a skill re-parse the same source at
@@ -235,6 +240,11 @@ Harness. It starts the trusted Python MCP server and exposes:
 - `start_sudarshan_skill`
 - `remember_sudarshan_context`
 - `recall_sudarshan_context`
+- `search_sudarshan_text_evidence`
+- `search_sudarshan_visual_evidence`
+- `search_sudarshan_table_evidence`
+- `search_sudarshan_video_segment`
+- `get_sudarshan_evidence`
 
 The MCP tools map to the application boundary as follows:
 
@@ -255,11 +265,17 @@ The MCP tools map to the application boundary as follows:
 | `start_sudarshan_skill` | `.submit_skill()` | durable background skill job |
 | `remember_sudarshan_context` | `.remember_context()` | User/Case session memory |
 | `recall_sudarshan_context` | `.recall_session_context()` | bounded User/Case recall |
+| `search_sudarshan_text_evidence` | `.search_text_evidence()` | scoped text/page/slide retrieval |
+| `search_sudarshan_visual_evidence` | `.search_visual_evidence()` | scoped image/video visual retrieval |
+| `search_sudarshan_table_evidence` | `.search_table_evidence()` | scoped table retrieval |
+| `search_sudarshan_video_segment` | `.search_video_segment_evidence()` | timestamped ASR/OCR/scene retrieval |
+| `get_sudarshan_evidence` | `.get_evidence()` | authorized evidence and relationship lookup |
 
 File ingestion remains an HTTP concern because it requires multipart streaming
-and temporary-file lifecycle management. A Harness or frontend that needs to
-ingest a file should upload it to `/ingest`, then pass the returned case/task
-identity into `run_sudarshan`.
+and staged-file lifecycle management. A Harness or frontend should use
+`/ingestions` for non-trivial PDF/PPTX/image/video work, poll the returned
+`ingestion_id`, then pass the case/task identity into `run_sudarshan`. Use
+`/ingest` only where an immediate compatibility receipt is required.
 
 The MCP server and HTTP API call the same process-scoped
 `SudarshanApplication`; they do not create a second router or direct Cognee

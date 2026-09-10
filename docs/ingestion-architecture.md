@@ -71,6 +71,32 @@ selected evidence references. A PPT, video, infographic, or LinkedIn skill can
 request the exact page, slide, crop, diagram, or timestamped video segment
 without re-running ingestion.
 
+The current structure compiler adds deterministic parent, temporal, and
+page/slide sequence relationships plus source-mapped chunks before retrieval.
+It does not infer new factual relationships or write directly to Cognee; those
+operations remain governed T36 stages. The first T36 local slice now persists
+typed blocks, chunks, and relationships in a scoped SQLite evidence index and
+projects only bounded, provenance-bearing summaries through `MemoryManager`.
+Exact evidence remains in the index and is retrieved through Sudarshan-owned
+authorization boundaries; distributed/vector/visual indexes and production
+object storage are still open work.
+
+The T37 runtime boundary adds a hard per-ingestion stage budget and a
+scope-aware derived-stage cache. The asynchronous ingestion worker normalizes
+the budget, charges parser/fan-out work before extraction, records observed
+OCR/vision work, and returns safe budget/cache receipts. A matching parser-stage
+cache entry can skip extraction. Fingerprints include source hash, stage and
+parser versions, configuration, model policy, classification scope, and prior
+stage fingerprints. The cache stores JSON-safe derived payloads and never
+serves a hit across User/Case/Task or classification boundaries. Provider
+usage remains an estimate until adapters reconcile actual response usage;
+adaptive fallback now records provider-unavailable/error markers and promotes
+the ingestion to `PARTIAL` instead of hiding missing channels. Distributed
+cache leases and abandoned artifact cleanup remain deployment work. The local
+usage ledger stores estimated preflight tokens separately from actual provider
+response tokens, so an operator can see whether a cost number is measured or
+only a reservation estimate.
+
 ## 3. Canonical contracts
 
 The first implementation must add these transport-neutral contracts under
@@ -231,9 +257,23 @@ Use adaptive scene/keyframe sampling rather than fixed periodic sampling only.
 Every output must retain start/end timestamps. Re-running a video should reuse
 ASR, unchanged scenes, and unchanged frame analyses.
 
+Current implementation status: T34 adapters now produce typed evidence for
+text, PDF, PPTX, image, and video while preserving the legacy extraction
+contracts. Video emits `video_scene`, `audio_transcript`, and `video_ocr`
+blocks with stable source-hash IDs, scene parent links, confidence, and parser
+provenance; the legacy transcript is derived from those blocks. Adaptive scene
+detection, keyframe artifact retention, stage-level caching, and durable
+evidence persistence remain follow-up work.
+
 ## 6. Parallelism, retries, and waiting
 
 Ingestion is a DAG, not one blocking function:
+
+The local scheduler records admission-to-worker-start time as
+`queue_wait_ms` on every claimed job, includes it in status, and exposes
+average/maximum queue wait in scheduler health metrics. This keeps queue
+backlog latency separate from parser/provider latency; production telemetry
+should later export the same fields to the shared collector.
 
 ```text
 document
@@ -257,7 +297,7 @@ The public API should eventually return:
   "document_id": "doc_01J...",
   "status": "accepted",
   "poll_uri": "/ingestions/ing_01J...",
-  "events_uri": "/ingestions/ing_01J.../events"
+  "events": "included in the status response"
 }
 ```
 

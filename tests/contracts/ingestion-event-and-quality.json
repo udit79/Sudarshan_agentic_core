@@ -1,0 +1,27 @@
+{
+  "event": {
+    "event_id": "evt-ing-1",
+    "ingestion_id": "ing-1",
+    "document_id": "doc-1",
+    "sequence": 1,
+    "stage": "parsing",
+    "status": "parsing",
+    "progress": 40,
+    "message": "PDF pages parsed",
+    "evidence_ids": ["page-1"]
+  },
+  "quality": {
+    "quality_report_id": "iqr-1",
+    "ingestion_id": "ing-1",
+    "document_id": "doc-1",
+    "status": "partial",
+    "coverage": {"pages_seen": 10, "pages_processed": 9},
+    "block_counts": {"text": 12, "table": 2},
+    "low_confidence_count": 1,
+    "fallback_count": 2,
+    "warnings": ["page 7 OCR confidence is low"],
+    "failures": ["page 10 timed out"],
+    "source_map_complete": false,
+    "security_markers": ["instruction-like-source-text"]
+  }
+}
