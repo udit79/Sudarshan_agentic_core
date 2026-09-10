@@ -384,6 +384,7 @@ class LocalRunScheduler:
     ) -> None:
         now = time.time()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
                 UPDATE run_queue
@@ -401,7 +402,21 @@ class LocalRunScheduler:
                     run_id,
                 ),
             )
-        self._record_event(run_id, "completed", status, error or status)
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) AS sequence "
+                "FROM run_queue_events WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            sequence = int(row["sequence"]) + 1
+            connection.execute(
+                """
+                INSERT INTO run_queue_events
+                    (run_id, sequence, event_type, status, message, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, sequence, "completed", status, error or status, now),
+            )
+            connection.commit()
 
     def _release_retry(self, run_id: str) -> None:
         if self._closed.is_set():

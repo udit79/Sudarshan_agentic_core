@@ -3392,7 +3392,12 @@ bounded backoff, and auth/budget/invalid-request failures go directly to the
 existing fallback path. Shared retry reservations, distributed leases, and
 abandoned-artifact file cleanup remain deployment work. Skill-cache startup
 cleanup now removes expired references and abandoned generation claims without
-deleting source or artifact files.
+deleting source or artifact files. The asynchronous ingestion status projection
+now exposes budget, estimated/actual usage, cache state, fallback reasons, and
+evidence counts at the top level for reconnect-safe dashboard consumers while
+retaining the compatibility result payload. Scheduler terminal state and its
+completion event are committed atomically so reconnect consumers cannot observe
+terminal status without the final event.
 
 `T38` now has a deterministic local evaluation slice in
 `ingestion_pipelines/evaluation.py`. It runs the same reviewed query cases

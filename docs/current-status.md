@@ -126,7 +126,12 @@ profile use the same Sudarshan application boundary.
   opt-in retry seam that re-charges each attempt and preserves fallback
   behavior for non-retryable failures. Skill-cache startup cleanup now removes
   expired cache references and abandoned generation claims without deleting
-  artifact files.
+  artifact files. Asynchronous ingestion status now projects budget, estimated
+  versus actual usage, cache state, fallback reasons, and evidence counts at
+  the top level for reconnect-safe dashboards while retaining the legacy
+  nested result. Scheduler terminal state and its completion event now commit
+  atomically, preventing reconnect consumers from observing a terminal status
+  before the final event.
 
 ### Backend work still required
 
@@ -190,7 +195,7 @@ sequenceDiagram
 The current local verification snapshot is:
 
 ```text
-Python: 211 passed, 1 skipped
+Python: 212 passed, 1 skipped
 T28 reliability focus: 21 passed
 Frontend projection/cursor tests: 3 passed
 Node gateway tests: 9 passed

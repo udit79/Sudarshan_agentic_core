@@ -381,6 +381,7 @@ class SudarshanApplication:
             "failed": "failed",
         }.get(status, "pending")
         result = state.get("skill_result")
+        receipt = result if isinstance(result, Mapping) else {}
         return {
             "ingestion_id": state["run_id"],
             "task_id": state["task_id"],
@@ -396,6 +397,16 @@ class SudarshanApplication:
             "queue_wait_ms": state.get("queue_wait_ms"),
             "error": state.get("error"),
             "dead_letter": bool(state.get("dead_letter", False)),
+            # Keep dashboard/reconnect consumers independent of the nested
+            # worker result while retaining ``result`` for compatibility.
+            "cache_status": receipt.get("cache_status"),
+            "budget": receipt.get("budget"),
+            "usage": receipt.get("usage"),
+            "fallback_count": receipt.get("fallback_count", 0),
+            "fallbacks": list(receipt.get("fallbacks") or []),
+            "evidence_count": receipt.get("evidence_count", 0),
+            "chunk_count": receipt.get("chunk_count", 0),
+            "relationship_count": receipt.get("relationship_count", 0),
             "result": result,
             "events": self.ingestion_scheduler.events(str(ingestion_id)),
             "created_at": state.get("created_at"),

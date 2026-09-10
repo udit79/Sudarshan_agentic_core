@@ -75,3 +75,38 @@ def test_optional_image_provider_failure_returns_partial_receipt(tmp_path, monke
     assert result["status"] == "partial"
     assert result["fallback_count"] == 1
     assert result["fallbacks"] == ["vision_provider_unavailable"]
+
+
+def test_ingestion_status_projects_safe_usage_and_cache_receipts() -> None:
+    app = object.__new__(SudarshanApplication)
+
+    class _Scheduler:
+        def status(self, _ingestion_id):
+            return {
+                "run_id": "ing-1",
+                "task_id": "task-1",
+                "case_id": "case-1",
+                "status": "partial",
+                "skill_result": {
+                    "cache_status": "hit",
+                    "budget": {"total_tokens": 0, "usage_is_estimate": True},
+                    "usage": {"estimated_tokens": 4096, "actual_tokens": 0, "usage_is_estimate": True},
+                    "fallback_count": 1,
+                    "fallbacks": ["vision_provider_unavailable"],
+                    "evidence_count": 2,
+                    "chunk_count": 1,
+                    "relationship_count": 1,
+                },
+            }
+
+        def events(self, _ingestion_id):
+            return []
+
+    app.ingestion_scheduler = _Scheduler()
+    status = app.ingestion_status("ing-1")
+
+    assert status["quality_status"] == "partial"
+    assert status["cache_status"] == "hit"
+    assert status["usage"]["estimated_tokens"] == 4096
+    assert status["fallbacks"] == ["vision_provider_unavailable"]
+    assert status["evidence_count"] == 2
