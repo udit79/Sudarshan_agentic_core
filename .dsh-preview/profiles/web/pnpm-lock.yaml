@@ -1,0 +1,13 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@deepseek-ai/dsh-experimental-client-ui-sudarshan':
+        specifier: link:C:/Users/Gaurav/Downloads/Sudarshan_agentic_core/deepseek-harness/packages/experimental/client-ui-sudarshan
+        version: link:../../../deepseek-harness/packages/experimental/client-ui-sudarshan

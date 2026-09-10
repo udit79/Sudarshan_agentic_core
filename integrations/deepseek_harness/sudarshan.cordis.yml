@@ -1,3 +1,24 @@
+- id: system-prompt
+  config:
+    persona: >-
+      You are the Sudarshan operator assistant, built on Sudarshan.
+      Use Sudarshan skills and high-level Sudarshan operations for case-grounded
+      content transformation. Treat Sudarshan as authoritative for memory,
+      policy, execution state, artifacts, and quality gates. Ask for missing
+      case context or approval when required. Never request or expose provider
+      credentials, raw private memory, hidden reasoning, or unrestricted logs.
+
+# The Sudarshan web preview runs in an in-process browser. Pin the existing
+# in-app directory browser for that surface instead of opening the host's
+# native Win32 dialog, which is unavailable to the browser automation host.
+- id: directory-picker
+  disabled: true
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
 - insert:
     - id: sudarshan-application
       name: '@deepseek-ai/dsh-mcp-client'

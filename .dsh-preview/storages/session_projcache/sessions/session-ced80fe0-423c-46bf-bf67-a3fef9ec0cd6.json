@@ -1,0 +1,177 @@
+{
+  "version": 6,
+  "record": {
+    "identity": {
+      "createdAt": 1789022472165,
+      "cwd": "C:\\Users\\Gaurav\\Downloads\\Sudarshan_agentic_core",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 15,
+        "val": "gaurav garg"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 15,
+        "val": {
+          "first": {
+            "seq": 7,
+            "text": "gaurav garg"
+          },
+          "count": 1,
+          "lastSeq": 7
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 15,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 15,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 15,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 15,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": null
+        }
+      },
+      "contextPressure": {
+        "ver": 4,
+        "seq": 15,
+        "val": {
+          "surfaceTokens": 11,
+          "contextWindow": 1000000
+        }
+      },
+      "contextBreakdown": {
+        "ver": 2,
+        "seq": 15,
+        "val": {
+          "systemTokens": 16,
+          "toolsTokens": 971,
+          "messageTokens": 11
+        }
+      },
+      "sessionStats": {
+        "ver": 1,
+        "seq": 15,
+        "val": {
+          "turns": 1,
+          "steps": 1,
+          "llmMs": 0,
+          "toolMs": 0,
+          "ttftMs": 0,
+          "ttftSteps": 0,
+          "decodeMs": 0,
+          "decodeTokens": 0,
+          "lastTurn": 1,
+          "openStep": null,
+          "pendingCalls": {}
+        }
+      },
+      "agentPreset": {
+        "ver": 1,
+        "seq": 15,
+        "val": "minimal"
+      },
+      "subagentTiming": {
+        "ver": 2,
+        "seq": 15,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 15,
+        "val": {}
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 15,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 6,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 13
+          },
+          "lastTurn": 1
+        }
+      },
+      "turnOutline": {
+        "ver": 2,
+        "seq": 15,
+        "val": {
+          "turns": [
+            {
+              "turn": 1,
+              "seq": 4,
+              "prompt": "gaurav garg",
+              "response": ""
+            }
+          ],
+          "draft": ""
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 15,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": true
+        }
+      },
+      "modelSelection": {
+        "ver": 2,
+        "seq": 15,
+        "val": {
+          "lastUsed": {
+            "provider": "deepseek-official",
+            "model": "deepseek-v4-flash",
+            "reasoningEffort": "high"
+          },
+          "pending": null
+        }
+      },
+      "sessionListMetadata": {
+        "ver": 1,
+        "seq": 15,
+        "val": {
+          "blank": false,
+          "lastPromptAt": 1789022664896
+        }
+      },
+      "imageLimits": {
+        "ver": 1,
+        "seq": 15,
+        "val": null
+      }
+    }
+  }
+}

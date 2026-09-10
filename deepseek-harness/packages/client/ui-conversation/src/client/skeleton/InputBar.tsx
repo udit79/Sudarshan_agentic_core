@@ -14,10 +14,10 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import type { ChangeEvent, CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
+  IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -103,6 +103,7 @@ export const InputBar = memo(function InputBar({
   }, [notice, showToast])
   const cardRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // The Access seat's data: the host-computed permissions projection
   // (undefined = capability absent → the chip renders nothing).
@@ -245,6 +246,13 @@ export const InputBar = memo(function InputBar({
   }, [addImages, attachments, imageLimits, showToast, t])
 
   const canAcceptDrop = !locked && !machineBusy && addImages !== undefined
+
+  /** Open the native image picker and route its files through intake validation. */
+  const onFilesSelected = useCallback((event: ChangeEvent<HTMLInputElement>): void => {
+    const files = Array.from(event.currentTarget.files ?? [])
+    event.currentTarget.value = ''
+    if (files.length > 0) intakeImages(files)
+  }, [intakeImages])
 
   // The keymap handlers read live bar state through this ref so the editor
   // registration survives re-renders without re-arming per keystroke.
@@ -438,6 +446,28 @@ export const InputBar = memo(function InputBar({
         </div>
         <div className={css.row}>
           <div className={css.tools}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={imageLimits?.mediaTypes.join(',') ?? 'image/*'}
+              multiple
+              hidden
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={onFilesSelected}
+            />
+            <Tooltip label={t('image.add')} side="top" delayMs={500}>
+              <button
+                type="button"
+                className={css.add}
+                aria-label={t('image.add')}
+                disabled={!canAcceptDrop}
+                onMouseDown={keepFocus}
+                onClick={() => { fileInputRef.current?.click() }}
+              >
+                <IconPaperclipOutline16 size={14} />
+              </button>
+            </Tooltip>
             <Tooltip label={t('input.commands')} side="top" delayMs={500}>
               <button
                 type="button"
