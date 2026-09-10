@@ -1,0 +1,18 @@
+{
+  "name": "agentic-engineering-loop",
+  "version": "0.1.0",
+  "description": "A research-first engineering loop for planning, implementing, testing, and verifying changes safely.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agentic Engineering Loop",
+    "shortDescription": "Research, plan, implement, test, and verify changes safely.",
+    "longDescription": "Guides Codex through repository research, executable tickets, focused implementation, regression testing, artifact checks, assumptions tracking, and explicit no-commit boundaries.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use the agentic engineering loop: research the repository and relevant sources, create small executable tickets, implement one ticket, run focused and regression tests, check what did not break, report assumptions, and do not commit or push unless explicitly authorized."
+  }
+}
