@@ -6,7 +6,9 @@ from pipelines import ExecutiveSummaryFlow, LinkedInPostFlow
 from pipelines.advisory.schemas import EvidenceItem
 from pipelines.executive_summary.schemas import ExecutiveSummaryOutput
 from pipelines.linkedin.openai_images import OpenAIImageGenerator
+from pipelines.linkedin.humanizer import audit_linkedin_text
 from pipelines.linkedin.schemas import LinkedInImageSpec, LinkedInPostOutput
+from pipelines.linkedin.visual_child import build_visual_child_call
 from pipelines.common.contracts import AdvisoryRequest
 
 
@@ -23,7 +25,7 @@ def test_automatic_text_flows_have_quality_and_delivery_routes() -> None:
 
 
 def test_linkedin_schema_normalizes_hashtags_and_rejects_model_language() -> None:
-    assert LinkedInPostOutput(
+    output = LinkedInPostOutput(
         post_id="post-1",
         title="Case update",
         post_text="A concise case-grounded update.",
@@ -32,7 +34,63 @@ def test_linkedin_schema_normalizes_hashtags_and_rejects_model_language() -> Non
         hashtags=["#NTRO", "case"],
         source_references=["case://1"],
         confidence_statement="Based on supplied information.",
-    ).hashtags == ["#NTRO", "#case"]
+    )
+    assert output.hashtags == ["#NTRO", "#case"]
+    assert output.approval_required == "publish"
+    assert output.publish_status == "draft_only"
+    assert output.humanizer_report.approved is True
+
+
+def test_linkedin_humanizer_is_explainable_and_bounded() -> None:
+    report = audit_linkedin_text(
+        "In today's rapidly changing world, our revolutionary approach always delivers. "
+        "As an AI, I cannot provide more details."
+    )
+    assert report.approved is False
+    assert {issue.category for issue in report.issues} >= {"generic_phrase", "overclaim", "ai_tell"}
+    assert report.revision_suggestions
+
+
+def test_linkedin_visual_child_is_typed_and_never_publish_capable() -> None:
+    output = LinkedInPostOutput(
+        post_id="post-visual",
+        title="Case update",
+        post_text="A concise case-grounded update.",
+        audience="Professional audience",
+        call_to_action="Read the case update.",
+        source_references=["case://1"],
+        confidence_statement="Based on supplied information.",
+        image=LinkedInImageSpec(
+            requested=True,
+            strategy="prompt",
+            image_type="diagram",
+            alt_text="Diagram of the case update",
+            generation_prompt="Show only the verified case relationships.",
+        ),
+    )
+    call = build_visual_child_call(output, parent_run_id="run-linkedin")
+    assert call is not None
+    assert call.skill_id == "visual.flowchart"
+    assert call.parent_run_id == "run-linkedin"
+    assert call.policy.max_parallel_children == 1
+    assert output.publish_status == "draft_only"
+
+
+def test_linkedin_quality_boundary_rejects_unbound_or_blocked_drafts() -> None:
+    flow = LinkedInPostFlow(None)
+    output = LinkedInPostOutput(
+        post_id="post-review",
+        title="Case update",
+        post_text="A concise case-grounded update with a clear next step.",
+        audience="Professional audience",
+        call_to_action="Read the case update.",
+        source_references=["case://1"],
+        confidence_statement="Based on supplied information.",
+    )
+    prepared = flow.prepare_quality_output(output)
+    issues = flow.quality_output_issues(prepared)
+    assert prepared.humanizer_report.approved is True
+    assert any("claim_bindings" in issue for issue in issues)
 
 
 def test_executive_summary_forbids_unresolved_placeholders() -> None:

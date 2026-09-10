@@ -8,6 +8,7 @@ from typing import Any, Callable
 from pipelines.advisory.schemas import QualityReview
 from pipelines.common.text_generation import TextTransformationFlow
 from pipelines.linkedin.agents import build_agents
+from pipelines.linkedin.humanizer import audit_linkedin_text
 from pipelines.linkedin.schemas import LinkedInImageSpec, LinkedInPostOutput
 from pipelines.linkedin.tasks import build_tasks
 
@@ -20,6 +21,7 @@ class LinkedInPostFlow(TextTransformationFlow):
     task_factory = staticmethod(build_tasks)
     output_model = LinkedInPostOutput
     quality_model = QualityReview
+    human_approval_required = True
 
     # CrewAI's Flow definition builder scans the concrete class namespace;
     # explicitly project the decorated methods onto each public Flow class.
@@ -83,26 +85,55 @@ class LinkedInPostFlow(TextTransformationFlow):
         }
 
     def enrich_output(self, output: Any) -> LinkedInPostOutput:
-        """Optionally turn the generated image prompt into an asset URI."""
+        """Attach deterministic humanizer state and optionally materialize an image."""
 
-        if not isinstance(output, LinkedInPostOutput) or not output.image.requested:
+        if not isinstance(output, LinkedInPostOutput):
             return output
+
+        updates: dict[str, Any] = {
+            "humanizer_report": audit_linkedin_text(output.post_text),
+            "approval_required": "publish",
+            "publish_status": "draft_only",
+        }
+        if output.image.requested and output.image.image_type in {"diagram", "infographic"}:
+            updates["visual_child"] = output.visual_child.model_copy(update={"status": "eligible"})
+
+        if not output.image.requested:
+            return output.model_copy(update=updates)
         image = output.image
         if self.image_generator is None:
             if image.strategy == "generate":
-                return output.model_copy(update={
-                    "image": image.model_copy(update={"strategy": "prompt"}),
-                })
-            return output
+                updates["image"] = image.model_copy(update={"strategy": "prompt"})
+                return output.model_copy(update=updates)
+            return output.model_copy(update=updates)
         try:
             asset_uri = self.image_generator(image.generation_prompt)
             if not asset_uri:
                 raise ValueError("image generator returned no asset URI")
-            return output.model_copy(update={
-                "image": image.model_copy(update={"strategy": "asset", "asset_uri": str(asset_uri)}),
-            })
+            updates["image"] = image.model_copy(update={"strategy": "asset", "asset_uri": str(asset_uri)})
+            return output.model_copy(update=updates)
         except Exception:
-            return output.model_copy(update={
-                "image": image.model_copy(update={"strategy": "prompt", "asset_uri": None}),
-                "caveats": [*output.caveats, "Image asset generation was unavailable; use the supplied prompt."],
-            })
+            updates["image"] = image.model_copy(update={"strategy": "prompt", "asset_uri": None})
+            updates["caveats"] = [*output.caveats, "Image asset generation was unavailable; use the supplied prompt."]
+            return output.model_copy(update=updates)
+
+    def prepare_quality_output(self, output: Any) -> LinkedInPostOutput:
+        """Run the deterministic humanizer before the model quality verdict."""
+
+        if not isinstance(output, LinkedInPostOutput):
+            return output
+        return output.model_copy(update={"humanizer_report": audit_linkedin_text(output.post_text)})
+
+    def quality_output_issues(self, output: Any) -> list[str]:
+        """Enforce parent-skill release gates independently of model obedience."""
+
+        if not isinstance(output, LinkedInPostOutput):
+            return ["LinkedIn output is not a validated LinkedInPostOutput"]
+        issues: list[str] = []
+        if not output.claim_bindings:
+            issues.append("claim_bindings must identify evidence for every material public claim")
+        if not output.humanizer_report.approved:
+            issues.extend(issue.message for issue in output.humanizer_report.issues if issue.severity == "block")
+        if output.approval_required != "publish" or output.publish_status != "draft_only":
+            issues.append("LinkedIn generation must remain draft_only and require separate publish approval")
+        return issues

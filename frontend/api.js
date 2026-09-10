@@ -189,6 +189,7 @@
       children: Array.isArray(raw.children) ? raw.children : (Array.isArray(summary?.children) ? summary.children : []),
       quality_report: raw.quality_report || raw.qualityReport || summary?.quality_report || null,
       wait_reason: raw.wait_reason || raw.waitReason || summary?.wait_reason || summary?.waitReason || "",
+      telemetry: raw.telemetry || summary?.telemetry || {},
       error: raw.error || fallback.error || null,
       wait_timed_out: Boolean(raw.wait_timed_out ?? fallback.wait_timed_out ?? false),
     };

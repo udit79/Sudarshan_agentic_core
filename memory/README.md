@@ -16,7 +16,8 @@ KnowledgeUnit + AccessContext
 query + AccessContext
         -> scope policy and node sets
         -> Cognee /api/v1/recall (context only)
-        -> bounded ContextBuilder
+        -> ranked, stage-bounded ContextBuilder
+        -> typed ContextPack + retrieval trace
         -> MemoryInjector
 ```
 
@@ -27,6 +28,30 @@ its ancestors. This preserves inheritance without making a user-level query
 retrieve all child cases and tasks. A recall request only sends
 the current context's node sets to Cognee; results with explicit conflicting
 scope metadata are also rejected defensively.
+
+`ContextBuilder` is the Sudarshan policy layer after Cognee retrieval. It ranks
+backend results with query-term overlap, removes exact duplicates, preserves
+source/provenance metadata, and applies a hard character/token budget. Stage
+profiles provide progressive loading: request understanding receives a small
+pack, grounding can receive more detail, and visual/quality stages receive
+only the evidence they need. The builder emits a stable retrieval trace and
+`MemoryManager.recall_context_pack()` returns the canonical orchestrator
+`ContextPack`; Cognee remains responsible for graph/vector retrieval, not run
+state or prompt policy.
+
+This follows the useful ideas from Cognee, OpenViking, and agentmemory without
+coupling Sudarshan to their storage formats: graph-plus-vector recall, explicit
+memory/resource/skill separation, progressive context depth, hybrid ranking,
+bounded injection, and inspectable retrieval traces. Task events remain
+auditable writes through `MemoryManager`, and unreviewed output is not promoted
+to case memory automatically.
+
+Memory also has an explicit lifecycle: `active`, `pending_review`,
+`superseded`, `retracted`, or `expired`. Only active records are eligible for
+recall. A replacement can explicitly supersede an older record, while
+`retract()` hides a record without destroying its audit entry. `forget()` is
+scope-checked and retracts by default; irreversible backend purge is opt-in and
+requires an adapter that explicitly supports it.
 
 ## Example
 

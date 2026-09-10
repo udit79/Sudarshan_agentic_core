@@ -3,9 +3,10 @@
 This is a dependency-free static frontend for the Node/Express gateway in
 `../backend-node`. It uses Google OAuth through HttpOnly cookies, loads
 user-owned cases, adds source files to case memory, submits selected output
-pipelines, polls task status, and renders transformed output as text. The
-result panel's Stop action requests cooperative cancellation at a safe
-orchestration boundary; it is not a resumable provider pause.
+pipelines, follows live progress, and renders safe transformed output and
+artifact previews. It is the reference operator dashboard; the gateway and
+Python backend remain responsible for identity, ownership, classification,
+quotas, artifact access, and provider credentials.
 
 ## Run locally
 
@@ -42,7 +43,8 @@ define `window.SUDARSHAN_API_ORIGIN` before `api.js` in both HTML files:
 - `login.html` / `login.js` — Google OAuth entry point.
 - `index.html` / `script.js` — authenticated case selector, file attachments,
   output selection, transformation submission, task polling, live agentic
-  progress, cooperative stop/cancellation, and output display.
+  progress, wait/quality/telemetry display, cooperative stop/cancellation,
+  artifact preview/download, and output display.
 - `styles.css` / `login.css` — visual system and responsive layout.
 
 Never put Google secrets, JWTs, provider API keys, or MongoDB credentials in
@@ -60,6 +62,10 @@ stores the last SSE sequence per task in `sessionStorage`, so reconnects ask
 the backend for only events after the last acknowledged sequence. Terminal
 FastAPI runs also hydrate their artifact manifests through the canonical
 manifest endpoint.
+
+The current UI does not yet expose a full parent/child execution graph,
+interactive visual repair editor, or audit-log explorer. Those are planned
+operator-surface improvements, not backend prerequisites.
 
 ## T09 migration boundary
 

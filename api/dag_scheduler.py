@@ -76,9 +76,16 @@ class DAGSchedulerBridge:
             "scheduler": self.scheduler.metrics(),
         }
 
-    def _submit_ready(self, run_id: str) -> None:
+    def _submit_ready(
+        self,
+        run_id: str,
+        *,
+        fallback_context: tuple[dict[str, Any], str] | None = None,
+    ) -> None:
         with self._context_lock:
             context = self._contexts.get(run_id)
+        if context is None:
+            context = fallback_context
         if context is None:
             return
         base_payload, operator_id = context
@@ -93,6 +100,7 @@ class DAGSchedulerBridge:
                 "dag_run_id": run_id,
                 "dag_node_id": node.node_id,
                 "dag_node_repair_attempt": node.repair_attempts,
+                "dag_base_task_id": str(base_payload.get("task_id", run_id)),
             })
             payload["metadata"] = metadata
             try:
@@ -141,7 +149,18 @@ class DAGSchedulerBridge:
         # A successful node can unlock more work; a repairable failure may also
         # put the same node back into ready state. DAG locking makes concurrent
         # completion callbacks safe and prevents duplicate claims.
-        self._submit_ready(run_id)
+        # The in-memory context is intentionally not the source of truth. If
+        # this worker belongs to a bridge recreated after a process restart,
+        # recover the base request from the durable job payload so dependent
+        # nodes can still be admitted.
+        fallback_payload = dict(payload)
+        base_task_id = str(metadata.get("dag_base_task_id", "")).strip()
+        if base_task_id:
+            fallback_payload["task_id"] = base_task_id
+        self._submit_ready(
+            run_id,
+            fallback_context=(fallback_payload, operator_id),
+        )
         return {
             "status": "pending" if status == "waiting" else status,
             "error": result.get("error") if status == "failed" else None,

@@ -44,6 +44,9 @@ class TextTransformationFlow(Flow[TaskState]):
     task_factory: TaskFactory | None = None
     output_model: type[BaseModel] | None = None
     quality_model: type[BaseModel] | None = None
+    # A draft may require explicit human approval even though this generic
+    # Flow has no interactive approval step of its own.
+    human_approval_required = False
     # Subclasses may opt into local preview rendering for a valid structured
     # draft that failed the quality gate. The response remains ``failed`` and
     # the frontend must label the artifact as a draft; this is only a preview
@@ -160,6 +163,16 @@ class TextTransformationFlow(Flow[TaskState]):
 
         return output
 
+    def prepare_quality_output(self, output: BaseModel) -> BaseModel:
+        """Apply deterministic, side-effect-free checks before the quality gate."""
+
+        return output
+
+    def quality_output_issues(self, output: BaseModel) -> list[str]:
+        """Return concrete non-LLM quality failures for the structured output."""
+
+        return []
+
     def _runtime(self) -> MemoryRuntime:
         request = self._request()
         return MemoryRuntime(
@@ -250,6 +263,7 @@ class TextTransformationFlow(Flow[TaskState]):
                     "quality_feedback": quality_feedback,
                 })
             output = self.output_model.model_validate(getattr(tasks["output"].output, "pydantic", None))  # type: ignore[union-attr]
+            output = self.prepare_quality_output(output)
             quality = self.quality_model.model_validate(getattr(tasks["quality"].output, "pydantic", None))  # type: ignore[union-attr]
             self.state.record(self.pipeline_name, "succeeded", summary="Text-generation crew completed")
             return TextCrewRun(output=output, quality=quality)
@@ -286,12 +300,17 @@ class TextTransformationFlow(Flow[TaskState]):
             self.state.failure = "Crew returned no structured output or quality review"
             self.state.record("quality_gate", "rejected", summary=self.state.failure)
             return False
-        self.state.output = result.output.model_dump(mode="json")
-        self.state.quality_review = result.quality.model_dump(mode="json")
-        if result.quality.model_dump().get("approved") is True:
+        prepared_output = self.prepare_quality_output(result.output)
+        deterministic_issues = self.quality_output_issues(prepared_output)
+        self.state.output = prepared_output.model_dump(mode="json")
+        quality_data = result.quality.model_dump(mode="json")
+        if deterministic_issues:
+            quality_data["issues"] = [*quality_data.get("issues", []), *deterministic_issues]
+        self.state.quality_review = quality_data
+        if quality_data.get("approved") is True and not deterministic_issues:
             self.state.record("quality_gate", "succeeded", summary="Output approved for frontend delivery")
             return True
-        issues = result.quality.model_dump().get("issues", []) + result.quality.model_dump().get("required_revisions", [])
+        issues = quality_data.get("issues", []) + quality_data.get("required_revisions", [])
         self.state.failure = "; ".join(issues) or "Quality critic rejected the output"
         self.state.record("quality_gate", "rejected", summary=self.state.failure)
         return False
@@ -322,7 +341,7 @@ class TextTransformationFlow(Flow[TaskState]):
                     "pipeline": self.pipeline_name,
                     "classification_level": self.state.classification_level,
                     "delivery_owner": "frontend",
-                    "human_approval_required": False,
+                    "human_approval_required": self.human_approval_required,
                     "operation": self.state.operation,
                     "parent_run_id": self.state.parent_run_id,
                     "parent_artifact_id": self.state.parent_artifact_id,
@@ -357,7 +376,7 @@ class TextTransformationFlow(Flow[TaskState]):
                 metadata={
                     "memory_records": len(self.state.memory_records),
                     "delivery_owner": "frontend",
-                    "human_approval_required": False,
+                    "human_approval_required": self.human_approval_required,
                 },
             )
             return self._result

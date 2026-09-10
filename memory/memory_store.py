@@ -7,9 +7,10 @@ domain cache for callers that need it.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from threading import RLock
 
-from memory.model import Memory
+from memory.model import Memory, MemoryLifecycle, utc_now
 
 
 class MemoryStore:
@@ -54,3 +55,39 @@ class MemoryStore:
     def list(self) -> list[Memory]:
         with self._lock:
             return list(self._memory.values())
+
+    def transition(
+        self,
+        memory_id: str,
+        lifecycle: MemoryLifecycle,
+        *,
+        superseded_by: str | None = None,
+    ) -> Memory:
+        """Apply an auditable local lifecycle transition."""
+
+        with self._lock:
+            existing = self._memory.get(memory_id)
+            if existing is None:
+                raise KeyError(memory_id)
+            updated = replace(
+                existing,
+                lifecycle=MemoryLifecycle(lifecycle),
+                superseded_by=superseded_by,
+                updated_at=utc_now(),
+                metadata={
+                    **dict(existing.metadata),
+                    "lifecycle": MemoryLifecycle(lifecycle).value,
+                    **({"superseded_by": superseded_by} if superseded_by else {}),
+                },
+            )
+            self._memory[memory_id] = updated
+            return updated
+
+    def is_recallable(self, memory_id: str | None) -> bool:
+        """Return false for locally known non-active memories."""
+
+        if not memory_id:
+            return True
+        with self._lock:
+            memory = self._memory.get(memory_id)
+            return memory is None or memory.lifecycle is MemoryLifecycle.ACTIVE

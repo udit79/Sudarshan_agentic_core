@@ -22,13 +22,18 @@ import subprocess
 import tempfile
 import base64
 import time
+import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
 from typing import Any, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
+
+from pipelines.video.contracts import VideoRunManifest, VideoSceneManifest
 
 
 _ARTIFACT_DIR = Path("artifacts") / "videos"
@@ -219,17 +224,23 @@ class NativeVideoGenerator:
         *,
         tts: OpenAITTSAdapter | None = None,
         image_generator: OpenAIImageAdapter | None = None,
-        output_dir: str | Path = _ARTIFACT_DIR,
+        output_dir: str | Path | None = None,
         width: int = 1920,
         height: int = 1080,
         fps: int = 24,
+        max_parallel_scenes: int | None = None,
+        renderer_version: str | None = None,
     ) -> None:
         self.tts = tts or OpenAITTSAdapter()
         self.image_generator = image_generator or OpenAIImageAdapter()
-        self.output_dir = Path(output_dir)
+        self.output_dir = Path(output_dir or os.getenv("SUDARSHAN_VIDEO_ARTIFACT_DIR", str(_ARTIFACT_DIR)))
         self.width = width
         self.height = height
         self.fps = fps
+        self.max_parallel_scenes = max_parallel_scenes or int(os.getenv("SUDARSHAN_VIDEO_MAX_PARALLEL_SCENES", "4"))
+        if self.max_parallel_scenes < 1 or self.max_parallel_scenes > 16:
+            raise ValueError("max_parallel_scenes must be between 1 and 16")
+        self.renderer_version = renderer_version or os.getenv("SUDARSHAN_VIDEO_RENDERER_VERSION", "native-video@2")
 
     def generate(
         self,
@@ -239,6 +250,7 @@ class NativeVideoGenerator:
         artifact_name: str | None = None,
         package_dir: str | Path | None = None,
         cancel_event: Event | None = None,
+        authorization_scope: Mapping[str, Any] | None = None,
     ) -> NativeVideoResult:
         """Generate a complete video from scenes.
 
@@ -266,45 +278,60 @@ class NativeVideoGenerator:
         except NativeVideoError as exc:
             return NativeVideoResult(status="failed", error=str(exc))
 
+        manifest_path = package_root / "video-manifest.json"
+        manifest = self._load_or_create_manifest(manifest_path, artifact_name, subject, scenes, authorization_scope)
+        manifest.status = "rendering"
+        self._persist_manifest(manifest_path, manifest)
         with tempfile.TemporaryDirectory(prefix="sudarshan-video-") as work_dir:
             work = Path(work_dir)
-            segment_paths: list[str] = []
-
-            for i, scene in enumerate(scenes):
-                self._check_cancelled(cancel_event)
-                try:
-                    segment = self._generate_scene(
-                        scene, work, i, ffmpeg, subject, package_root, cancel_event,
-                    )
-                    if segment:
-                        segment_paths.append(segment)
-                except NativeVideoCancelled:
-                    raise
-                except Exception as exc:
-                    # Log but continue — partial videos are acceptable.
-                    continue
+            segment_paths, failed_scene_ids, cache_hits = self._render_scene_batch(
+                scenes,
+                manifest,
+                manifest_path,
+                work,
+                ffmpeg,
+                subject,
+                package_root,
+                cancel_event,
+                authorization_scope,
+            )
 
             if not segment_paths:
+                manifest.status = "cancelled" if cancel_event is not None and cancel_event.is_set() else "failed"
+                manifest.failed_scene_ids = failed_scene_ids
+                self._persist_manifest(manifest_path, manifest)
                 return NativeVideoResult(
                     status="failed",
                     error="No video segments could be generated",
                     scene_count=len(scenes),
+                    metadata={"manifest_path": str(manifest_path), "failed_scene_ids": failed_scene_ids},
                 )
 
             # Concatenate all segments.
             # Keep the final render inside the same durable package as its
             # source script, storyboard, scene media, and manifest.
             output_path = str(package_root / "final.mp4")
+            manifest.status = "composing"
+            manifest.segment_order = [scene.scene_id for scene in scenes if scene.video_path and Path(scene.video_path).exists()]
+            self._persist_manifest(manifest_path, manifest)
             try:
                 self._concatenate(segment_paths, output_path, work, ffmpeg, cancel_event)
             except Exception as exc:
+                manifest.status = "failed"
+                manifest.failed_scene_ids = failed_scene_ids
+                self._persist_manifest(manifest_path, manifest)
                 return NativeVideoResult(
                     status="failed",
                     error=f"FFmpeg concatenation failed: {exc}",
                     scene_count=len(scenes),
+                    metadata={"manifest_path": str(manifest_path), "failed_scene_ids": failed_scene_ids},
                 )
 
             duration = self._probe_duration(output_path)
+            manifest.status = "partial" if failed_scene_ids else "succeeded"
+            manifest.output_video = output_path
+            manifest.failed_scene_ids = failed_scene_ids
+            self._persist_manifest(manifest_path, manifest)
 
             return NativeVideoResult(
                 status="succeeded",
@@ -317,6 +344,10 @@ class NativeVideoGenerator:
                     "rendered_scenes": len(segment_paths),
                     "resolution": f"{self.width}x{self.height}",
                     "package_dir": str(package_root),
+                    "manifest_path": str(manifest_path),
+                    "cache_hits": cache_hits,
+                    "failed_scene_ids": failed_scene_ids,
+                    "degraded": bool(failed_scene_ids),
                     "scenes": [
                         {
                             "scene_id": scene.scene_id,
@@ -332,6 +363,150 @@ class NativeVideoGenerator:
                     ],
                 },
             )
+
+    def _render_scene_batch(
+        self,
+        scenes: Sequence[VideoScene],
+        manifest: VideoRunManifest,
+        manifest_path: Path,
+        work: Path,
+        ffmpeg: str,
+        subject: str,
+        package_root: Path,
+        cancel_event: Event | None,
+        authorization_scope: Mapping[str, Any] | None,
+    ) -> tuple[list[str], list[str], int]:
+        """Render missing scenes concurrently and preserve storyboard order."""
+
+        entries = {entry.scene_id: entry for entry in manifest.scenes}
+        segment_by_scene: dict[str, str] = {}
+        failed_scene_ids: list[str] = []
+        cache_hits = 0
+        futures = {}
+
+        with ThreadPoolExecutor(max_workers=min(self.max_parallel_scenes, len(scenes)), thread_name_prefix="sudarshan-video-scene") as pool:
+            for index, scene in enumerate(scenes):
+                self._check_cancelled(cancel_event)
+                fingerprint = self.scene_fingerprint(
+                    subject,
+                    scene,
+                    renderer_version=self.renderer_version,
+                    authorization_scope=authorization_scope,
+                )
+                entry = entries.get(scene.scene_id)
+                if entry is not None and entry.fingerprint == fingerprint and entry.status == "succeeded" and entry.video_path and Path(entry.video_path).is_file():
+                    scene.video_path = entry.video_path
+                    scene.image_path = entry.image_path
+                    scene.audio_path = entry.audio_path
+                    segment_by_scene[scene.scene_id] = entry.video_path
+                    cache_hits += 1
+                    continue
+                entry = VideoSceneManifest(
+                    scene_id=scene.scene_id,
+                    fingerprint=fingerprint,
+                    status="running",
+                    attempt=(entry.attempt + 1 if entry is not None else 1),
+                    duration_seconds=scene.duration_seconds,
+                )
+                entries[scene.scene_id] = entry
+                manifest.scenes = [entries[item.scene_id] for item in scenes]
+                self._persist_manifest(manifest_path, manifest)
+                futures[pool.submit(self._generate_scene, scene, work, index, ffmpeg, subject, package_root, cancel_event)] = (scene, entry)
+
+            for future in as_completed(futures):
+                scene, entry = futures[future]
+                try:
+                    segment = future.result()
+                    if not segment:
+                        raise NativeVideoError("scene renderer returned no segment")
+                    entry.status = "succeeded"
+                    entry.video_path = segment
+                    entry.image_path = scene.image_path
+                    entry.audio_path = scene.audio_path
+                    entry.error = None
+                    segment_by_scene[scene.scene_id] = segment
+                except NativeVideoCancelled:
+                    entry.status = "cancelled"
+                    entry.error = "scene generation cancelled"
+                    self._persist_manifest(manifest_path, manifest)
+                    raise
+                except Exception as exc:
+                    entry.status = "failed"
+                    entry.error = str(exc)[:1000]
+                    failed_scene_ids.append(scene.scene_id)
+                finally:
+                    manifest.scenes = [entries[item.scene_id] for item in scenes]
+                    self._persist_manifest(manifest_path, manifest)
+
+        ordered_paths = [segment_by_scene[scene.scene_id] for scene in scenes if scene.scene_id in segment_by_scene]
+        return ordered_paths, failed_scene_ids, cache_hits
+
+    @staticmethod
+    def scene_fingerprint(
+        subject: str,
+        scene: VideoScene,
+        *,
+        renderer_version: str | None = None,
+        authorization_scope: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Hash only scene inputs and renderer/provider versions, never raw cache output."""
+
+        payload = {
+            "subject": subject,
+            "scene_id": scene.scene_id,
+            "narration": scene.narration,
+            "visual_description": scene.visual_description,
+            "duration_seconds": scene.duration_seconds,
+            "on_screen_text": scene.on_screen_text,
+            "renderer_version": renderer_version or os.getenv("SUDARSHAN_VIDEO_RENDERER_VERSION", "native-video@2"),
+            "tts_model": os.getenv("OPENAI_TTS_MODEL", "tts-1"),
+            "tts_voice": os.getenv("OPENAI_TTS_VOICE", "alloy"),
+            "image_model": os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1"),
+            "authorization_scope": dict(authorization_scope or {}),
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _load_or_create_manifest(
+        self,
+        path: Path,
+        run_id: str,
+        subject: str,
+        scenes: Sequence[VideoScene],
+        authorization_scope: Mapping[str, Any] | None,
+    ) -> VideoRunManifest:
+        if path.is_file():
+            try:
+                loaded = VideoRunManifest.model_validate_json(path.read_text(encoding="utf-8"))
+                if loaded.run_id == run_id and loaded.subject == subject and loaded.renderer_version == self.renderer_version:
+                    return loaded
+            except Exception:
+                pass
+        return VideoRunManifest(
+            run_id=run_id,
+            subject=subject,
+            renderer_version=self.renderer_version,
+            scenes=[
+                VideoSceneManifest(
+                    scene_id=scene.scene_id,
+                    fingerprint=self.scene_fingerprint(
+                        subject,
+                        scene,
+                        renderer_version=self.renderer_version,
+                        authorization_scope=authorization_scope,
+                    ),
+                    duration_seconds=scene.duration_seconds,
+                )
+                for scene in scenes
+            ],
+        )
+
+    @staticmethod
+    def _persist_manifest(path: Path, manifest: VideoRunManifest) -> None:
+        manifest.updated_at = datetime.now(timezone.utc).isoformat()
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+        temporary.replace(path)
 
     def _generate_scene(
         self,

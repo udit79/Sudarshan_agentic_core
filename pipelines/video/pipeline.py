@@ -120,6 +120,12 @@ class VideoPipeline:
                     scenes=scenes,
                     run_id=run_id,
                     cancel_event=cancel_event,
+                    authorization_scope={
+                        "user_id": request.user_id,
+                        "case_id": request.case_id,
+                        "classification_level": request.classification_level,
+                        "distribution": request.distribution,
+                    },
                 )
                 if result.status == "failed":
                     writer.write("video_generation", "failed", result.error or "Native video generation failed")
@@ -187,8 +193,12 @@ class VideoPipeline:
             return PipelineResponse(
                 status="succeeded", pipeline=self.pipeline_name, task_id=request.task_id,
                 run_id=run_id, output=output, artifact=artifact,
-                metadata={"provider": "moneyprinterturbo" if self.client is not None else "openai-native",
-                          "human_approval_required": False},
+                metadata={
+                    **(dict(result.metadata) if self.client is None else {}),
+                    "provider": "moneyprinterturbo" if self.client is not None else "openai-native",
+                    "human_approval_required": False,
+                    "stages": ["storyboard", "scene-media", "composition", "qa"],
+                },
             )
         except Exception as exc:
             try:

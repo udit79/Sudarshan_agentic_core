@@ -7,10 +7,14 @@ adapter can compile them into its provider options when explicitly enabled.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class VideoScene(BaseModel):
@@ -38,6 +42,40 @@ class VideoProviderOptions(BaseModel):
     bgm_volume: float | None = Field(default=None, ge=0.0, le=1.0)
     video_concat_mode: str | None = Field(default=None, max_length=32)
     video_transition: str | None = Field(default=None, max_length=32)
+
+
+class VideoSceneManifest(BaseModel):
+    """Durable state for one independently retryable scene."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str = Field(min_length=1, max_length=120)
+    fingerprint: str = Field(min_length=64, max_length=64)
+    status: Literal["pending", "running", "succeeded", "failed", "cancelled"] = "pending"
+    attempt: int = Field(default=0, ge=0)
+    duration_seconds: int = Field(default=5, ge=1, le=600)
+    image_path: str | None = None
+    audio_path: str | None = None
+    video_path: str | None = None
+    error: str | None = None
+    updated_at: str = Field(default_factory=_utc_now)
+
+
+class VideoRunManifest(BaseModel):
+    """Resumable package state for storyboard, scene media, and composition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(min_length=1)
+    subject: str = Field(min_length=1, max_length=500)
+    renderer_version: str = Field(min_length=1)
+    status: Literal["planning", "rendering", "composing", "succeeded", "partial", "failed", "cancelled"] = "planning"
+    scenes: list[VideoSceneManifest] = Field(default_factory=list, max_length=100)
+    segment_order: list[str] = Field(default_factory=list, max_length=100)
+    output_video: str | None = None
+    failed_scene_ids: list[str] = Field(default_factory=list, max_length=100)
+    created_at: str = Field(default_factory=_utc_now)
+    updated_at: str = Field(default_factory=_utc_now)
 
 
 class VideoPackage(BaseModel):

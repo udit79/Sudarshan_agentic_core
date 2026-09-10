@@ -14,8 +14,13 @@ tests/
 Run everything from the repository root:
 
 ```bash
-uv run pytest -q
+uv run pytest -q --basetemp .pytest-tmp-current
 ```
+
+On Windows environments where the system pytest temp directory is locked,
+use the workspace-local temporary root shown above. The local suite currently
+finishes with 178 passed and 1 skipped; third-party deprecation warnings are
+expected and do not indicate a provider smoke test.
 
 The system scenarios currently cover:
 
@@ -30,3 +35,16 @@ adapter component tests use a transport seam to verify the documented request
 and response contract; they do not claim that a video was generated. A real
 MoneyPrinterTurbo or multimodal ingestion smoke test should use synthetic
 input, an explicitly configured worker, and `RUN_LIVE_PROVIDER_TESTS=1` only.
+
+For focused work:
+
+```powershell
+# Orchestration, scheduler, memory, cache, and security contracts
+.\.venv\Scripts\python.exe -m pytest tests/component -q --basetemp .pytest-tmp-component
+
+# PPT, infographic, video, and text pipeline contracts
+.\.venv\Scripts\python.exe -m pytest tests/pipeline pipelines/tests -q --basetemp .pytest-tmp-pipeline
+
+# API/application boundary
+.\.venv\Scripts\python.exe -m pytest api/tests tests/system -q --basetemp .pytest-tmp-system
+```

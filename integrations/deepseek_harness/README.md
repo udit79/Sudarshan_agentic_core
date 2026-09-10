@@ -61,3 +61,16 @@ entry point.
 The MCP server is an application adapter, not a second orchestrator: it calls
 the same application service as the JSONL runner. Do not place Cognee keys in
 Harness workflow scripts or pass them into an E2B sandbox.
+
+## Harness web UI composition
+
+The web profile loads Sudarshan branding and presentation through the
+replaceable packages under
+`deepseek-harness/packages/experimental/client-ui-sudarshan*`. The overlay
+does not modify the official Harness brand package. See
+[`docs/harness-ui-plugin.md`](../../docs/harness-ui-plugin.md) for the package
+contract and white-label replacement path.
+
+Never commit `.dsh-preview/`; it is local preview state and may contain
+credentials, transcripts, caches, and machine-specific paths. If a credential
+was ever committed, rotate it even after the local file is deleted.

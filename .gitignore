@@ -30,6 +30,10 @@ pipelines/infographic/antv_renderer/node_modules/
 # Runtime-generated pipeline artifacts
 artifacts/
 
+# DeepSeek Harness local preview state (credentials, sessions, caches, and
+# machine-specific profile links must never be committed).
+.dsh-preview/
+
 # Secrets and local Cognee configuration
 .env
 .env.*

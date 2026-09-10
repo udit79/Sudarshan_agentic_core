@@ -55,6 +55,8 @@ class RunContext:
     ancestors: tuple[str, ...] = ()
     allowed_capabilities: frozenset[str] | None = None
     allowed_tools: frozenset[str] | None = None
+    allowed_trust_tiers: frozenset[str] | None = None
+    approved_side_effects: frozenset[str] = frozenset()
     cancel_event: Event = field(default_factory=Event, compare=False, repr=False)
 
 
@@ -201,11 +203,12 @@ class SkillRuntime:
                     budget_settled = True
                 return self._cancelled(call, child_run_id, "PARENT_CANCELLED")
 
+            usage_record = self._usage_from_response(call, response)
             if budget_reservation_id is not None:
                 try:
                     self._budget_controller.commit(
                         budget_reservation_id,
-                        self._usage_from_response(call, response),
+                        usage_record,
                     )
                     budget_settled = True
                 except BudgetExceededError as error:
@@ -234,7 +237,15 @@ class SkillRuntime:
                 "waiting": "skill.waiting",
                 "cancelled": "skill.cancelled",
             }.get(result.status, "skill.failed")
-            self._emit(event_name, call, child_run_id=child_run_id, error_code=result.failure_code)
+            self._emit(
+                event_name,
+                call,
+                child_run_id=child_run_id,
+                error_code=result.failure_code,
+                artifact_ids=result.artifact_ids,
+                quality_report_id=result.quality_report_id,
+                usage=usage_record.model_dump(mode="json"),
+            )
             return result
         except Exception as error:  # adapters are untrusted plugin boundaries
             result = SkillResult(
@@ -343,6 +354,11 @@ class SkillRuntime:
             raise SkillRuntimeError("SKILL_CYCLE", "Skill call would create a recursive child cycle")
         if call.depth > call.max_depth:
             raise SkillRuntimeError("DEPTH_EXCEEDED", "Skill call depth exceeds the configured maximum")
+        if parent_context.allowed_trust_tiers is not None and manifest.trust_tier not in parent_context.allowed_trust_tiers:
+            raise SkillRuntimeError(
+                "TRUST_TIER_DENIED",
+                f"Skill '{call.skill_id}' trust tier '{manifest.trust_tier}' is not allowed by the parent",
+            )
         self._check_policy(call.policy, parent_context.policy)
         if parent_context.allowed_capabilities is not None:
             missing = set(manifest.required_capabilities) - set(parent_context.allowed_capabilities)
@@ -352,8 +368,9 @@ class SkillRuntime:
             denied = set(manifest.allowed_tools) - set(parent_context.allowed_tools)
             if denied:
                 raise SkillRuntimeError("TOOL_DENIED", f"Disallowed tools: {', '.join(sorted(denied))}")
-        if any(side_effect in parent_context.policy.approval_required_for for side_effect in manifest.side_effects):
-            raise SkillRuntimeError("APPROVAL_REQUIRED", "Child side effect requires an approval boundary")
+        for side_effect in manifest.side_effects:
+            if side_effect in {"external_write", "publish"} and side_effect not in parent_context.approved_side_effects:
+                raise SkillRuntimeError("APPROVAL_REQUIRED", "Child side effect requires an approval boundary")
         adapter = self._adapters.get(call.skill_id)
         if adapter is None:
             # Compatibility aliases can point a manifest at a legacy pipeline.
@@ -404,9 +421,22 @@ class SkillRuntime:
         payload = dict(call.input_payload)
         query = str(payload.pop("query", payload.pop("prompt", f"Execute skill {call.skill_id}")))[:4000]
         metadata = dict(payload.pop("metadata", {}))
+        # Identity, scope, and cancellation metadata come only from the
+        # trusted parent context; child payloads are untrusted plugin input.
+        for protected in {
+            "user_id", "case_id", "task_id", "parent_run_id", "classification_level",
+            "distribution", "requested_pipelines", "_cancel_event",
+        }:
+            metadata.pop(protected, None)
         metadata.update({
             "skill_call_id": call.skill_call_id,
             "parent_run_id": context.run_id,
+            "user_id": context.user_id,
+            "case_id": context.case_id,
+            "task_id": child_task_id,
+            "classification_level": context.classification_level,
+            "distribution": context.distribution,
+            "requested_pipelines": [call.skill_id],
             # Internal adapter seam. It is not serialized by as_inputs or
             # projected into safe events, but cooperative adapters can use it.
             "_cancel_event": child_cancel_event,

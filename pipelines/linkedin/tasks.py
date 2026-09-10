@@ -6,7 +6,7 @@ from crewai import Agent, Task
 
 from pipelines.advisory.schemas import EvidenceReview, IntelligenceBrief, QualityReview
 from pipelines.common.memory_tools import TaskMemoryWriter
-from pipelines.linkedin.schemas import LinkedInPostOutput
+from pipelines.linkedin.schemas import HumanizerReport, LinkedInPostOutput
 
 
 def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str, Task]:
@@ -55,16 +55,36 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
         output_pydantic=LinkedInPostOutput,
         callback=writer.callback("linkedin_post_writer"),
     )
+    humanizer = Task(
+        description=(
+            "Audit the LinkedInPostOutput for AI/meta language, generic phrasing, repeated words, inflated "
+            "certainty, and unprofessional visual or emoji density. Return a HumanizerReport with explicit "
+            "issues and targeted revision suggestions. This is a review signal, not a publishing decision."
+        ),
+        expected_output="A validated HumanizerReport JSON object.",
+        agent=agents["humanizer"],
+        context=[output],
+        output_pydantic=HumanizerReport,
+        callback=writer.callback("linkedin_humanizer"),
+    )
     quality = Task(
         description=(
             "Review the LinkedInPostOutput. Approve only when every material claim is supported, the draft is "
             "professional and audience-appropriate, no restricted details or invented authority appear, and it "
-            "contains no AI/meta language. Return QualityReview JSON with precise revision issues if rejected."
+            "contains no AI/meta language. Require claim_bindings and a passing humanizer_report. Confirm that "
+            "approval_required is publish and publish_status remains draft_only. Return QualityReview JSON with "
+            "precise revision issues if rejected."
         ),
         expected_output="A validated QualityReview JSON object.",
         agent=agents["quality_critic"],
-        context=[output, review],
+        context=[output, humanizer, review],
         output_pydantic=QualityReview,
         callback=writer.callback("linkedin_quality_critic"),
     )
-    return {"analysis": analysis, "review": review, "output": output, "quality": quality}
+    return {
+        "analysis": analysis,
+        "review": review,
+        "output": output,
+        "humanizer": humanizer,
+        "quality": quality,
+    }

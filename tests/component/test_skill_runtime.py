@@ -101,6 +101,72 @@ def test_runtime_rejects_cycle_budget_and_permission_violations_before_adapter()
     assert invoked == []
 
 
+def test_runtime_strips_child_identity_overrides_and_enforces_trust_tier() -> None:
+    captured = []
+
+    def runner(request):
+        captured.append(request)
+        return PipelineResponse(
+            status="succeeded",
+            pipeline="visual.flowchart",
+            task_id=request.task_id,
+            run_id=request.parent_run_id or request.task_id,
+            output={"ok": True},
+        )
+
+    runtime = SkillRuntime(
+        {"visual.flowchart": PipelineAdapter("visual.flowchart", runner)},
+        {"visual.flowchart": manifest()},
+    )
+    child_call = call().model_copy(update={
+        "input_payload": {
+            "query": "make a flowchart",
+            "metadata": {
+                "case_id": "other-case",
+                "user_id": "other-user",
+                "classification_level": "TOP SECRET",
+            },
+        }
+    })
+    result = runtime.invoke(
+        child_call,
+        parent_context=context(allowed_trust_tiers=frozenset({"builtin"})),
+    )
+
+    assert result.status == "succeeded"
+    assert captured[0].case_id == "case-1"
+    assert captured[0].user_id == "operator-1"
+    assert captured[0].classification_level == "RESTRICTED"
+    assert captured[0].metadata["case_id"] == "case-1"
+    assert captured[0].metadata["user_id"] == "operator-1"
+    assert captured[0].metadata["classification_level"] == "RESTRICTED"
+
+    untrusted = manifest().model_copy(update={"trust_tier": "untrusted"})
+    blocked_runtime = SkillRuntime(
+        {"visual.flowchart": PipelineAdapter("visual.flowchart", runner)},
+        {"visual.flowchart": untrusted},
+    )
+    blocked = blocked_runtime.invoke(
+        call(),
+        parent_context=context(allowed_trust_tiers=frozenset({"builtin", "verified"})),
+    )
+    assert blocked.status == "blocked"
+    assert blocked.failure_code == "TRUST_TIER_DENIED"
+
+
+def test_runtime_requires_explicit_approval_for_publishing_side_effects() -> None:
+    publish_manifest = manifest().model_copy(update={"side_effects": ["publish"]})
+    runtime = SkillRuntime(
+        {"visual.flowchart": PipelineAdapter("visual.flowchart", lambda request: None)},
+        {"visual.flowchart": publish_manifest},
+    )
+
+    blocked = runtime.invoke(call(), parent_context=context())
+
+    assert blocked.status == "blocked"
+    assert blocked.failure_code == "APPROVAL_REQUIRED"
+
+
 def test_runtime_timeout_is_bounded_and_parent_cancellation_is_cooperative() -> None:
     def slow_runner(request):
         sleep(0.2)

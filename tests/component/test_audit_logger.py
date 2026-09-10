@@ -33,7 +33,8 @@ def test_audit_log_write_and_read(temp_audit_logger):
     assert entry["operator_id"] == "op-123"
     assert entry["classification"] == "SECRET"
     assert entry["status"] == "queued"
-    assert "Test query" in entry["detail"]
+    assert "Test query" not in entry["detail"]
+    assert "query_sha256=" in entry["detail"]
 
 
 def test_audit_integrity(temp_audit_logger):

@@ -22,6 +22,8 @@ from threading import Lock
 from typing import Any, Iterator, Mapping, Sequence
 from uuid import uuid4
 
+from pipelines.common.ntro_policy import redact_sensitive
+
 
 _DEFAULT_DB_PATH = "artifacts/.state/audit_log.db"
 
@@ -124,9 +126,10 @@ class AuditLogger:
 
         entry_id = f"audit-{uuid4()}"
         timestamp = _utc_now_iso()
+        safe_detail = str(redact_sensitive(detail[:10000]))
         integrity = _row_hash(
             timestamp, operator_id, case_id, task_id,
-            action, classification, status, detail[:2000],
+            action, classification, status, safe_detail[:2000],
         )
         with self._lock:
             with self._connect() as conn:
@@ -138,7 +141,7 @@ class AuditLogger:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (entry_id, timestamp, operator_id, case_id, task_id, run_id,
-                     action, classification, status, pipeline, detail[:10000], integrity),
+                     action, classification, status, pipeline, safe_detail, integrity),
                 )
         return entry_id
 
@@ -162,7 +165,10 @@ class AuditLogger:
             run_id=run_id,
             classification=classification,
             pipeline=pipeline,
-            detail=query[:2000],
+            detail=(
+                f"query_sha256={hashlib.sha256(query.encode('utf-8')).hexdigest()}; "
+                f"query_length={len(query)}"
+            ),
         )
 
     def log_run_complete(

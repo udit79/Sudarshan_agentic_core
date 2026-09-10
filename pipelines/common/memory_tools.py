@@ -145,6 +145,7 @@ class TaskMemoryWriter:
             "linkedin_case_analyst": linkedin_case_analyst_callback,
             "linkedin_evidence_review": linkedin_evidence_review_callback,
             "linkedin_post_writer": linkedin_post_writer_callback,
+            "linkedin_humanizer": linkedin_humanizer_callback,
             "linkedin_quality_critic": linkedin_quality_critic_callback,
             "executive_case_analyst": executive_case_analyst_callback,
             "executive_evidence_review": executive_evidence_review_callback,
@@ -216,6 +217,10 @@ def linkedin_evidence_review_callback(output: TaskOutput) -> TaskOutput:
 
 def linkedin_post_writer_callback(output: TaskOutput) -> TaskOutput:
     return _record_task_output("linkedin_post_writer", output)
+
+
+def linkedin_humanizer_callback(output: TaskOutput) -> TaskOutput:
+    return _record_task_output("linkedin_humanizer", output)
 
 
 def linkedin_quality_critic_callback(output: TaskOutput) -> TaskOutput:

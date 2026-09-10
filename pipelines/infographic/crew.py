@@ -61,12 +61,21 @@ class InfographicFlow(TextTransformationFlow):
                 output.syntax,
                 artifact_name=f"{output.infographic_id}-{self.state.run_id}",
             )
+            caveats = list(output.caveats)
+            if self.renderer.last_render_mode == "fallback":
+                warning = self.renderer.last_render_warning or "AntV SSR did not complete within its configured bound."
+                caveats.append(f"Rendered with the deterministic local SVG fallback: {warning}")
             rendered = output.model_copy(update={
                 "render_status": "rendered",
                 "artifact_path": artifact_path,
                 "render_error": None,
+                "caveats": caveats,
             })
-            self.state.artifact = {"path": artifact_path, "artifact_type": "svg"}
+            self.state.artifact = {
+                "path": artifact_path,
+                "artifact_type": "svg",
+                "renderer_mode": self.renderer.last_render_mode,
+            }
             return rendered
         except Exception as exc:
             return output.model_copy(update={

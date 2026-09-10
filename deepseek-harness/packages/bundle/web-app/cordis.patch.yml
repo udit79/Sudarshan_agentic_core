@@ -177,6 +177,10 @@
     - id: ui-theme
       name: '@deepseek-ai/dsh-client-ui-theme'
 
+    # Product presentation is layered after the generic Harness theme.
+    - id: ui-theme-sudarshan
+      name: '@deepseek-ai/dsh-experimental-client-ui-sudarshan-theme'
+
     - id: locale
       name: '@deepseek-ai/dsh-client-locale'
 
@@ -213,9 +217,9 @@
     - id: ui-chat
       name: '@deepseek-ai/dsh-client-ui-chat'
 
-    # Official occupants for the generic sidebar and conversation brand slots.
-    - id: ui-brand-official
-      name: '@deepseek-ai/dsh-client-ui-brand-official'
+    # Product branding is a replaceable plugin, not a core Harness fork.
+    - id: ui-brand-sudarshan
+      name: '@deepseek-ai/dsh-experimental-client-ui-sudarshan'
 
     - id: ui-attachment
       name: '@deepseek-ai/dsh-client-ui-attachment'

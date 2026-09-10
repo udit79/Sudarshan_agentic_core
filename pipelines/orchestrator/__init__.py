@@ -16,6 +16,8 @@ from pipelines.orchestrator.contracts import (
     SkillCall,
     SkillManifest,
     SkillResult,
+    TelemetrySummary,
+    TelemetryUsage,
     UsageRecord,
     project_progress_event,
 )
@@ -25,6 +27,11 @@ from pipelines.orchestrator.progress import (
     ProgressSink,
     SQLiteProgressSink,
     event_dict,
+)
+from pipelines.orchestrator.observability import (
+    ObservableProgressSink,
+    ObservabilityEvent,
+    SQLiteObservabilityStore,
 )
 from pipelines.orchestrator.skill_runtime import (
     RunContext,
@@ -80,6 +87,8 @@ __all__ = [
     "RunEvent",
     "RunPolicy",
     "RunSummary",
+    "TelemetrySummary",
+    "TelemetryUsage",
     "SkillCall",
     "SkillManifest",
     "SkillResult",
@@ -107,6 +116,9 @@ __all__ = [
     "ProgressSink",
     "SQLiteProgressSink",
     "event_dict",
+    "ObservableProgressSink",
+    "ObservabilityEvent",
+    "SQLiteObservabilityStore",
     "project_progress_event",
     "RequestUnderstanding",
     "RequestUnderstandingAgent",

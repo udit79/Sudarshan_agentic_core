@@ -81,9 +81,14 @@ operator header. Classification is normalized to one of `UNCLASSIFIED`,
 | POST | `/ingest` | upload a real source into scoped memory | `201` |
 | POST | `/runs` | queue an advisory/generation run | `202` |
 | GET | `/runs/{run_id}` | read frontend-safe status | `200` |
+| GET | `/runs/{run_id}/telemetry` | read safe token/cache/wait/quality/artifact aggregates | `200` |
+| GET | `/runs/{run_id}/wait` | bounded wait for terminal state or user action | `200` |
 | GET | `/runs/{run_id}/events` | stream progress over SSE | `200` / `text/event-stream` |
 | POST | `/runs/{run_id}/resume` | answer clarification or approval | `200` |
 | POST | `/runs/{run_id}/cancel` | request cooperative cancellation | `200` |
+| GET | `/artifacts/{artifact_id}/manifest` | read an integrity-verified artifact manifest | `200` |
+| GET | `/artifacts/{artifact_id}/download` | download an authorized artifact | file response |
+| GET | `/artifacts/{artifact_id}/preview` | return an authorized image preview | file response |
 
 The backend should treat `run_id` and `task_id` as opaque identifiers. Do not
 derive them from user-visible names or reuse them across revisions.
@@ -92,11 +97,22 @@ derive them from user-visible names or reuse them across revisions.
 
 `POST /ingest` accepts an authenticated `multipart/form-data` upload with a
 `file` field and optional `case_id`, `task_id`, `user_id`, and
-`classification_level` fields. The backend streams the file to a bounded
-temporary location, extracts its text/timeline, creates a `KnowledgeUnit`,
-persists it through `MemoryManager`/Cognee, records the audit entry, deletes
-the temporary file, and returns a receipt with `memory_persisted=true`.
-There is no demo or sample-data ingestion path in the production entry point.
+`classification_level` fields. The current compatibility path streams the file
+to a bounded temporary location, extracts its text/timeline, creates a
+`KnowledgeUnit`, persists it through `MemoryManager`/Cognee, records the audit
+entry, deletes the temporary file, and returns a receipt with
+`memory_persisted=true`. There is no demo or sample-data ingestion path in the
+production entry point.
+
+The target ingestion path is asynchronous and evidence-first. It registers an
+immutable source, returns an `ingestion_id`, and runs modality extraction,
+structure enrichment, indexing, Cognee projection, and quality checks through
+the ingestion job queue. The compatibility receipt remains supported while
+the new status/event contract is introduced. See
+[Ingestion architecture](ingestion-architecture.md) for the canonical
+`IngestionManifest`, `EvidenceBlock`, cache key, quality gate, and plugin
+requirements. Do not make the Harness or a skill re-parse the same source at
+request time.
 
 Supported file extensions are defined in `ingestion_pipelines/extract.py` and
 the upload size is controlled by `SUDARSHAN_MAX_INGEST_BYTES` (50 MiB by
@@ -118,9 +134,10 @@ $form = @{
 Invoke-RestMethod http://localhost:8000/ingest -Method Post -Headers $headers -Form $form
 ```
 
-The receipt contains `document_id`, `doc_type`, `case_id`, `task_id`,
-`classification_level`, `content_characters`, `memory_persisted`, and
-`ingested_at`. A `401` means the operator header is missing, `403` means the
+The compatibility receipt contains `document_id`, `doc_type`, `case_id`,
+`task_id`, `classification_level`, `content_characters`, `memory_persisted`,
+and `ingested_at`. The target receipt additionally contains `ingestion_id`,
+`status`, `poll_uri`, and `events_uri`. A `401` means the operator header is missing, `403` means the
 user/operator identity mismatched, `413` means the upload is too large, `415`
 means the extension is unsupported, and `502` means extraction or memory
 persistence failed. The service does not return raw extracted content.
@@ -175,9 +192,11 @@ response.
 ### Status and events
 
 `GET /runs/{run_id}` returns frontend-safe state: stage, status, selected
-pipelines, clarification questions, errors, ordered lifecycle events, and the
-validated `response`/`responses` output envelope when available. Raw Cognee
-results, prompts, credentials, and model reasoning are not returned.
+pipelines, clarification questions, errors, ordered lifecycle events, safe
+telemetry, and the validated `response`/`responses` output envelope when
+available. Raw Cognee results, prompts, credentials, and model reasoning are
+not returned. `/runs/{run_id}/telemetry` exposes only aggregate counters; it
+does not expose provider payloads or raw prompts.
 The SSE event payload is a `ProgressEvent` with `event_id`, `run_id`,
 `task_id`, `pipeline`, `stage`, `status`, `progress`, `message`, and optional
 `artifact_id`/`error_code`.
@@ -203,10 +222,17 @@ Harness. It starts the trusted Python MCP server and exposes:
 
 - `run_sudarshan`
 - `get_sudarshan_status`
+- `wait_sudarshan`
 - `resume_sudarshan`
 - `cancel_sudarshan`
+- `get_sudarshan_artifact`
 - `get_sudarshan_health`
+- `get_sudarshan_usage`
 - `list_sudarshan_pipelines`
+- `list_sudarshan_skills`
+- `get_sudarshan_skill`
+- `invoke_sudarshan_skill`
+- `start_sudarshan_skill`
 - `remember_sudarshan_context`
 - `recall_sudarshan_context`
 
@@ -216,10 +242,17 @@ The MCP tools map to the application boundary as follows:
 | --- | --- | --- |
 | `run_sudarshan` | `SudarshanApplication.run()` | create or revise a run |
 | `get_sudarshan_status` | `.status()` | frontend-safe state and progress |
+| `wait_sudarshan` | `.wait()` | bounded wait with cursor-based events |
 | `resume_sudarshan` | `.resume()` | clarification or authorized approval |
 | `cancel_sudarshan` | `.cancel()` | cooperative cancellation |
+| `get_sudarshan_artifact` | `.get_artifact()` | integrity-verified manifest and stable URI |
 | `get_sudarshan_health` | `.health()` | operational readiness projection |
+| `get_sudarshan_usage` | `.usage()` | safe budget and telemetry counters |
 | `list_sudarshan_pipelines` | `.list_pipelines()` | pipeline discovery |
+| `list_sudarshan_skills` | `.list_skills()` | canonical skill discovery |
+| `get_sudarshan_skill` | `.get_skill()` | versioned manifest and output contract |
+| `invoke_sudarshan_skill` | `.invoke_skill()` | bounded local child skill invocation |
+| `start_sudarshan_skill` | `.submit_skill()` | durable background skill job |
 | `remember_sudarshan_context` | `.remember_context()` | User/Case session memory |
 | `recall_sudarshan_context` | `.recall_session_context()` | bounded User/Case recall |
 
@@ -270,14 +303,18 @@ sequenceDiagram
     participant API as api.server
     participant APP as SudarshanApplication
     participant G as LangGraph router
+    participant J as Ingestion job queue
+    participant X as Evidence compiler
     participant M as MemoryManager/Cognee
     participant P as Selected pipeline
 
     B->>API: POST /ingest or POST /runs
     API->>APP: get_application()
     alt source upload
-        APP->>M: extract -> KnowledgeUnit -> remember (synchronous)
-        M-->>API: ingestion receipt
+        APP->>J: register manifest and enqueue ingestion
+        J->>X: modality parser and evidence compiler
+        X->>M: governed KnowledgeUnits -> remember
+        X-->>API: receipt/status/events
     else generation run
         APP->>G: run(AdvisoryRequest)
         G->>M: bounded scoped recall
@@ -291,16 +328,20 @@ sequenceDiagram
 
 ## End-to-end memory path
 
-1. `ingestion_pipelines.ingest_file(..., memory_manager=manager)` extracts a
-   source, converts it to a `KnowledgeUnit`, and writes it through
-   `MemoryManager` into the correct Case/User/System scope.
-2. The router recalls bounded User/Case memory for request understanding.
-3. After pipeline selection, the router recalls permitted User/Case/Task
+1. The compatibility path `ingestion_pipelines.ingest_file(...,
+   memory_manager=manager)` extracts a source, converts it to a
+   `KnowledgeUnit`, and writes it through `MemoryManager` into the correct
+   Case/User/System scope.
+2. The target path registers an immutable source and produces typed evidence
+   blocks before creating governed `KnowledgeUnit` summaries and relationships.
+   Exact evidence remains addressable outside Cognee by `evidence_id`.
+3. The router recalls bounded User/Case memory for request understanding.
+4. After pipeline selection, the router recalls permitted User/Case/Task
    memory and passes only bounded, provenance-preserving context to the flow.
-4. CrewAI agents get a scoped recall tool; they never get a Cognee client or
+5. CrewAI agents get a scoped recall tool; they never get a Cognee client or
    credentials.
-5. Task lifecycle events are written through `TaskMemoryWriter`.
-6. Validated pipeline outputs are written back to Case memory according to the
+6. Task lifecycle events are written through `TaskMemoryWriter`.
+7. Validated pipeline outputs are written back to Case memory according to the
    pipeline's release policy. Revisions create new task/artifact versions.
 
 Cognee is configured through `COGNEE_BASE_URL`, `COGNEE_API_KEY`,

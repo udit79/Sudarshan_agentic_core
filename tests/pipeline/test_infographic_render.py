@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from pipelines.infographic.ir import diagram_ir_from_output, infographic_ir_from_output, infographic_ir_to_syntax
+from pipelines.infographic.normalization import normalize_infographic_output
+from pipelines.infographic.renderer import AntVInfographicRenderer
+from pipelines.infographic.quality import inspect_svg
+from pipelines.infographic.schemas import InfographicOutput
+
+
+FIXTURE = Path(__file__).parents[1] / "fixtures" / "infographic-final-output.json"
+
+
+def load_final_output() -> InfographicOutput:
+    return InfographicOutput.model_validate(json.loads(FIXTURE.read_text(encoding="utf-8")))
+
+
+def test_real_final_output_shape_compiles_to_semantic_ir() -> None:
+    output = load_final_output()
+    ir = infographic_ir_from_output(output)
+    compiled = infographic_ir_to_syntax(ir)
+    diagram = diagram_ir_from_output(output)
+
+    assert ir.infographic_id == output.infographic_id
+    assert len(ir.blocks) == len(output.evidence)
+    assert compiled.startswith("infographic")
+    assert "[E-1]" in compiled
+    assert len(diagram.nodes) == 2
+    assert diagram.edges[0].source == "E-1"
+
+
+def test_real_final_output_renders_through_node_boundary(tmp_path) -> None:
+    output = normalize_infographic_output(load_final_output())
+    renderer = AntVInfographicRenderer(output_dir=tmp_path, timeout_seconds=30, ssr_timeout_ms=2000)
+    artifact_path = renderer(output.syntax, artifact_name=output.infographic_id)
+    artifact = Path(artifact_path)
+    svg = artifact.read_text(encoding="utf-8")
+
+    assert artifact.is_file()
+    assert artifact.suffix == ".svg"
+    assert "<svg" in svg[:500]
+    assert "Source review" in svg or "E-1" in svg
+    assert "Synthetic case process" in svg
+    assert renderer.last_render_mode in {"antv", "fallback"}
+    report = inspect_svg(
+        artifact,
+        required_text=("Synthetic case process",),
+        renderer_mode=renderer.last_render_mode,
+        renderer_warning=renderer.last_render_warning,
+    )
+    assert report.approved, report.issues
+    assert report.width and report.width > 0
+    assert report.height and report.height > 0

@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from pipelines.orchestrator.contracts import QualityStatus, TelemetryUsage
 
 
 ProgressStatus = Literal[
@@ -44,6 +45,16 @@ class ProgressEvent(BaseModel):
     requires_action: bool = False
     artifact_id: str | None = None
     error_code: str | None = None
+    wait_reason: str = Field(default="", max_length=500)
+    quality_status: QualityStatus = "pending"
+    quality_report_id: str | None = None
+    child_count: int = Field(default=0, ge=0)
+    child_id: str | None = None
+    skill_call_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    usage: TelemetryUsage | None = None
+    cache_status: Literal["hit", "miss", "wait", "write", "not_applicable"] | None = None
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -153,6 +164,16 @@ class ProgressReporter:
         requires_action: bool = False,
         artifact_id: str | None = None,
         error_code: str | None = None,
+        wait_reason: str = "",
+        quality_status: QualityStatus = "pending",
+        quality_report_id: str | None = None,
+        child_count: int = 0,
+        child_id: str | None = None,
+        skill_call_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        usage: TelemetryUsage | None = None,
+        cache_status: Literal["hit", "miss", "wait", "write", "not_applicable"] | None = None,
     ) -> ProgressEvent:
         event = ProgressEvent(
             run_id=self.run_id,
@@ -165,6 +186,16 @@ class ProgressReporter:
             requires_action=requires_action,
             artifact_id=artifact_id,
             error_code=error_code,
+            wait_reason=wait_reason,
+            quality_status=quality_status,
+            quality_report_id=quality_report_id,
+            child_count=child_count,
+            child_id=child_id,
+            skill_call_id=skill_call_id,
+            provider=provider,
+            model=model,
+            usage=usage,
+            cache_status=cache_status,
         )
         self.sink.publish(event)
         return event

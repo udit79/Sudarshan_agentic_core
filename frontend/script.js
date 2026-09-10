@@ -39,6 +39,10 @@ document.addEventListener("DOMContentLoaded", () => {
     runChildrenValue: document.getElementById("runChildrenValue"),
     runQualityValue: document.getElementById("runQualityValue"),
     runCursorValue: document.getElementById("runCursorValue"),
+    runTokensValue: document.getElementById("runTokensValue"),
+    runLatencyValue: document.getElementById("runLatencyValue"),
+    runCacheValue: document.getElementById("runCacheValue"),
+    runWaitsValue: document.getElementById("runWaitsValue"),
     runWaitingNotice: document.getElementById("runWaitingNotice"),
     runWaitingReason: document.getElementById("runWaitingReason"),
     toggleAllOutputsBtn: document.getElementById("toggleAllOutputsBtn"),
@@ -148,6 +152,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (elements.runCursorValue) {
       elements.runCursorValue.textContent = String(Number(task.event_cursor || 0));
     }
+    const telemetry = task.telemetry || {};
+    const totalTokens = Number(telemetry.total_tokens ?? (
+      Number(telemetry.input_tokens || 0)
+      + Number(telemetry.output_tokens || 0)
+      + Number(telemetry.reasoning_tokens || 0)
+    ));
+    if (elements.runTokensValue) elements.runTokensValue.textContent = String(Number.isFinite(totalTokens) ? totalTokens : 0);
+    if (elements.runLatencyValue) elements.runLatencyValue.textContent = `${Number(telemetry.latency_ms || 0)} ms`;
+    if (elements.runCacheValue) elements.runCacheValue.textContent = `${Number(telemetry.cache_hits || 0)} hits`;
+    if (elements.runWaitsValue) elements.runWaitsValue.textContent = String(Number(telemetry.wait_count || 0));
 
     const status = String(task.status || "").toLowerCase();
     const waiting = ["waiting", "waiting_for_input", "paused"].includes(status) || task.requires_action;
@@ -171,6 +185,7 @@ document.addEventListener("DOMContentLoaded", () => {
       currentTaskData.quality_status = payload.quality_status || currentTaskData.quality_status;
       currentTaskData.requires_action = Boolean(payload.requires_action ?? currentTaskData.requires_action ?? false);
       currentTaskData.wait_reason = payload.wait_reason || currentTaskData.wait_reason || "";
+      currentTaskData.telemetry = payload.telemetry || currentTaskData.telemetry || {};
       renderRunProjectionMeta(currentTaskData);
     }
     const message = payload.message || "";

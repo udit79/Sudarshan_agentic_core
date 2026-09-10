@@ -60,6 +60,29 @@ def test_cache_requires_passed_quality_and_returns_only_live_entries() -> None:
     assert store.get(key) is None
 
 
+def test_cache_metadata_drops_credential_shaped_fields():
+    store = CacheStore(":memory:")
+    key = fingerprint()
+
+    entry = store.put(
+        fingerprint=key,
+        skill_id="visual.flowchart",
+        skill_version="1.0.0",
+        artifact_ids=["artifact-safe"],
+        quality_report_id="quality-safe",
+        quality_status="passed",
+        metadata={
+            "api_key": "should-not-persist",
+            "authorization": "Bearer should-not-persist",
+            "renderer_version": "r2",
+        },
+    )
+
+    assert "api_key" not in entry.metadata
+    assert "authorization" not in entry.metadata
+    assert entry.metadata["renderer_version"] == "r2"
+
+
 def test_cache_claim_prevents_stampede_and_reclaims_expired_lease() -> None:
     store = CacheStore(":memory:")
     key = fingerprint()
@@ -70,4 +93,3 @@ def test_cache_claim_prevents_stampede_and_reclaims_expired_lease() -> None:
     assert store.try_claim(key, owner="worker-2", lease_seconds=1) == "worker-2"
     assert store.release_claim(key, "worker-1") is False
     assert store.release_claim(key, "worker-2") is True
-

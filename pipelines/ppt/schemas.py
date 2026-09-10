@@ -21,6 +21,54 @@ class EvidenceBinding(BaseModel):
     role: Literal["supports", "contradicts", "context", "uncertain"] = "supports"
 
 
+class FlowchartNode(BaseModel):
+    """Semantic node in a renderer-neutral flowchart."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=180)
+    kind: Literal["start", "process", "decision", "review", "end"] = "process"
+    group: str | None = None
+    evidence: list[EvidenceBinding] = Field(default_factory=list)
+
+
+class FlowchartEdge(BaseModel):
+    """Directed relationship between two flowchart nodes."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    source: str = Field(min_length=1, validation_alias="from")
+    target: str = Field(min_length=1, validation_alias="to")
+    label: str = Field(default="", max_length=120)
+
+
+class FlowchartSpec(BaseModel):
+    """Graph IR consumed by both SVG and editable PPTX renderers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    flowchart_id: str = Field(min_length=1)
+    direction: Literal["left-to-right", "top-to-bottom"] = "left-to-right"
+    nodes: list[FlowchartNode] = Field(min_length=1, max_length=80)
+    edges: list[FlowchartEdge] = Field(default_factory=list, max_length=160)
+    layout_hints: dict[str, Any] = Field(default_factory=dict)
+    style_tokens: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_graph_references(self) -> "FlowchartSpec":
+        node_ids = [node.node_id for node in self.nodes]
+        if len(set(node_ids)) != len(node_ids):
+            raise ValueError("flowchart node IDs must be unique")
+        known = set(node_ids)
+        for edge in self.edges:
+            if edge.source not in known or edge.target not in known:
+                raise ValueError("flowchart edges must reference existing node IDs")
+            if edge.source == edge.target:
+                raise ValueError("flowchart edges cannot point to the same node")
+        return self
+
+
 class LayoutBox(BaseModel):
     """Normalized slide coordinates consumed by renderers."""
 

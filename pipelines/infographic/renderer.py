@@ -21,6 +21,7 @@ class AntVInfographicRenderer:
         width: int = 1200,
         height: int = 675,
         timeout_seconds: int | None = None,
+        ssr_timeout_ms: int | None = None,
     ) -> None:
         base_dir = Path(__file__).resolve().parent
         self.node_binary = node_binary or os.getenv("ANTV_NODE_BINARY", "node")
@@ -28,6 +29,11 @@ class AntVInfographicRenderer:
         self.output_dir = Path(output_dir)
         self.width = width
         self.height = height
+        self.ssr_timeout_ms = ssr_timeout_ms or int(os.getenv("ANTV_SSR_TIMEOUT_MS", "5000"))
+        if self.ssr_timeout_ms < 100:
+            raise ValueError("ssr_timeout_ms must be at least 100 milliseconds")
+        self.last_render_mode = "unknown"
+        self.last_render_warning: str | None = None
         if timeout_seconds is None:
             raw_timeout = os.getenv("ANTV_RENDER_TIMEOUT_SECONDS", "60")
             try:
@@ -47,6 +53,7 @@ class AntVInfographicRenderer:
             "artifactName": artifact_name,
             "width": self.width,
             "height": self.height,
+            "ssrTimeoutMs": self.ssr_timeout_ms,
         })
         try:
             completed = subprocess.run(
@@ -66,6 +73,9 @@ class AntVInfographicRenderer:
         try:
             result: Any = json.loads(completed.stdout)
             path = result["path"]
+            self.last_render_mode = str(result.get("renderer", "antv"))
+            warning = result.get("warning")
+            self.last_render_warning = str(warning) if warning else None
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             raise RuntimeError("AntV renderer returned an invalid result") from exc
         if not isinstance(path, str) or not Path(path).exists():

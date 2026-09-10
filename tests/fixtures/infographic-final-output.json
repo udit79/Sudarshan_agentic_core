@@ -1,0 +1,30 @@
+{
+  "infographic_id": "synthetic-case-process",
+  "title": "Synthetic case process",
+  "visual_type": "process",
+  "syntax": "infographic list-grid-simple\ndata\n  lists\n    - label Brief\n      desc Synthetic case process\n    - label [E-1] Source review\n      desc The supplied case brief contains one reviewed source. | Source: case://synthetic/source-1\n    - label [E-2] Quality gate\n      desc The system checks the generated artifact before delivery. | Source: pipeline://synthetic/quality",
+  "alt_text": "A synthetic two-step process showing source review followed by a quality gate.",
+  "evidence": [
+    {
+      "evidence_id": "E-1",
+      "claim": "The supplied case brief contains one reviewed source.",
+      "source_reference": "case://synthetic/source-1",
+      "evidence_summary": "Synthetic test data supplied to the pipeline.",
+      "confidence": 0.8
+    },
+    {
+      "evidence_id": "E-2",
+      "claim": "The system checks the generated artifact before delivery.",
+      "source_reference": "pipeline://synthetic/quality",
+      "evidence_summary": "Synthetic execution contract for the quality gate.",
+      "confidence": 0.8
+    }
+  ],
+  "references": ["E-1: supplied synthetic source", "E-2: synthetic quality contract"],
+  "confidence_statement": "Moderate confidence based on supplied synthetic observations.",
+  "intelligence_gaps": ["No operational source was used in this fixture."],
+  "caveats": ["This fixture contains synthetic test data only."],
+  "render_status": "pending",
+  "artifact_path": null,
+  "render_error": null
+}

@@ -346,6 +346,12 @@ async def get_run(run_id: str):
     return get_application().status(run_id)
 
 
+@app.get("/runs/{run_id}/telemetry")
+async def get_run_telemetry(run_id: str):
+    """Get dashboard-safe aggregate telemetry without prompts or raw memory."""
+    return get_application().telemetry(run_id)
+
+
 @app.get("/runs/{run_id}/wait")
 async def wait_run(
     run_id: str,

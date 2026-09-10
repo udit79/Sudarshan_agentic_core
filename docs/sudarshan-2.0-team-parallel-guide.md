@@ -21,7 +21,8 @@ Do not wait for every pipeline. One reliable vertical slice is more valuable tha
 | Frontend/native Harness | run card, Execution Monitor, artifacts, approvals | operator UI |
 | Agentic/skills | manifests, typed plans, validators | presentation + flowchart contracts |
 | Rendering | slide IR, flowchart IR, SVG/PPTX | editable flowchart slide |
-| Memory/evaluation | Cognee scopes, retrieval traces, benchmarks | bounded context pack + metrics |
+| Memory/evaluation | Cognee scopes, evidence projection, retrieval traces, benchmarks | bounded context pack + ingestion/retrieval metrics |
+| Ingestion/data | manifests, modality plugins, evidence blocks, source safety, ingestion jobs | one PDF/PPTX/video source compiled into reusable evidence |
 | Platform/security | local setup, CI, auth, secrets | reproducible safe environment |
 
 Each team may use mocks, but public contract changes require cross-team review.
@@ -136,6 +137,12 @@ The current compatibility tool is `run_sudarshan`. The target asynchronous MCP s
 - **Artifact service:** store binaries outside the event table, create immutable manifests/checksums/previews, enforce classification on download.
 - **MCP/API adapter:** keep synchronous compatibility, add async run tools, return structured data/resources, test stdio and Streamable HTTP.
 - **Memory gateway:** keep `MemoryManager` as the only Cognee gateway; add scopes, provenance, freshness, confidence, retrieval traces, and reviewed writes.
+- **Ingestion boundary:** keep the current `/ingest` compatibility path while
+  adding the asynchronous manifest/job path described in
+  [Ingestion architecture](ingestion-architecture.md). The backend owns source
+  validation, bounded staging, job status, idempotency, cancellation, and safe
+  ingestion events. It must not pass raw files or unrestricted extraction text
+  directly to the Harness.
 
 ### Backend acceptance tests
 
@@ -206,6 +213,11 @@ The UI must render from `RunSummary`, `RunEvent`, `ArtifactManifest`, and `Quali
 - Extract the current video pipeline into `video.brief`, `video.script`, `video.storyboard`, `video.assets`, `video.timeline`, and `video.qa` stages.
 - Define `EvidenceLedger`, `ContextPack`, `VideoTimelineIR`, `InfographicIR`, and `DiagramIR` before adding more agents.
 - Ensure the central agent passes compact stage artifacts, not full transcripts, to scene workers; give every worker a budget, deadline, cache key, and parent run ID.
+- Treat ingestion as a reusable platform capability, not a separate skill
+  implementation for every output type. Skills request evidence by ID and
+  modality (`search_text`, `search_visual`, `search_table`,
+  `search_video_segment`, `get_evidence`); they do not call Cognee or reparse
+  source files.
 - Implement diagram/mind-map grammar selection and graph validation; renderer-specific source such as AntV or Mermaid must be compiled from the typed IR.
 
 ### Rendering team
@@ -217,6 +229,22 @@ The UI must render from `RunSummary`, `RunEvent`, `ArtifactManifest`, and `Quali
 - Add deterministic FFmpeg/ffprobe checks for video duration, codecs, audio presence, scene order, caption safe areas, and manifest hashes.
 - Add infographic SVG/PNG visual QA for overflow, contrast, bilingual text, density, and accessibility metadata.
 - Use a shared diagram layout/export layer for SVG, HTML, PNG, and PPT embedding; record a fidelity ledger when detail is reduced.
+
+### Ingestion/data team
+
+- Implement the canonical `IngestionManifest`, `EvidenceBlock`,
+  `ExtractionEvent`, and `QualityReport` contracts without removing the
+  legacy `IngestedDocument` path.
+- Refactor PDF/PPTX/image/video extractors to preserve page, slide, region,
+  and timestamp provenance; return typed evidence before producing summaries.
+- Add source hashing, parser/model/config fingerprints, targeted fallback
+  routing, bounded modality budgets, cache reuse, partial-result semantics,
+  and prompt-injection markers.
+- Add fixtures for scanned PDFs, table-heavy PDFs, slide decks, infographics,
+  repeated video frames, scene boundaries, extraction failures, and partial
+  ingestion.
+- Do not make Cognee the raw artifact store. Project governed summaries,
+  entities, relationships, and evidence references through `MemoryManager`.
 
 ### Memory/evaluation team
 

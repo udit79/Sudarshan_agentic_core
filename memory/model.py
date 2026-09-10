@@ -28,6 +28,16 @@ class MemoryType(str, Enum):
     RELATIONSHIP = "relationship"
 
 
+class MemoryLifecycle(str, Enum):
+    """Promotion state used to keep stale or unreviewed memory out of recall."""
+
+    ACTIVE = "active"
+    PENDING_REVIEW = "pending_review"
+    SUPERSEDED = "superseded"
+    RETRACTED = "retracted"
+    EXPIRED = "expired"
+
+
 class SourceType(str, Enum):
     PDF = "pdf"
     PPTX = "pptx"
@@ -105,10 +115,15 @@ class Memory:
     source: Source | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     provenance: Mapping[str, Any] = field(default_factory=dict)
+    lifecycle: MemoryLifecycle = MemoryLifecycle.ACTIVE
+    superseded_by: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "memory_type", MemoryType(self.memory_type))
+        object.__setattr__(self, "lifecycle", MemoryLifecycle(self.lifecycle))
         object.__setattr__(self, "id", _required(self.id, "id"))
         object.__setattr__(self, "content", _required(self.content, "content"))
         object.__setattr__(self, "metadata", dict(self.metadata))
         object.__setattr__(self, "provenance", dict(self.provenance))
+        if self.superseded_by is not None:
+            object.__setattr__(self, "superseded_by", _required(self.superseded_by, "superseded_by"))

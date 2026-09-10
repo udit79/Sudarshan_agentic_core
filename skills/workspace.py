@@ -79,6 +79,7 @@ class SkillWorkspace:
             budget_policy=RunPolicy(**budget),
             quality_gates=list(raw.get("quality_gates", [])),
             risk_class=str(raw.get("risk_class", "RESTRICTED")),
+            trust_tier=str(raw.get("trust_tier", "builtin")),
             side_effects=list(raw.get("side_effects", [])),
             coordination=dict(raw.get("coordination", {})),
         )

@@ -59,8 +59,10 @@ class OrchestratorState(TypedDict):
     clarification_response: dict[str, Any] | None
     request_memory_context: str
     request_memory_records: list[dict[str, Any]]
+    request_context_pack: dict[str, Any]
     memory_context: str
     memory_records: list[dict[str, Any]]
+    context_pack: dict[str, Any]
     prompt_plan: dict[str, Any]
     prompt_plans: dict[str, Any]
     response: dict[str, Any] | None
@@ -146,6 +148,29 @@ def _memory_records(recalled: Any) -> list[dict[str, Any]]:
             "score": getattr(result, "score", None),
         })
     return records
+
+
+def _context_pack(manager: MemoryManagerLike, *, query: str, context: AccessContext,
+                  run_id: str, stage_id: str, top_k: int, token_budget: int) -> dict[str, Any] | None:
+    """Build a typed pack when the active memory manager supports T23.
+
+    The fallback keeps older test doubles and external adapters compatible
+    while the production MemoryManager becomes the single pack authority.
+    """
+
+    builder = getattr(manager, "recall_context_pack", None)
+    if not callable(builder):
+        return None
+    pack = builder(
+        query,
+        context,
+        run_id=run_id,
+        stage_id=stage_id,
+        top_k=top_k,
+        token_budget=token_budget,
+        session_id=run_id,
+    )
+    return pack.model_dump(mode="json")
 
 
 def build_default_pipeline_registry(
@@ -535,8 +560,10 @@ class PipelineOrchestrator:
             "clarification_response": None,
             "request_memory_context": "",
             "request_memory_records": [],
+            "request_context_pack": {},
             "memory_context": "",
             "memory_records": [],
+            "context_pack": {},
             "prompt_plan": {},
             "prompt_plans": {},
             "response": None,
@@ -638,6 +665,7 @@ class PipelineOrchestrator:
                 "request_understanding": understanding.model_dump(mode="json"),
                 "request_memory_context": state.get("request_memory_context", ""),
                 "request_memory_records": state.get("request_memory_records", []),
+                "request_context_pack": state.get("request_context_pack", {}),
             }
             if not understanding.clarification_required:
                 request_data["metadata"]["pipeline"] = pipeline
@@ -723,18 +751,32 @@ class PipelineOrchestrator:
                     f" Revision target artifact={request.parent_artifact_id or 'by parent run'}, "
                     f"instruction={request.revision_instruction or ''}."
                 )
-            recalled = self.memory_manager.recall(
-                query=(
-                    "Understand the user's requested operation using relevant user preferences, "
-                    f"terminology, and case summary. Request: {request.query}.{revision_hint}"
-                ),
+            recall_query = (
+                "Understand the user's requested operation using relevant user preferences, "
+                f"terminology, and case summary. Request: {request.query}.{revision_hint}"
+            )
+            pack = _context_pack(
+                self.memory_manager,
+                query=recall_query,
                 context=request_context,
+                run_id=state["run_id"],
+                stage_id="understanding",
                 top_k=min(request.top_k, 8),
                 token_budget=min(request.token_budget, 1200),
-                session_id=state["run_id"],
             )
-            records = _memory_records(recalled)
-            context_text = str(recalled.context.text or "")
+            if pack is not None:
+                records = list(pack.get("records", []))
+                context_text = str(pack.get("context_text", ""))
+            else:
+                recalled = self.memory_manager.recall(
+                    query=recall_query,
+                    context=request_context,
+                    top_k=min(request.top_k, 8),
+                    token_budget=min(request.token_budget, 1200),
+                    session_id=state["run_id"],
+                )
+                records = _memory_records(recalled)
+                context_text = str(recalled.context.text or "")
             reporter.emit(
                 stage="request_memory_recall",
                 status="succeeded",
@@ -750,6 +792,7 @@ class PipelineOrchestrator:
             return {
                 "request_memory_context": context_text,
                 "request_memory_records": records,
+                "request_context_pack": pack or {},
                 "stage": "request_memory_recall",
                 "status": "running",
             }
@@ -875,14 +918,28 @@ class PipelineOrchestrator:
                     f" Retrieve the parent artifact {request.parent_artifact_id or request.parent_run_id} "
                     f"and apply this revision instruction: {request.revision_instruction}."
                 )
-            recalled = self.memory_manager.recall(
+            pack = _context_pack(
+                self.memory_manager,
                 query=query,
                 context=request.access_context,
-                top_k=request.top_k,
-                token_budget=request.token_budget,
-                session_id=state["run_id"],
+                run_id=state["run_id"],
+                stage_id="grounding",
+                top_k=min(request.top_k, 16),
+                token_budget=min(request.token_budget, 2600),
             )
-            records = _memory_records(recalled)
+            if pack is not None:
+                records = list(pack.get("records", []))
+                context_text = str(pack.get("context_text", ""))
+            else:
+                recalled = self.memory_manager.recall(
+                    query=query,
+                    context=request.access_context,
+                    top_k=request.top_k,
+                    token_budget=request.token_budget,
+                    session_id=state["run_id"],
+                )
+                records = _memory_records(recalled)
+                context_text = str(recalled.context.text or "")
             reporter.emit(
                 stage="memory_recall",
                 status="succeeded",
@@ -897,8 +954,9 @@ class PipelineOrchestrator:
                 f"Recalled {len(records)} permitted records for task-scoped generation.",
             )
             return {
-                "memory_context": recalled.context.text,
+                "memory_context": context_text,
                 "memory_records": records,
+                "context_pack": pack or {},
                 "stage": "memory_recall",
                 "status": "running",
             }
@@ -1115,6 +1173,7 @@ class PipelineOrchestrator:
             "request_understanding": state.get("understanding", {}),
             "resolved_memory_context": state.get("memory_context", ""),
             "resolved_memory_records": state.get("memory_records", []),
+            "context_pack": state.get("context_pack", {}),
             "prompt_plan": dict(prompt_plan),
         }
         runner = self.registry[pipeline].run

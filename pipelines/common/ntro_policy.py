@@ -145,6 +145,42 @@ _INTERNAL_TOOL_NAME = re.compile(
     re.IGNORECASE,
 )
 
+# Secret-shaped values are redacted at response and logging boundaries. This
+# is deliberately conservative: ordinary words such as ``token_budget`` are
+# safe, while credentials and bearer/JWT-like values are not.
+_SECRET_VALUE = re.compile(
+    r"(?:"
+    r"(?:sk|rk|ghp|github_pat|xox[baprs])-[-A-Za-z0-9_]{4,}"
+    r"|Bearer\s+[A-Za-z0-9._~+/=-]{8,}"
+    r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+    r"|(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password)"
+    r"\s*[:=]\s*[^\s,;]+"
+    r")",
+    re.IGNORECASE,
+)
+_SENSITIVE_KEY = re.compile(
+    r"(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret"
+    r"|password|passwd|authorization|cookie|private[_-]?key|credential|secret)",
+    re.IGNORECASE,
+)
+
+
+def redact_sensitive(value: Any) -> Any:
+    """Recursively remove credentials from data crossing a trust boundary."""
+
+    if isinstance(value, str):
+        return _SECRET_VALUE.sub("[REDACTED]", value)
+    if isinstance(value, Mapping):
+        safe: dict[Any, Any] = {}
+        for key, item in value.items():
+            safe[key] = "[REDACTED]" if _SENSITIVE_KEY.search(str(key)) else redact_sensitive(item)
+        return safe
+    if isinstance(value, list):
+        return [redact_sensitive(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_sensitive(item) for item in value)
+    return value
+
 
 @dataclass(frozen=True, slots=True)
 class SanitizationResult:
@@ -290,4 +326,4 @@ def validate_ntro_response(response_data: Mapping[str, Any]) -> dict[str, Any]:
         result["output"] = sanitize_output(result["output"])
 
     result["metadata"] = metadata
-    return result
+    return redact_sensitive(result)

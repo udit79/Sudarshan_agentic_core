@@ -31,6 +31,9 @@ from pipelines.orchestrator import (
     SkillCall,
     SkillRuntime,
     SQLiteProgressSink,
+    ObservableProgressSink,
+    SQLiteObservabilityStore,
+    TelemetrySummary,
     create_sqlite_checkpointer,
     event_dict,
     project_progress_event,
@@ -49,7 +52,8 @@ class SudarshanApplication:
     """Own the real application services behind Harness-facing tools."""
 
     def __init__(self) -> None:
-        self.progress_sink = SQLiteProgressSink()
+        self.observability = SQLiteObservabilityStore()
+        self.progress_sink = ObservableProgressSink(SQLiteProgressSink(), self.observability)
         self.orchestrator = PipelineOrchestrator(
             MemoryManager.from_env(),
             progress_sink=self.progress_sink,
@@ -317,6 +321,7 @@ class SudarshanApplication:
             ancestors=tuple(request.metadata.get("ancestor_skills", ())),
             allowed_capabilities=frozenset(manifest.required_capabilities),
             allowed_tools=frozenset(manifest.allowed_tools),
+            allowed_trust_tiers=frozenset({"builtin", "verified"}),
             cancel_event=cancel_event or Event(),
         )
         result = self.skill_runtime.invoke(call, parent_context=context)
@@ -339,6 +344,9 @@ class SudarshanApplication:
     def _publish_skill_event(self, name: str, payload: Mapping[str, Any]) -> None:
         """Project child-runtime lifecycle into the existing safe event stream."""
 
+        observability = getattr(self, "observability", None)
+        if observability is not None:
+            observability.record_runtime_event(name, payload)
         run_id = str(payload.get("parent_run_id", "")).strip()
         context = self._run_contexts.get(run_id, {})
         task_id = context.get("task_id") or str(payload.get("parent_node_id", "skill"))
@@ -351,6 +359,13 @@ class SudarshanApplication:
             "skill.cancelled": ("cancelled", 100, False),
         }
         status, progress, requires_action = status_map.get(name, ("running", 0, False))
+        cache_status = None
+        if name.endswith("cache_hit"):
+            cache_status = "hit"
+        elif name.endswith("cache_wait"):
+            cache_status = "wait"
+        elif name.endswith("cache_write_failed"):
+            cache_status = "write"
         self.progress_sink.publish(
             ProgressEvent(
                 run_id=run_id or "skill-runtime",
@@ -362,6 +377,18 @@ class SudarshanApplication:
                 message=f"Child skill event: {name}",
                 requires_action=requires_action,
                 error_code=payload.get("error_code"),
+                wait_reason=(
+                    "Child skill is waiting for a dependency or cache owner."
+                    if status == "pending" else ""
+                ),
+                child_id=payload.get("child_run_id"),
+                skill_call_id=payload.get("skill_call_id"),
+                quality_report_id=payload.get("quality_report_id"),
+                artifact_id=(payload.get("artifact_ids") or [None])[0],
+                provider=(payload.get("usage") or {}).get("provider") if isinstance(payload.get("usage"), Mapping) else None,
+                model=(payload.get("usage") or {}).get("model") if isinstance(payload.get("usage"), Mapping) else None,
+                usage=payload.get("usage"),
+                cache_status=cache_status,
             )
         )
 
@@ -467,6 +494,14 @@ class SudarshanApplication:
             )
         return projected
 
+    def telemetry(self, run_id: str) -> dict[str, Any]:
+        """Return the safe aggregate used by the operator dashboard."""
+
+        observability = getattr(self, "observability", None)
+        if observability is None:
+            return {"run_id": str(run_id), "event_count": 0}
+        return observability.summary(str(run_id)).model_dump(mode="json")
+
     @staticmethod
     def _skill_id(pipeline: Any) -> str:
         aliases = {
@@ -528,6 +563,13 @@ class SudarshanApplication:
             artifact_count=artifact_count,
             child_count=len(responses),
             error_code=values.get("error_code"),
+            telemetry=TelemetrySummary.model_validate({
+                key: value
+                for key, value in self.telemetry(
+                    str(values.get("run_id") or request.get("metadata", {}).get("run_id") or "run-unknown")
+                ).items()
+                if key != "run_id"
+            }),
             created_at=timestamps[0] if timestamps else now,
             updated_at=timestamps[-1] if timestamps else now,
         )
@@ -559,6 +601,7 @@ class SudarshanApplication:
                     ),
                     progress=0,
                     quality_status="pending",
+                    telemetry=TelemetrySummary(),
                 )
                 return {
                     "run_id": run_id,
@@ -575,6 +618,7 @@ class SudarshanApplication:
                     "skill_result": queue_state.get("skill_result"),
                     "events": [],
                     "summary": summary.model_dump(mode="json"),
+                    "telemetry": self.telemetry(run_id),
                 }
             return {"run_id": run_id, "status": "not_found", "events": self.events(run_id)}
         events = self.events(run_id)
@@ -595,6 +639,7 @@ class SudarshanApplication:
             "error": values.get("error"),
             "events": events,
             "summary": summary.model_dump(mode="json"),
+            "telemetry": self.telemetry(run_id),
         }
         # The projection is already serialized through the NTRO response
         # sanitizer and contains no prompts, raw memory, credentials, or

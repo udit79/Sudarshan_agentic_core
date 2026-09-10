@@ -37,6 +37,16 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
             ),
             **common,
         ),
+        "humanizer": Agent(
+            role="LinkedIn Humanizer and Release-Safety Reviewer",
+            goal="Find machine-like phrasing, inflated certainty, and public-release risks before approval.",
+            backstory=(
+                "You perform a transparent style audit. You do not invent facts or rewrite evidence; you return "
+                "specific findings and revision suggestions. Publishing is always a separate approved action. "
+                f"{NTRO_AGENT_GUARDRAILS}"
+            ),
+            **common,
+        ),
         "quality_critic": Agent(
             role="LinkedIn Content Quality Reviewer",
             goal="Reject posts that are unsupported, unsafe to publish, unclear, or outside the requested case.",

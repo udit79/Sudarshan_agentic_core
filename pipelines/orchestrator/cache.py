@@ -265,7 +265,11 @@ def _safe_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
     safe: dict[str, Any] = {}
     for key, value in metadata.items():
         name = str(key).lower()
-        if any(marker in name for marker in ("prompt", "query", "content", "input", "secret", "memory")):
+        if any(marker in name for marker in (
+            "prompt", "query", "content", "input", "secret", "memory",
+            "api_key", "access_token", "refresh_token", "authorization",
+            "credential", "password", "private_key",
+        )):
             continue
         if isinstance(value, (str, int, float, bool)) or value is None:
             safe[str(key)[:80]] = value

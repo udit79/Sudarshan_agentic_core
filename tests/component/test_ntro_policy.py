@@ -6,6 +6,7 @@ from pipelines.common.ntro_policy import (
     validate_distribution,
     sanitize_text,
     sanitize_output,
+    redact_sensitive,
     contains_hindi,
     bilingual_label,
     validate_ntro_response
@@ -95,3 +96,21 @@ def test_validate_ntro_response():
     assert "openai_api_key" not in cleaned["metadata"]
     # Permitted metadata kept
     assert cleaned["metadata"]["pipeline"] == "advisory"
+
+
+def test_redact_sensitive_recursively_preserves_safe_budget_fields():
+    value = {
+        "metadata": {
+            "api_key": "sk-live-example",
+            "token_budget": 1200,
+            "nested": [{"authorization": "Bearer very-secret-value"}],
+        },
+        "message": "password=do-not-log",
+    }
+
+    cleaned = redact_sensitive(value)
+
+    assert cleaned["metadata"]["api_key"] == "[REDACTED]"
+    assert cleaned["metadata"]["token_budget"] == 1200
+    assert cleaned["metadata"]["nested"][0]["authorization"] == "[REDACTED]"
+    assert "do-not-log" not in cleaned["message"]

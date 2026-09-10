@@ -85,6 +85,7 @@ class NativeVideoRenderSkill:
         scenes: list[Any],
         run_id: str,
         cancel_event: Event | None = None,
+        authorization_scope: Mapping[str, Any] | None = None,
     ) -> NativeVideoResult:
         return self.generator.generate(
             subject=package.subject,
@@ -92,6 +93,7 @@ class NativeVideoRenderSkill:
             artifact_name=f"video-{run_id}",
             package_dir=Path("artifacts") / "videos" / str(run_id),
             cancel_event=cancel_event,
+            authorization_scope=authorization_scope,
         )
 
 

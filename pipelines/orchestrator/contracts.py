@@ -54,6 +54,50 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TelemetryUsage(ContractModel):
+    """Safe provider-usage projection; prompts and model output are excluded."""
+
+    provider: str | None = None
+    model: str | None = None
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+    tool_calls: int = Field(default=0, ge=0)
+    latency_ms: int = Field(default=0, ge=0)
+    estimated_cost: float = Field(default=0.0, ge=0)
+    is_estimate: bool = False
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens + self.reasoning_tokens
+
+
+class TelemetrySummary(ContractModel):
+    """Dashboard-safe aggregate for one run."""
+
+    event_count: int = Field(default=0, ge=0)
+    child_count: int = Field(default=0, ge=0)
+    artifact_count: int = Field(default=0, ge=0)
+    cache_hits: int = Field(default=0, ge=0)
+    cache_misses: int = Field(default=0, ge=0)
+    cache_waits: int = Field(default=0, ge=0)
+    wait_count: int = Field(default=0, ge=0)
+    quality_report_count: int = Field(default=0, ge=0)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+    tool_calls: int = Field(default=0, ge=0)
+    latency_ms: int = Field(default=0, ge=0)
+    estimated_cost: float = Field(default=0.0, ge=0)
+    usage_is_estimate: bool = False
+    last_stage: str = ""
+    last_status: str = ""
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens + self.reasoning_tokens
+
+
 class RunSummary(ContractModel):
     """Safe current projection for APIs, MCP, and the frontend."""
 
@@ -71,6 +115,7 @@ class RunSummary(ContractModel):
     artifact_count: int = Field(default=0, ge=0)
     child_count: int = Field(default=0, ge=0)
     error_code: str | None = None
+    telemetry: TelemetrySummary = Field(default_factory=TelemetrySummary)
     created_at: str = Field(default_factory=_utc_now)
     updated_at: str = Field(default_factory=_utc_now)
 
@@ -91,6 +136,14 @@ class RunEvent(ContractModel):
     artifact_id: str | None = None
     error_code: str | None = None
     requires_action: bool = False
+    wait_reason: str = Field(default="", max_length=500)
+    quality_status: QualityStatus = "pending"
+    quality_report_id: str | None = None
+    child_count: int = Field(default=0, ge=0)
+    provider: str | None = None
+    model: str | None = None
+    usage: TelemetryUsage | None = None
+    cache_status: Literal["hit", "miss", "wait", "write", "not_applicable"] | None = None
     timestamp: str = Field(default_factory=_utc_now)
 
 
@@ -183,6 +236,7 @@ class SkillManifest(ContractModel):
     budget_policy: RunPolicy = Field(default_factory=RunPolicy)
     quality_gates: list[str] = Field(default_factory=list)
     risk_class: str = Field(min_length=1)
+    trust_tier: Literal["builtin", "verified", "untrusted"] = "builtin"
     side_effects: list[SideEffectClass] = Field(default_factory=list)
     coordination: dict[str, Any] = Field(default_factory=dict)
 
@@ -250,6 +304,7 @@ class ContextPack(ContractModel):
     token_budget: int = Field(default=2000, ge=256)
     retrieval_trace_id: str | None = None
     scope: dict[str, str] = Field(default_factory=dict)
+    context_text: str = ""
 
 
 def project_progress_event(event: Mapping[str, Any], *, sequence: int) -> RunEvent:
@@ -270,6 +325,13 @@ def project_progress_event(event: Mapping[str, Any], *, sequence: int) -> RunEve
         artifact_id=payload.get("artifact_id"),
         error_code=payload.get("error_code"),
         requires_action=bool(payload.get("requires_action", False)),
+        wait_reason=str(payload.get("wait_reason", "")),
+        quality_status=payload.get("quality_status", "pending"),
+        quality_report_id=payload.get("quality_report_id"),
+        child_count=int(payload.get("child_count", 0) or 0),
+        provider=payload.get("provider"),
+        model=payload.get("model"),
+        usage=payload.get("usage"),
+        cache_status=payload.get("cache_status"),
         timestamp=str(payload.get("timestamp", _utc_now())),
     )
-

@@ -361,6 +361,10 @@ integrations/deepseek_harness/
   ├── approval and notification bridge
   └── artifact preview adapter
 
+deepseek-harness/packages/experimental/
+  ├── client-ui-sudarshan          # replaceable brand-slot occupants
+  └── client-ui-sudarshan-theme    # replaceable product stylesheet
+
 Sudarshan core/
   ├── skill runtime
   ├── run coordinator
@@ -371,6 +375,11 @@ Sudarshan core/
 ```
 
 Do not fork the Harness core for branding or application logic. Prefer composition, plugin registration, and a small patch layer. This protects the ability to use another MCP host later.
+
+The checked-in web bundle must load the two product packages above instead of
+changing `ui-brand-official` or baking product CSS into the generic theme.
+Harness preview state (`.dsh-preview/`) is local-only and must never carry
+credentials, transcripts, or machine-specific paths into a release.
 
 ## 5. Cognee at maximum useful power
 
@@ -736,6 +745,7 @@ Deliverables:
 - hierarchical skill router;
 - tool profiles for user, analyst, renderer, operator, and developer roles;
 - native Harness UI plugin for runs, artifacts, evidence, approvals, and logs;
+- replaceable Sudarshan brand/theme plugins loaded through the web bundle;
 - external Harness compatibility through baseline MCP tools;
 - native model routing and provider fallback policy.
 
@@ -3059,6 +3069,15 @@ The final rule for Sudarshan is:
 
 The workspace structure gives users control. The runtime provides scale. The artifact and evidence contracts provide reliability. Adaptive topology selection prevents the system from paying the cost of multi-agent coordination when a single agent or deterministic stage is better.
 
+The source-to-evidence boundary follows the same rule. The detailed contract
+is maintained in [Ingestion architecture](ingestion-architecture.md). Ingestion
+is an asynchronous evidence compiler, not a request-time text dump: original
+sources remain immutable, modality plugins produce typed evidence blocks,
+structure and provenance are preserved, Cognee receives governed projections,
+and skills retrieve evidence by ID. The compatibility `IngestedDocument` path
+remains available until the ingestion workstream below passes its migration
+gates.
+
 ## 24. Research audit and future-use source index
 
 ### 24.1 GitHub reference index
@@ -3157,7 +3176,7 @@ This backlog is the operational form of the plan. A coding agent must complete t
 
 | Ticket | Owner | Depends on | Exact work and primary files | Acceptance criteria |
 |---|---|---|---|---|
-| T00 | All | none | Baseline inventory. Read `README.md`, `docs/backend-integration.md`, `docs/gateway-integration.md`, `pipelines/README.md`, current API/MCP tests, and the pipeline registry. Record current test commands and route/tool names in `docs/sudarshan-2.0-baseline.md`. | Baseline document matches the repository; no implementation change; existing targeted tests pass. |
+| T00 | All | none | Baseline inventory. Read `README.md`, the engineering handbook, `docs/backend-integration.md`, `docs/gateway-integration.md`, `pipelines/README.md`, current API/MCP tests, and the pipeline registry. Record current test commands and route/tool names in `docs/current-status.md` and the assumption ledger. | Current-status and assumption documents match the repository; no implementation change; existing targeted tests pass. |
 | T01 | Backend + agentic | T00 | Freeze common contracts in a new `pipelines/orchestrator/contracts.py` or an approved equivalent. Define `RunSummary`, `RunEvent`, `ArtifactManifest`, `QualityReport`, `UsageRecord`, `SkillManifest`, `SkillCall`, `SkillResult`, `RunPolicy`, `NodeSpec`, and `ContextPack`. Use Pydantic and strict extras. | Fixtures validate; unknown fields fail; old `ProgressEvent` and `PipelineResponse` can be projected without losing fields. |
 | T02 | Backend | T01 | Add versioned fixtures under `tests/contracts/` for queued, running, waiting, partial, succeeded, failed, cancelled, artifact, quality, usage, and child-skill states. | Python tests load every fixture and verify stable serialization. |
 | T03 | Backend | T01 | Upgrade `pipelines/orchestrator/progress.py` with durable monotonic sequence, cursor-based reads, bounded event projection, and safe event redaction. Preserve `InMemoryProgressSink` for tests and `SQLiteProgressSink` for local development. | `after_sequence` returns only later events; reconnect is idempotent; secrets/prompts are rejected or redacted. |
@@ -3182,12 +3201,20 @@ This backlog is the operational form of the plan. A coding agent must complete t
 | T22 | Infographic/diagram team | T16,T18,T19 | Add semantic `InfographicIR` and `DiagramIR` adapters around current AntV rendering. Keep evidence separate from syntax and add SVG/PNG quality checks. | Unsupported syntax fails safely; visual outputs include alt text, source hash, citations, and quality diagnostics. |
 | T23 | Memory team | T01,T10,T13 | Add `ContextPack` construction and stage-specific recall in `memory/context_builder.py`, `memory/memory_manager.py`, and the orchestrator. Keep Cognee behind `MemoryManager`; never store live run state in Cognee. | Context is bounded, scoped, provenance-bearing, and smaller than the full-context baseline without reducing groundedness. |
 | T24 | Memory/evaluation | T23,T14 | Add memory lifecycle states, contradiction/supersession handling, deletion tests, and retrieval benchmarks. | Case isolation, forgetting, stale-memory, and retrieval-trace tests pass; unreviewed transcripts are not promoted to system memory. |
-| T25 | LinkedIn team | T10,T15,T23 | Convert the existing `linkedin_post` flow into a parent skill with grounding, hook, writing, optional visual child, humanizer audit, quality, and approval stages. Keep publish as a separate side-effecting capability. | A LinkedIn draft can call `visual.flowchart` using `SkillCall` and receives only a typed artifact reference; no publish occurs without approval. |
+| T25 | LinkedIn team | T10,T15,T23 | Convert the existing `linkedin_post` flow into a parent skill with grounding, hook, writing, optional visual child, humanizer audit, quality, and approval stages. Keep publish as a separate side-effecting capability. | A LinkedIn draft emits explicit claim bindings, a humanizer report, and draft-only approval state; eligible diagram/infographic requests produce a bounded `SkillCall` for `visual.flowchart`. Executable child reconciliation remains the next integration slice; no publish occurs without approval. |
 | T26 | Observability | T01,T03,T08,T13 | Add correlated logs/traces for run, node, skill call, provider call, cache, artifact, quality, and wait reason. Project safe data to the dashboard and keep raw details operator-restricted. | Every artifact can be traced to a run and quality report; dashboard shows token/cost/latency/cache/wait metrics without prompts or secrets. |
 | T27 | Security | T06,T10,T14,T26 | Add tool allow-lists, skill trust tiers, sandbox policy, classification propagation, prompt-injection fixtures, memory-poisoning tests, artifact access checks, and secret scanning. | Unauthorized child calls and cross-case reads fail; sensitive fields never appear in events, cache keys, logs, or artifacts. |
 | T28 | Reliability | T08,T11,T14,T20,T21 | Add failure-injection tests for provider timeout, worker crash, duplicate submission, stale lease, child failure, renderer failure, reconnect, and partial artifact recovery. | Runs reach a safe terminal state or an explicit waiting state; successful nodes are not rebuilt unnecessarily. |
 | T29 | Evaluation | T19,T20,T21,T23,T26 | Build matched benchmark runs for legacy versus staged PPT, video, infographic, summary, advisory, and LinkedIn. Measure quality, evidence coverage, tokens, cost, latency, queue wait, cache hits, repairs, and human correction time. | Promotion decision uses recorded thresholds; no “more agentic” claim is made without measured improvement. |
 | T30 | Release owner | T27,T28,T29 | Run full Python, Node, frontend, and Harness checks; pin versions; create rollback notes; update operator documentation and demo script. | Native Harness and a second MCP client complete the same run lifecycle; artifacts are reproducible from manifests; release gate is signed off. |
+| T31 | Ingestion/data + backend | T01,T08,T13,T14 | Freeze `IngestionManifest`, `EvidenceBlock`, `ExtractionEvent`, and ingestion `QualityReport` contracts in `ingestion_pipelines/`; preserve `IngestedDocument`/`extract_text()` compatibility wrappers. Add fixtures for accepted, processing, ready, partial, failed, cancelled, provenance, confidence, location, and source hashes. | Strict contracts validate; legacy ingestion tests remain green; every evidence block has stable ID, source location, confidence, parser version, and provenance. |
+| T32 | Ingestion/data + security | T31,T27 | Add source registration and safety policy: MIME sniffing, bounded bytes/pages/slides/duration, archive/decompression limits, immutable source hash, classification/scope propagation, prompt-injection markers, and safe temporary/object-storage lifecycle. | Unsupported or oversized sources fail before extraction; source data cannot become system instructions; secrets and raw source content are excluded from safe events. |
+| T33 | Backend/control plane | T31,T32,T08,T11 | Add asynchronous ingestion manifests, durable job admission, status/events, idempotency, cooperative cancellation, retry/dead-letter behavior, and compatibility projection for `/ingest`. Add `submit_ingestion()` plus a synchronous test-only path. | Upload returns an ingestion handle; restart/reconnect is safe; duplicate submissions do not duplicate work; `READY/PARTIAL/FAILED` states are observable. |
+| T34 | Ingestion/data | T31,T33 | Refactor text/PDF/PPTX/image/video plugins to emit typed evidence. Preserve hierarchy, page/slide/region/timestamp geometry, tables, notes, images, scene boundaries, ASR segments, and explicit fallback/failure metadata. | Scanned PDFs, table-heavy PDFs, PPTX shapes/notes, infographics, and videos produce evidence fixtures with complete source maps; no extractor silently swallows failures. |
+| T35 | Ingestion/data + agentic | T31,T33,T34 | Add structure/relationship compilation and structure-aware chunking. Build heading trees, slide/shape relationships, table/figure links, video temporal parents, breadcrumbs, and modality-specific retrieval records. | Chunks retain ancestry and parent links; tables/figures/diagrams remain addressable; chunking never creates orphan evidence without a source map. |
+| T36 | Backend + memory | T23,T31,T35 | Add evidence indexes and Cognee projection. Keep exact source/evidence artifacts outside Cognee; write governed summaries, entities, relationships, and evidence references through `MemoryManager`. Add `search_text`, `search_visual`, `search_table`, `search_video_segment`, and `get_evidence` boundaries. | Skills retrieve compact provenance-bearing context; Cognee is never called directly by a plugin or agent; evidence authorization follows User/Case/Task scope. |
+| T37 | Backend + platform | T13,T14,T26,T33,T34 | Add per-ingestion parser/OCR/vision/summary/embedding budgets, adaptive fallback routing, cache fingerprints, partial retries, fan-out limits, queue wait telemetry, usage records, and abandoned-artifact cleanup. | Re-ingestion reuses unchanged stages; changed parser/model/config invalidates only affected stages; token/cost/latency/cache metrics are visible and labeled as estimates when necessary. |
+| T38 | Evaluation + all teams | T19,T21,T24,T26,T27,T36,T37 | Build multimodal ingestion/retrieval benchmark and promotion gate using scanned/table-heavy PDFs, PPTX decks, infographics, long videos, paraphrased queries, partial failures, and cross-skill evidence reuse. Compare flat-text baseline with typed evidence. | Release decision records extraction coverage, retrieval recall, evidence faithfulness, tokens, cost, P50/P95 latency, cache hit rate, queue wait, repair rate, and human correction time. |
 
 ### 26.3 Milestones and stop/go gates
 
@@ -3199,6 +3226,7 @@ This backlog is the operational form of the plan. A coding agent must complete t
 | G3 PPT vertical slice | T16–T20 complete | PPT still relies on free-form slide prose or unverified visuals |
 | G4 Pipeline migration | T21–T25 complete | Video, infographic, or LinkedIn migration rebuilds successful work or bypasses evidence |
 | G5 Production readiness | T26–T30 complete | Logs leak sensitive data, failures are unrecoverable, or quality/cost gains are unmeasured |
+| G6 Multimodal ingestion readiness | T31–T38 complete | Sources are flattened into text, evidence is untraceable, ingestion is request-blocking, or cost/quality is not measured |
 
 ### 26.4 Coding-agent handoff template
 
@@ -3223,7 +3251,7 @@ If a coding agent discovers a mismatch not listed above, it must add a new audit
 
 Completed on the `Sudarshan2.0` branch:
 
-- `T00` baseline inventory: `docs/sudarshan-2.0-baseline.md`.
+- `T00` baseline inventory: `docs/current-status.md` and `docs/sudarshan-2.0-assumptions.md`.
 - `T01` common execution contracts: `pipelines/orchestrator/contracts.py`, exported through the orchestrator package.
 - `T02` contract fixtures and validation tests: `tests/contracts/` and `tests/component/test_execution_contracts.py`.
 - `T03` replayable events: progress events now receive monotonic sequences, application event reads return strict `RunEvent` projections, and SSE accepts an `after_sequence` query parameter.
@@ -3248,6 +3276,17 @@ Completed on the `Sudarshan2.0` branch:
 - First `T15` skill-workspace slice: `skills/` provides validated versioned packages with compact manifests, lazy `SKILL.md` bodies, schemas, policy, failure cases, and smoke eval fixtures; the Harness catalog consumes workspace manifests while preserving legacy fallback definitions.
 - First `T16` presentation-IR slice: `pipelines/ppt/schemas.py` adds renderer-neutral `DeckPlan`, `SlideSpec`, `SlideTask`, `SlideContentIR`, `VisualIR`, evidence bindings, normalized layout boxes, and targeted `RepairPatch` contracts while keeping the legacy `PresentationOutput` renderer path compatible.
 - First `T17` staged-PPT slice: `SUDARSHAN_PPT_FLOW=staged` selects grounding, deck planning, visual routing, slide content, and quality tasks with named persisted callbacks; legacy mode remains the default and staged output is still converted to `PresentationOutput`.
+- First `T18` renderer slice: `pipelines/ppt/flowchart.py` converts `VisualIR` into strict `FlowchartSpec`, validates DAG integrity, computes deterministic normalized geometry, and renders the same layout to SVG and editable `python-pptx` shapes/connectors; the legacy renderer remains available.
+- First `T19` QA slice: `pipelines/ppt/quality.py` adds deterministic flowchart diagnostics for overlap, edge crossing, off-canvas geometry, and label overflow, plus evidence source maps and bounded `RepairPatch` generation.
+- First `T20` vertical slice: `pipelines/ppt/vertical.py` runs `visual.flowchart → visual.flowchart.qa → presentation.flowchart.delivery` through the persisted DAG bridge, renders shared SVG/PPTX geometry, registers checksum-verified artifact manifests after QA, and exposes safe quality/artifact status; `.env.example` documents the new local paths and feature flags.
+- First `T21` video-stage slice: `VideoRunManifest`/`VideoSceneManifest` persist exact scene fingerprints and status; `NativeVideoGenerator` renders missing scenes with bounded cooperative workers, resumes existing scene files, preserves storyboard order during composition, records failed/cache-hit metadata, and includes authorization scope in fingerprints. `.env.example` exposes the artifact, worker, and renderer settings.
+- First `T22` infographic/diagram slice: the actual `InfographicOutput` contract is loaded from a synthetic final-generation fixture, adapted into renderer-neutral `InfographicIR`/`DiagramIR`, compiled deterministically, and rendered through the real AntV Node boundary. AntV SSR runs in a killable child process with a bounded timeout; native versus deterministic fallback mode and warnings are preserved, and SVG integrity/text checks run before the fixture is accepted.
+- First `T23` context slice: `MemoryManager` now converts Cognee results into query-ranked, duplicate-free, stage-bounded context, emits a stable retrieval trace, and returns the canonical typed `ContextPack`; the LangGraph request-understanding and grounding stages propagate that pack to child pipeline metadata without exposing Cognee to agents.
+- First `T24` memory-lifecycle slice: memory records now carry explicit active/pending-review/superseded/retracted/expired states; explicit replacements supersede prior records, recall excludes non-active records, and scope-checked retraction/forgetting preserves an audit record while making irreversible backend purge opt-in.
+- First `T25` LinkedIn-parent slice: the LinkedIn output now carries explicit claim bindings, a deterministic humanizer report, a draft-only approval boundary, and typed optional visual-child state; diagram/infographic requests can produce a bounded `SkillCall` for `visual.flowchart` without publishing or recursively invoking the public API.
+- First `T26` observability slice: progress and child-runtime events now feed an allow-listed SQLite telemetry store; run summaries, FastAPI status, and the dashboard expose safe token, latency, cache, wait, quality, and artifact aggregates without prompts, raw memory, or provider payloads.
+- First `T27` security slice: child identity and classification metadata are derived from the trusted parent context; manifest trust tiers and publish side effects are enforced before adapter execution; retrieved source content is marked when it contains instruction-like text; audit start records hash queries; response, audit, and cache boundaries redact or reject credential-shaped data.
+- First `T28` reliability slice: restarted DAG bridges recover the base task context from durable job metadata and continue dependent-node admission; progress cursors replay only unseen events; renderer failures remain explicit; and partially completed video packages retry only failed scenes while reusing successful segments.
 
 Verification after this slice:
 
@@ -3258,6 +3297,10 @@ Node gateway syntax check and test suite: passed, 9 tests
 Frontend projection/cursor tests: passed, 3 tests; frontend JavaScript syntax checks: passed
 Typed child-runtime and contract tests: passed, 16 tests
 git diff --check: passed
+T25 LinkedIn parent-skill tests: passed, 9 tests; full Python suite after T25: 166 passed, 1 skipped
+T26 observability tests: passed, 3 tests; full Python suite after T26: 169 passed, 1 skipped; frontend projection: 3 passed; gateway: 9 passed
+T27 security tests: passed, 26 focused tests; full Python suite after T27: 174 passed, 1 skipped with a workspace-local pytest basetemp; `git diff --check`: passed
+T28 reliability tests: passed, 21 focused tests; full Python suite after T28: 178 passed, 1 skipped with a workspace-local pytest basetemp; `git diff --check`: passed
 ```
 
 `T07` is functionally covered by local projection and reconnect tests; a live Mongo/Python integration environment is still required for production-level duplicate-submission and partial-result recovery testing.
@@ -3271,6 +3314,77 @@ git diff --check: passed
 `T15` is locally implemented and verified. Seven packaged skills now have manifests, lazy bodies, schemas, policies, failure cases, and smoke fixtures; signed distribution, package ownership, compatibility migration, and user-install security remain open.
 `T16` is locally implemented and targeted-tested. The typed presentation boundary supports flowchart child routing and rejects unresolved placeholders/renderer payloads; renderer conversion, slide image QA, visual regression, and legacy-to-IR migration remain open.
 `T17` is locally implemented and targeted-tested. The staged task graph and feature flag are present with legacy compatibility; real IR-to-child execution, renderer integration, matched evaluations, and promotion gates remain open.
+`T18` is locally implemented and verified. Flowchart graph validation, shared layout, VisualIR conversion, SVG preview, and editable PPTX output are covered; font-aware geometry, routed arrowheads, rendered-image QA, and renderer-version promotion remain open.
+`T19` is locally implemented and targeted-tested. Stable geometry diagnostics, source maps, and targeted repair patches are present; rasterized slide inspection, font-aware measurement, contrast/density checks, visual snapshots, and human preference gates remain open.
+`T20` is locally implemented and targeted-tested. The flowchart child, quality gate, artifact store, and DAG are connected in one local vertical slice; application/MCP exposure, restart reconstruction, shared queue/object storage, and full deck assembly remain open.
+`T21` is locally implemented and verified. Video storyboard/media/composition/QA stages now have resumable scene manifests, bounded parallelism, exact cache reuse, cooperative cancellation, and degraded-scene metadata; shared manifests/leases, provider usage accounting, crash recovery, cleanup, and rendered-media QA remain open.
+`T22` has a locally implemented and targeted-tested first slice. The test uses the same Pydantic `InfographicOutput` shape emitted by the current pipeline, not an invented renderer payload; it verifies semantic IR conversion and a real Node/AntV SVG artifact with explicit renderer mode and deterministic integrity checks. Source hashes, PNG/raster visual regression, full diagram skill registration, DAG/application exposure, and production fallback promotion policy remain open.
+`T23` has a locally implemented first slice. The memory layer now applies Sudarshan-owned ranking, deduplication, progressive stage budgets, provenance-bearing records, and typed pack propagation around Cognee. T24 adds the first local lifecycle/supersession/retraction slice; full Cognee graph/search integration, contradiction detection beyond explicit supersession, deletion guarantees, retrieval benchmarks, and distributed dataset controls remain open.
+`T24` has a locally implemented and tested first slice. Lifecycle transitions, explicit supersession, pending-review exclusion, scope-checked retraction, and non-destructive forgetting are covered locally; shared lifecycle persistence, restart reconciliation, true Cognee deletion, expiry workers, and contradiction detection beyond explicit supersession remain open.
+`T25` has a locally implemented and tested first slice. Claim-binding fields, transparent humanizer findings, approval-separated draft state, humanizer CrewAI task wiring, and optional visual-child call construction are covered; executable visual registration, child-result reconciliation, and staging evidence for publish approval remain open.
+`T26` has a locally implemented and tested first slice. Correlated safe telemetry, durable local storage, aggregate run/status projections, a telemetry endpoint, and dashboard metric pills are covered; distributed collection, OpenTelemetry export, retention/access controls, and billing reconciliation remain open.
+`T27` has a locally implemented and tested first slice. Trusted child identity propagation, trust-tier and publish-approval enforcement, source prompt-injection markers, recursive secret redaction, hashed audit query records, and credential-filtered cache metadata are covered; signed package verification, OS/container sandboxing, distributed authorization, CI secret scanning, and multi-worker attack tests remain open.
+`T28` has a locally implemented and tested first slice. Scheduler timeout/retry/dead-letter/lease behavior, duplicate submission, DAG child failure, renderer failure, progress reconnect, restarted-bridge dependent admission, and partial video recovery are covered locally; kill-9/host-loss tests, shared multi-worker leases, distributed idempotency, and abandoned-artifact reconciliation remain open.
+
+`T31–T38` are the next planned ingestion workstream. They are not complete in
+the current repository. The existing synchronous ingestion path remains the
+compatibility baseline until typed evidence, asynchronous status, source
+security, structure-aware indexing, Cognee projection, cache/budget controls,
+and multimodal evaluation are implemented and promoted together.
+
+### T23 research alignment
+
+The implementation adopts the relevant design principles from the repositories
+and documentation reviewed for this ticket, while keeping the project’s existing
+policy boundary:
+
+- Cognee’s `add/cognify/search` separation and graph-plus-vector retrieval are
+  treated as backend capabilities; dataset scope and release policy stay in
+  `MemoryManager`.[^95]
+- OpenViking’s separation of resources, memories, and skills plus progressive
+  L0/L1/L2 context loading is represented by scoped memory types, the versioned
+  `skills/` workspace, and stage-specific context budgets.[^94]
+- agentmemory’s confidence/lifecycle, hybrid retrieval, token budgeting, and
+  inspectable traces are represented by provenance, query-aware ranking,
+  `ContextBuildTrace`, and typed `ContextPack`; automatic capture remains a
+  deliberate future ticket because NTRO memory promotion requires review.[^93]
+- diagram-design’s semantic-pattern/layout separation and restrained,
+  grid-aligned visual language are reflected in `VisualIR`, deterministic
+  flowchart geometry, and the SVG/PPT quality gates.[^90]
+- linkedin-skills’ modular skills, humanizer audit, draft-first behavior, and
+  approval-separated publishing are already represented in the LinkedIn skill
+  manifest/policy; the missing work is wiring a dedicated humanizer report into
+  the runtime output.[^96]
+
+### Ingestion research alignment
+
+The ingestion workstream is aligned to the research reviewed for the current
+architecture:
+
+- [MultiDocFusion, EMNLP 2025](https://aclanthology.org/2025.emnlp-main.1062/)
+  supports visual parsing, OCR, hierarchy reconstruction, and hierarchical
+  chunks; this maps to T34–T35.
+- [ColPali](https://arxiv.org/abs/2407.01449) identifies document ingestion as
+  a retrieval bottleneck and motivates preserving visual page evidence; this
+  maps to T34, T36, and T38.
+- [EcoDoc, ACL 2025](https://aclanthology.org/2025.acl-industry.109/)
+  supports dynamic text-versus-visual processing for cost and latency; this
+  maps to T33 and T37 instead of sending every page to a VLM.
+- [Google layout parsing](https://docs.cloud.google.com/document-ai/docs/layout-parse-chunk)
+  and [SuperRAG, NAACL 2025](https://aclanthology.org/2025.naacl-industry.45/)
+  motivate preserving document trees and links between text, tables, figures,
+  and diagrams.
+- [VideoRAG](https://arxiv.org/abs/2501.05874) motivates timestamped
+  multimodal video evidence instead of transcript-only representation.
+- [ReadAgent, ICML 2024](https://proceedings.mlr.press/v235/lee24c.html)
+  motivates compact summaries plus lookup of original evidence, which is the
+  role split between Cognee summaries and evidence storage.
+- [REAL-MM-RAG, ACL 2025](https://aclanthology.org/2025.acl-long.1528/)
+  motivates table-heavy and paraphrase-resistant retrieval tests in T38.
+
+These sources guide hypotheses; Sudarshan must still measure extraction
+coverage, retrieval recall, evidence faithfulness, cost, latency, and cache
+reuse on its own fixtures.
 
 ## Sources
 

@@ -1,1 +1,1 @@
-{"input":{"type":"AdvisoryRequest"},"output":{"type":"LinkedInDraft","required":["post","claim_bindings","humanizer_report"]},"publish":{"separate_approval":true}}
+{"input":{"type":"AdvisoryRequest"},"output":{"type":"LinkedInDraft","required":["post","claim_bindings","humanizer_report","approval_required","publish_status","visual_child"]},"publish":{"separate_approval":true,"generation_status":"draft_only"}}

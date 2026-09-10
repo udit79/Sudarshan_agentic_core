@@ -29,6 +29,20 @@ and returns frontend-safe artefacts and progress events.
 > Do not connect it to classified production data without approved identity,
 > storage, network, security, and operating controls.
 
+## Current implementation status
+
+Sudarshan 2.0 currently has a strong, tested local vertical slice: the Python
+application boundary, skill runtime, memory policy, specialist pipelines,
+quality gates, artifact manifests, scheduler, cache, telemetry, audit trail,
+DeepSeek Harness/MCP integration, and reference dashboard are connected.
+
+It is not yet production-complete for distributed deployment. Shared queue and
+lease infrastructure, object storage, signed skill packages, OS/container
+sandboxing, live external-service smoke tests, final visual regression gates,
+matched evaluation benchmarks, and release/rollback sign-off remain open.
+See the detailed [current status](docs/current-status.md) and
+[assumption ledger](docs/sudarshan-2.0-assumptions.md).
+
 ## What it delivers
 
 | Pipeline | Output |
@@ -74,7 +88,7 @@ Sudarshan is a hybrid agentic workflow:
 - DeepSeek Harness owns session, MCP, and runtime integration.
 - The Node gateway owns browser authentication, ownership, quotas, and safe
   delivery.
-- The frontend owns preview, editing, uploads, and progress display.
+- The frontend owns request composition, uploads, previews, and progress display.
 
 Prompt planning occurs after routing. Pipeline collaboration is bounded by
 typed capability proposals, shared constraints, declared dependencies, and
@@ -135,7 +149,15 @@ From the dashboard, an operator can:
   cooperative; it is not a provider pause or resumable checkpoint;
 - preview videos and rendered images and open/download PPTX, SVG, Markdown,
   and other returned artifacts;
+- see quality status, wait reasons, classification markings, cache/latency/
+  token summaries, and safe artifact telemetry;
 - reload the page and recover task history from the authenticated gateway.
+
+The frontend is a reference operator dashboard, not the security boundary.
+The gateway/backend owns authentication, case ownership, quotas, classification
+checks, artifact authorization, and provider credentials. The full frontend
+feature matrix and known UI gaps are in
+[docs/current-status.md](docs/current-status.md).
 
 If the development backend reports that `OPENAI_API_KEY` is not configured,
 the dashboard offers a one-time session setup dialog. The submitted key is
@@ -203,24 +225,29 @@ node --check frontend\api.js
 node --check frontend\login.js
 ```
 
-The offline baseline is 90 Python tests passed with 1 skipped, 4 Node gateway
-tests passed, frontend JavaScript syntax checks passed, and 12 focused
-application-boundary integration tests passed. External MongoDB, Cognee,
-Google OAuth, OpenAI, and worker reachability require a separate live smoke
-test.
+The current local snapshot is 178 Python tests passed with 1 skipped, 9 Node
+gateway tests passed, 3 frontend projection/cursor tests passed, and frontend
+JavaScript syntax checks passed. External MongoDB, Cognee, Google OAuth,
+OpenAI, AntV SSR, and worker reachability require a separate live smoke test.
 
 ## Documentation index
 
 | Document | Use it for |
 | --- | --- |
 | [Operations](docs/operations.md) | setup, configuration, API list, testing, troubleshooting, deployment limits |
+| [Current status](docs/current-status.md) | implemented frontend/backend features, honest production gaps, and verification snapshot |
+| [Engineering handbook](docs/sudarshan-2.0-engineering-handbook.md) | end-to-end HLD/LLD, lifecycle, skills, parallelism, memory, rendering, security, deployment, and team workflow |
+| [Skill authoring](docs/skill-authoring.md) | manifests, prompts, child skills, budgets, tools, quality, and evaluation fixtures |
+| [Artifact rendering](docs/artifact-rendering-and-quality.md) | PPT, flowchart, infographic, video, LinkedIn, repair, cache, and quality gates |
 | [Architecture](docs/internal/pipeline-orchestration.md) | graph, memory sequence, pipelines, model routing, diagrams |
 | [Backend integration](docs/backend-integration.md) | Python API, ingestion, MCP, status, resume, cancellation |
+| [Ingestion architecture](docs/ingestion-architecture.md) | typed multimodal evidence, async ingestion jobs, provenance, budgets, cache, and Cognee projection |
 | [Gateway integration](docs/gateway-integration.md) | OAuth, cases, transformations, tasks, quotas, MongoDB |
 | [Frontend integration](docs/frontend-integration.md) | browser calls, uploads, polling, SSE, rendering, security |
 | [Memory](memory/README.md) | Cognee adapter and User/Case/Task memory policy |
 | [Pipelines](pipelines/README.md) | pipeline contracts, video package, images, renderers |
 | [Harness integration](integrations/deepseek_harness/README.md) | MCP and JSONL boundary |
+| [Harness UI composition](docs/harness-ui-plugin.md) | replaceable Sudarshan brand/theme plugins and preview-state security |
 | [Design review](docs/design-review.md) | corrections recommended for the submitted slides |
 
 ## Team and credits
