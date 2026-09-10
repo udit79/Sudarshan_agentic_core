@@ -3216,6 +3216,14 @@ This backlog is the operational form of the plan. A coding agent must complete t
 | T37 | Backend + platform | T13,T14,T26,T33,T34 | Add per-ingestion parser/OCR/vision/summary/embedding budgets, adaptive fallback routing, cache fingerprints, partial retries, fan-out limits, queue wait telemetry, usage records, and abandoned-artifact cleanup. | Re-ingestion reuses unchanged stages; changed parser/model/config invalidates only affected stages; token/cost/latency/cache metrics are visible and labeled as estimates when necessary. |
 | T38 | Evaluation + all teams | T19,T21,T24,T26,T27,T36,T37 | Build multimodal ingestion/retrieval benchmark and promotion gate using scanned/table-heavy PDFs, PPTX decks, infographics, long videos, paraphrased queries, partial failures, and cross-skill evidence reuse. Compare flat-text baseline with typed evidence. | Release decision records extraction coverage, retrieval recall, evidence faithfulness, tokens, cost, P50/P95 latency, cache hit rate, queue wait, repair rate, and human correction time. |
 
+The post-T38 production and interoperability backlog is maintained in the
+[remaining-work execution plan](sudarshan-2.0-remaining-work-plan.md). It
+continues with T39–T52: shared control-plane leases, durable source/evidence/
+artifact storage, distributed budgets and provider reconciliation, production
+observability and cleanup, frontend execution monitoring, signed sandboxed
+skills, MCP/A2A interoperability, production visual QA, full cross-skill
+execution, real-corpus promotion, and release/rollback sign-off.
+
 ### 26.3 Milestones and stop/go gates
 
 | Gate | Must be true | Do not proceed if |

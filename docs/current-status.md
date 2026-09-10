@@ -137,8 +137,10 @@ profile use the same Sudarshan application boundary.
 
 These are real engineering gaps, not cosmetic follow-ups:
 
-1. Replace process-local SQLite queue, cache, DAG coordination, and progress
-   storage with shared durable services for multi-worker/multi-host deployment.
+1. Complete the post-T38 production backlog in
+   [the remaining-work plan](sudarshan-2.0-remaining-work-plan.md), starting
+   with shared queue/cache/DAG/progress control-plane services for
+   multi-worker/multi-host deployment.
 2. Add kill-9, host-loss, concurrent duplicate-worker, lease-fencing, and
    abandoned-artifact cleanup tests against the production-like control plane.
 3. Add shared object storage, encryption at rest, retention policy, artifact
@@ -159,9 +161,10 @@ These are real engineering gaps, not cosmetic follow-ups:
    indexing, Cognee projection, cache/budget controls, security, and benchmark
    runs on reviewed real or sanitized sources. The local T38 evaluator is
    ready, but it is not a substitute for these runs.
-9. Run T29 matched evaluations across legacy/staged pipelines for quality,
-   groundedness, tokens, cost, latency, cache savings, retries, and human
-   correction time; then complete T30 release/rollback sign-off.
+9. Run T29 matched evaluations and the post-T38 T47 benchmark across legacy/
+   staged pipelines for quality, groundedness, tokens, cost, latency, cache
+   savings, retries, and human correction time; then complete T52
+   release/rollback sign-off.
 
 ## Request and data flow
 
@@ -220,3 +223,4 @@ multi-host behavior.
 - [Operations and deployment guide](operations.md)
 - [Harness integration](../integrations/deepseek_harness/README.md)
 - [Harness UI composition](harness-ui-plugin.md)
+- [Remaining-work execution plan](sudarshan-2.0-remaining-work-plan.md)

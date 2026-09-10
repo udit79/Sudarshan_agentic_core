@@ -38,6 +38,9 @@ document and the assumption ledger in the same change.
    contracts and native media behavior.
 12. Read [Harness UI composition](harness-ui-plugin.md) for the native
    DeepSeek web plugin boundary and white-label replacement path.
+13. Read the [remaining-work execution plan](sudarshan-2.0-remaining-work-plan.md)
+   for the post-T38 production, interoperability, frontend, security, and
+   release backlog.
 
 Research citations are centralized in the [full 2.0 execution plan](sudarshan-2.0-full-execution-plan.md)
 and its [Harness research companion](sudarshan-2.0-harness-research.md). New
@@ -58,6 +61,7 @@ documents should link to those sources instead of copying reference lists.
 | How does Harness connect? | [Harness integration](../integrations/deepseek_harness/README.md) | [Harness UI plugin](harness-ui-plugin.md) |
 | How do I deploy and troubleshoot? | [Operations](operations.md) | [Assumptions](sudarshan-2.0-assumptions.md) |
 | What is actually complete? | [Current status](current-status.md) | [Assumptions](sudarshan-2.0-assumptions.md) |
+| What remains before production? | [Remaining-work plan](sudarshan-2.0-remaining-work-plan.md) | [Current status](current-status.md) |
 
 ## System ownership
 
@@ -120,12 +124,14 @@ documents should link to those sources instead of copying reference lists.
   across backend, agentic, frontend, rendering, and evaluation teams.
 - [Assumption ledger](sudarshan-2.0-assumptions.md) records deployment risks and
   evidence still required.
+- [Remaining-work plan](sudarshan-2.0-remaining-work-plan.md) is the active
+  post-T38 execution backlog and release checklist.
 
 ## Verification baseline
 
 The repository's current local baseline is:
 
-- Python: 178 passed, 1 skipped when run with a workspace-local pytest
+- Python: 212 passed, 1 skipped when run with a workspace-local pytest
   temporary root.
 - Reference frontend: 3 projection/cursor tests passed and JavaScript syntax
   checks passed.
