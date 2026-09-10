@@ -410,7 +410,7 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getAllByRole('treeitem').slice(1)[0]?.textContent).toContain('two')
   })
 
-  it('archives a session from the row menu and hides archived rows in both modes', async () => {
+  it('deletes a chat from the row menu and hides it in both modes', async () => {
     const archiveSession = vi.fn(async () => {})
     const b = mount({
       useSessions: hook(sessionState([summary('kept-s', 2), summary('gone-s', 1)])),
@@ -419,7 +419,7 @@ describe('WorkspaceBrowser', () => {
     })
     fireEvent.click(screen.getByText('alpha'))
     fireEvent.click(screen.getByRole('button', { name: '会话“gone-s”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '归档会话' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除聊天' }))
     expect(archiveSession).toHaveBeenCalledWith(sid('gone-s'))
 
     // The archive-set echo hides the row in grouped and flat modes.
@@ -443,7 +443,7 @@ describe('WorkspaceBrowser', () => {
       })
       fireEvent.click(screen.getByText('alpha'))
       fireEvent.click(screen.getByRole('button', { name: '会话“alpha-s”的操作' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: '归档会话' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: '删除聊天' }))
       await Promise.resolve()
       await Promise.resolve()
       expect(warn).toHaveBeenCalledWith('session archive rejected:', rejection)

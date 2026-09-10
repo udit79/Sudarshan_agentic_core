@@ -212,6 +212,7 @@ body::after {
 #root {
   position: relative;
   z-index: 1;
+  isolation: isolate;
   background: transparent;
 }
 
@@ -246,15 +247,99 @@ body::after {
 [class*='_detailsCol_'] {
   background: rgba(9, 13, 28, 0.68) !important;
   border-color: var(--sudarshan-border-specular) !important;
-  box-shadow: inset 0 0 30px rgba(99, 102, 241, 0.04);
+  box-shadow: inset 0 0 30px rgba(99, 102, 241, 0.06),
+    12px 0 40px rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
 }
 
 [class*='_card_'] {
   border-color: var(--sudarshan-border-glass) !important;
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.04),
+    0 16px 36px rgba(0, 0, 0, 0.24),
+    0 0 28px rgba(99, 102, 241, 0.08);
 }
 
 [class*='_headline_'] {
   text-shadow: 0 0 18px rgba(129, 140, 248, 0.28);
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+/* Premium treatment for the existing chat surfaces. These rules deliberately
+ * avoid dimensions, margins, and positioning so the harness layout remains
+ * unchanged. */
+[data-composer-card] {
+  background:
+    linear-gradient(135deg, rgba(24, 29, 64, 0.92), rgba(10, 14, 32, 0.92)) !important;
+  box-shadow:
+    0 0 0 1px rgba(129, 140, 248, 0.18),
+    0 18px 42px rgba(0, 0, 0, 0.42),
+    0 0 32px rgba(99, 102, 241, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+
+[data-composer-card]::before {
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  content: '';
+  background: linear-gradient(115deg, rgba(165, 180, 252, 0.08), transparent 34%, rgba(56, 189, 248, 0.04));
+}
+
+[data-composer-card] > * {
+  position: relative;
+  z-index: 1;
+}
+
+[data-composer-input] {
+  color: #f8fafc !important;
+  text-shadow: 0 0 12px rgba(165, 180, 252, 0.08);
+}
+
+[data-composer-card] button:not(:disabled) {
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+[data-composer-card] button:not(:disabled):hover {
+  box-shadow: 0 0 18px rgba(99, 102, 241, 0.24);
+  transform: translateY(-1px);
+}
+
+[class*='_sessionRow_'],
+[class*='_projectRow_'] {
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+[class*='_sessionRow_']:hover,
+[class*='_projectRow_']:hover,
+[class*='_sessionRow_'][aria-selected='true'] {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.16), rgba(56, 189, 248, 0.05)) !important;
+  box-shadow: inset 2px 0 0 rgba(129, 140, 248, 0.78),
+    0 0 18px rgba(99, 102, 241, 0.08);
+}
+
+div[class*='_list_'][role='menu'] {
+  border: 1px solid rgba(129, 140, 248, 0.2);
+  background: rgba(11, 15, 34, 0.94);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.48),
+    0 0 26px rgba(99, 102, 241, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+
+[class*='_item_'][role='menuitem']:hover {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.2), rgba(56, 189, 248, 0.08));
+}
+
+[class*='_danger_'][role='menuitem']:hover {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.2), rgba(236, 72, 153, 0.08));
 }
 
 [class*='_brandName_'],

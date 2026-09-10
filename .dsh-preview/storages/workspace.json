@@ -8,7 +8,15 @@
     "workspaceIds": [
       "8b8339be-fc66-4aa3-9df7-35eeedbe50c2"
     ],
-    "archivedSessionIds": []
+    "archivedSessionIds": [
+      "session-ced80fe0-423c-46bf-bf67-a3fef9ec0cd6",
+      "session-61ba2170-3f80-4f6b-a3aa-ca139cf6d542",
+      "session-bfab212c-43f5-444a-9689-e6cca8a14c03",
+      "session-658bcffa-d52f-4547-b56c-b3b18caeb68c",
+      "session-5c370979-6197-450d-aa82-cf849f71d7cf",
+      "session-2e5cd572-dffe-4bfb-85ab-7b943d299e9e",
+      "session-8ca5f380-b9f7-43f3-b89b-92b80b9349a4"
+    ]
   },
   "tables": {
     "workspaces": {
@@ -16,6 +24,9 @@
         "path": "C:\\Users\\Gaurav\\Downloads\\Sudarshan_agentic_core",
         "title": "Sudarshan_agentic_core",
         "sessionIds": [
+          "session-b90cd193-33d0-41f5-ae8e-66b598b5fea4",
+          "session-8ca5f380-b9f7-43f3-b89b-92b80b9349a4",
+          "session-2e5cd572-dffe-4bfb-85ab-7b943d299e9e",
           "session-5c370979-6197-450d-aa82-cf849f71d7cf",
           "session-658bcffa-d52f-4547-b56c-b3b18caeb68c",
           "session-bfab212c-43f5-444a-9689-e6cca8a14c03",
@@ -23,7 +34,7 @@
           "session-ced80fe0-423c-46bf-bf67-a3fef9ec0cd6"
         ],
         "createdAt": "2026-09-10T06:41:12.103Z",
-        "updatedAt": "2026-09-10T07:26:20.330Z"
+        "updatedAt": "2026-09-10T07:44:16.118Z"
       }
     }
   }

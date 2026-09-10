@@ -2,7 +2,7 @@
   "version": 6,
   "record": {
     "identity": {
-      "createdAt": 1789025180307,
+      "createdAt": 1789026256097,
       "cwd": "C:\\Users\\Gaurav\\Downloads\\Sudarshan_agentic_core",
       "isSeeded": false,
       "inheritedEventCount": 0
@@ -10,34 +10,31 @@
     "rows": {
       "title": {
         "ver": 1,
-        "seq": 15,
-        "val": "garuav"
+        "seq": 2,
+        "val": null
       },
       "titleInput": {
         "ver": 3,
-        "seq": 15,
+        "seq": 2,
         "val": {
-          "first": {
-            "seq": 7,
-            "text": "garuav"
-          },
-          "count": 1,
-          "lastSeq": 7
+          "first": null,
+          "count": 0,
+          "lastSeq": null
         }
       },
       "llmRetry": {
         "ver": 1,
-        "seq": 15,
+        "seq": 2,
         "val": {}
       },
       "sandboxMode": {
         "ver": 1,
-        "seq": 15,
+        "seq": 2,
         "val": "workspace-write"
       },
       "goal": {
         "ver": 6,
-        "seq": 15,
+        "seq": 2,
         "val": {
           "current": null,
           "seenGoalIds": [],
@@ -46,7 +43,7 @@
       },
       "tokenUsage": {
         "ver": 2,
-        "seq": 15,
+        "seq": 2,
         "val": {
           "totals": {
             "uncachedInputTokens": 0,
@@ -59,46 +56,45 @@
       },
       "contextPressure": {
         "ver": 4,
-        "seq": 15,
+        "seq": 2,
         "val": {
-          "surfaceTokens": 10,
-          "contextWindow": 1000000
+          "surfaceTokens": 0
         }
       },
       "contextBreakdown": {
         "ver": 2,
-        "seq": 15,
+        "seq": 2,
         "val": {
-          "systemTokens": 16,
-          "toolsTokens": 971,
-          "messageTokens": 10
+          "systemTokens": 0,
+          "toolsTokens": 0,
+          "messageTokens": 0
         }
       },
       "sessionStats": {
         "ver": 1,
-        "seq": 15,
+        "seq": 2,
         "val": {
-          "turns": 1,
-          "steps": 1,
+          "turns": 0,
+          "steps": 0,
           "llmMs": 0,
           "toolMs": 0,
           "ttftMs": 0,
           "ttftSteps": 0,
           "decodeMs": 0,
           "decodeTokens": 0,
-          "lastTurn": 1,
+          "lastTurn": null,
           "openStep": null,
           "pendingCalls": {}
         }
       },
       "agentPreset": {
         "ver": 1,
-        "seq": 15,
+        "seq": 2,
         "val": "minimal"
       },
       "subagentTiming": {
         "ver": 2,
-        "seq": 15,
+        "seq": 2,
         "val": {
           "descriptorSeen": false,
           "settledMs": 0
@@ -106,70 +102,56 @@
       },
       "subagent": {
         "ver": 2,
-        "seq": 15,
+        "seq": 2,
         "val": {}
       },
       "turnBoundary": {
         "ver": 2,
-        "seq": 15,
+        "seq": 2,
         "val": {
           "openTurnStartSeq": null,
-          "lastStepStartSeq": 6,
-          "lastStepBoundary": {
-            "kind": "end",
-            "seq": 13
-          },
-          "lastTurn": 1
+          "lastStepStartSeq": null,
+          "lastStepBoundary": null,
+          "lastTurn": 0
         }
       },
       "turnOutline": {
         "ver": 2,
-        "seq": 15,
+        "seq": 2,
         "val": {
-          "turns": [
-            {
-              "turn": 1,
-              "seq": 4,
-              "prompt": "garuav",
-              "response": ""
-            }
-          ],
+          "turns": [],
           "draft": ""
         }
       },
       "permissions": {
         "ver": 2,
-        "seq": 15,
+        "seq": 2,
         "val": {
           "preset": "workspace-write",
           "sandbox": "workspace-write",
           "approval": "ask",
-          "seeded": true
+          "seeded": false
         }
       },
       "modelSelection": {
         "ver": 2,
-        "seq": 15,
+        "seq": 2,
         "val": {
-          "lastUsed": {
-            "provider": "deepseek-official",
-            "model": "deepseek-v4-flash",
-            "reasoningEffort": "high"
-          },
+          "lastUsed": null,
           "pending": null
         }
       },
       "sessionListMetadata": {
         "ver": 1,
-        "seq": 15,
+        "seq": 2,
         "val": {
-          "blank": false,
-          "lastPromptAt": 1789025188474
+          "blank": true,
+          "lastPromptAt": null
         }
       },
       "imageLimits": {
         "ver": 1,
-        "seq": 15,
+        "seq": 2,
         "val": null
       }
     }

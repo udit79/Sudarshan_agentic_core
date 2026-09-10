@@ -2,7 +2,7 @@
   "version": 6,
   "record": {
     "identity": {
-      "createdAt": 1789025180307,
+      "createdAt": 1789026234456,
       "cwd": "C:\\Users\\Gaurav\\Downloads\\Sudarshan_agentic_core",
       "isSeeded": false,
       "inheritedEventCount": 0
@@ -10,16 +10,16 @@
     "rows": {
       "title": {
         "ver": 1,
-        "seq": 15,
-        "val": "garuav"
+        "seq": 14,
+        "val": "gaurav"
       },
       "titleInput": {
         "ver": 3,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "first": {
             "seq": 7,
-            "text": "garuav"
+            "text": "gaurav"
           },
           "count": 1,
           "lastSeq": 7
@@ -27,17 +27,17 @@
       },
       "llmRetry": {
         "ver": 1,
-        "seq": 15,
+        "seq": 14,
         "val": {}
       },
       "sandboxMode": {
         "ver": 1,
-        "seq": 15,
+        "seq": 14,
         "val": "workspace-write"
       },
       "goal": {
         "ver": 6,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "current": null,
           "seenGoalIds": [],
@@ -46,7 +46,7 @@
       },
       "tokenUsage": {
         "ver": 2,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "totals": {
             "uncachedInputTokens": 0,
@@ -59,7 +59,7 @@
       },
       "contextPressure": {
         "ver": 4,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "surfaceTokens": 10,
           "contextWindow": 1000000
@@ -67,7 +67,7 @@
       },
       "contextBreakdown": {
         "ver": 2,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "systemTokens": 16,
           "toolsTokens": 971,
@@ -76,7 +76,7 @@
       },
       "sessionStats": {
         "ver": 1,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "turns": 1,
           "steps": 1,
@@ -93,12 +93,12 @@
       },
       "agentPreset": {
         "ver": 1,
-        "seq": 15,
+        "seq": 14,
         "val": "minimal"
       },
       "subagentTiming": {
         "ver": 2,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "descriptorSeen": false,
           "settledMs": 0
@@ -106,12 +106,12 @@
       },
       "subagent": {
         "ver": 2,
-        "seq": 15,
+        "seq": 14,
         "val": {}
       },
       "turnBoundary": {
         "ver": 2,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "openTurnStartSeq": null,
           "lastStepStartSeq": 6,
@@ -124,13 +124,13 @@
       },
       "turnOutline": {
         "ver": 2,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "turns": [
             {
               "turn": 1,
               "seq": 4,
-              "prompt": "garuav",
+              "prompt": "gaurav",
               "response": ""
             }
           ],
@@ -139,17 +139,17 @@
       },
       "permissions": {
         "ver": 2,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "preset": "workspace-write",
           "sandbox": "workspace-write",
           "approval": "ask",
-          "seeded": true
+          "seeded": false
         }
       },
       "modelSelection": {
         "ver": 2,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "lastUsed": {
             "provider": "deepseek-official",
@@ -161,15 +161,15 @@
       },
       "sessionListMetadata": {
         "ver": 1,
-        "seq": 15,
+        "seq": 14,
         "val": {
           "blank": false,
-          "lastPromptAt": 1789025188474
+          "lastPromptAt": 1789026242682
         }
       },
       "imageLimits": {
         "ver": 1,
-        "seq": 15,
+        "seq": 14,
         "val": null
       }
     }

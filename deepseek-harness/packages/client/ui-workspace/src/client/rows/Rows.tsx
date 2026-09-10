@@ -8,7 +8,7 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import {
-  HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
+  HoverCard, IconAlarmClockOutline16, IconBranchOutline16,
   IconEditOutline16, IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16,
   IconPlusOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, relativeTime,
   StateDot,
@@ -369,7 +369,7 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
  * @param props.onOpen - open a session by id.
  * @param props.onRename - open the session rename dialog (id + current title).
  * @param props.onFork - fork a session at its last completed turn.
- * @param props.onArchive - archive a session by id.
+ * @param props.onArchive - remove a session from the visible chat list by id.
  * @param props.drag - optional draggable-row wiring.
  * @param props.flat - omit the empty status slot in the hierarchy-free flat list.
  * @param props.t - the browser root's locale seat.
@@ -384,7 +384,7 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
   onRename: (id: SessionNode['id'], currentTitle: string) => void
   /** Fork a session at its last completed turn (row menu action). */
   onFork: (id: SessionNode['id']) => void
-  /** Archive this session (row menu action; commits without a dialog). */
+  /** Delete this chat from the visible session list (archive-backed action). */
   onArchive: (id: SessionNode['id']) => void
   /** Present only on draggable rows (workspace-group sessions outside search). */
   drag?: RowDragProps | undefined
@@ -399,14 +399,13 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
   const primaryStatus = statuses[0]
   const showStatus = primaryStatus.state !== 'done' || row.completed
   const [menuOpen, setMenuOpen] = useState(false)
-  // Archive hides the row through the registry-global archive set and never
-  // touches the session log, so it is not styled as destructive and needs no
-  // confirmation dialog.
+  // The host contract exposes archiveSession as the durable session-list
+  // removal primitive. Present it as Delete chat in Sudarshan while keeping
+  // the existing backend behavior and session logs intact.
   const sessionMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'fork', label: t('menu.fork'), icon: <IconBranchOutline16 /> },
-    // 20-native glyph in the menu's 16px icon slot (Menu.module.css .itemIcon).
-    { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutline20 size={16} /> },
+    { id: 'delete', label: t('menu.deleteChat'), icon: <IconTrashOutline16 />, danger: true },
   ]
   // Figma session cell: pad 8, status slot 16, then a 4px title gap.
   const ownRow = (
@@ -469,7 +468,7 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
               setMenuOpen(false)
               if (id === 'rename') onRename(node.id, row.title)
               if (id === 'fork') onFork(node.id)
-              if (id === 'archive') onArchive(node.id)
+              if (id === 'delete') onArchive(node.id)
             }}
             portal
             closeOnPointerLeave
