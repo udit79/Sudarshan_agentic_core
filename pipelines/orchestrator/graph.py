@@ -8,6 +8,7 @@ existing controlled interfaces.
 from __future__ import annotations
 
 import os
+import inspect
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -159,7 +160,18 @@ def build_default_pipeline_registry(
     """Build adapters without exposing Cognee or CrewAI objects to the router."""
 
     from pipelines.video.pipeline import VideoPipeline
-    from integrations.providers.moneyprinterturbo import MoneyPrinterTurboClient
+    video_backend = os.getenv("SUDARSHAN_VIDEO_BACKEND", "native").strip().lower()
+    legacy_video_client = None
+    if video_backend in {"moneyprinterturbo", "legacy"}:
+        from integrations.providers.moneyprinterturbo import MoneyPrinterTurboClient
+
+        legacy_video_client = MoneyPrinterTurboClient()
+
+    def video_runner(request: AdvisoryRequest, *, cancel_event: Event | None = None) -> Any:
+        return VideoPipeline(
+            memory_manager,
+            client=legacy_video_client,
+        ).run(request, cancel_event=cancel_event)
 
     def progress_callback(request: AdvisoryRequest) -> Callable[[str, str], None] | None:
         if progress_sink is None:
@@ -257,10 +269,7 @@ def build_default_pipeline_registry(
         ),
         "video": PipelineAdapter(
             "video",
-            lambda request: VideoPipeline(
-                memory_manager,
-                client=(MoneyPrinterTurboClient() if os.getenv("MONEYPRINTERTURBO_BASE_URL", "").strip() else None),
-            ).run(request),
+            video_runner,
         ),
     }
 
@@ -498,7 +507,13 @@ class PipelineOrchestrator:
         builder.add_edge("fail", END)
         return builder.compile(checkpointer=self._checkpointer)
 
-    def run(self, request: AdvisoryRequest, *, run_id: str | None = None) -> OrchestrationResult:
+    def run(
+        self,
+        request: AdvisoryRequest,
+        *,
+        run_id: str | None = None,
+        cancellation_event: Event | None = None,
+    ) -> OrchestrationResult:
         resolved_run_id = run_id or f"run-{uuid4()}"
         ProgressReporter(self.progress_sink, run_id=resolved_run_id, task_id=request.task_id).emit(
             stage="queued",
@@ -532,7 +547,7 @@ class PipelineOrchestrator:
             "stage": "queued",
         }
         with self._run_lock:
-            self._cancel_events[resolved_run_id] = Event()
+            self._cancel_events[resolved_run_id] = cancellation_event or Event()
             self._active_runs.add(resolved_run_id)
         try:
             return self._invoke(initial, resolved_run_id, request.task_id)
@@ -1102,7 +1117,25 @@ class PipelineOrchestrator:
             "resolved_memory_records": state.get("memory_records", []),
             "prompt_plan": dict(prompt_plan),
         }
-        response = self.registry[pipeline].run(_request_from_dict(request_data))
+        runner = self.registry[pipeline].run
+        with self._run_lock:
+            cancellation_event = self._cancel_events.get(state["run_id"])
+        supports_event = False
+        try:
+            parameters = inspect.signature(runner).parameters
+            supports_event = "cancel_event" in parameters or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
+        except (TypeError, ValueError):
+            pass
+        if supports_event and cancellation_event is not None:
+            response = runner(
+                _request_from_dict(request_data),
+                cancel_event=cancellation_event,
+            )
+        else:
+            response = runner(_request_from_dict(request_data))
         self._check_cancelled(state["run_id"])
         payload = response_to_dict(response) or {}
         response_metadata = dict(payload.get("metadata") or {})

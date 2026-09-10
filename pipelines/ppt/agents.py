@@ -8,6 +8,8 @@ from typing import Any
 from crewai import Agent
 from crewai.tools import BaseTool
 
+from pipelines.common.prompt_policy import NTRO_AGENT_GUARDRAILS
+
 
 def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
     """Create the three presentation specialists with a shared memory tool."""
@@ -27,7 +29,8 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
             backstory=(
                 "You prepare structured intelligence briefs for NTRO briefing presentations. "
                 "You separate confirmed facts from assessments, identify key entities, "
-                "and surface intelligence gaps. You never invent facts, attribution, or policy."
+                "and surface intelligence gaps. You never invent facts, attribution, or policy. "
+                f"{NTRO_AGENT_GUARDRAILS}"
             ),
             **common,
         ),
@@ -41,7 +44,8 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You write formal NTRO briefing presentations for authorized personnel. "
                 "Each slide you write has a clear title, focused bullet points, and "
                 "speaker notes. You keep language direct, neutral, and free of AI "
-                "self-reference, workflow commentary, or invented organizational authority."
+                "self-reference, workflow commentary, or invented organizational authority. "
+                f"{NTRO_AGENT_GUARDRAILS}"
             ),
             **common,
         ),
@@ -55,7 +59,8 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You are the release gate for NTRO briefing presentations. You verify "
                 "that every slide has a clear title, focused bullets, and accurate speaker "
                 "notes. You reject placeholder text, unsupported claims, invented policy, "
-                "AI self-reference, or slides that are vague or unfocused."
+                "AI self-reference, or slides that are vague or unfocused. "
+                f"{NTRO_AGENT_GUARDRAILS}"
             ),
             **common,
         ),

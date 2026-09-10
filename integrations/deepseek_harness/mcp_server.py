@@ -20,6 +20,11 @@ mcp = FastMCP(
     instructions=(
         "Use run_sudarshan for NTRO case operations. Use "
         "get_sudarshan_status for frontend-safe progress, "
+        "get_sudarshan_artifact for verified artifact manifests, "
+        "list_sudarshan_skills/get_sudarshan_skill for canonical skill discovery, "
+        "invoke_sudarshan_skill for bounded local child skills, and "
+        "start_sudarshan_skill for durable background skill jobs. "
+        "wait_sudarshan for bounded waiting on completion or user action, "
         "resume_sudarshan for clarification or approval decisions, and "
         "cancel_sudarshan for cooperative cancellation. The tools route "
         "through the application orchestrator and return validated output "
@@ -112,12 +117,180 @@ def get_sudarshan_status(run_id: str) -> dict[str, Any]:
 
 
 @mcp.tool(
+    name="get_sudarshan_artifact",
+    description=(
+        "Return a verified, frontend-safe manifest and stable download URI for "
+        "a generated artifact. Filesystem paths and raw artifact bytes are not returned."
+    ),
+)
+def get_sudarshan_artifact(
+    artifact_id: str,
+    classification_level: str = "RESTRICTED",
+) -> dict[str, Any]:
+    """Read one integrity-checked artifact manifest through the application boundary."""
+
+    return get_application().get_artifact(
+        artifact_id,
+        classification_level=classification_level,
+    )
+
+
+@mcp.tool(
+    name="start_sudarshan_run",
+    description=(
+        "Start an asynchronous Sudarshan operation and return its run handle. "
+        "Use wait_sudarshan or get_sudarshan_status for progress."
+    ),
+)
+def start_sudarshan_run(
+    query: str,
+    user_id: str,
+    case_id: str,
+    task_id: str,
+    classification_level: str = "RESTRICTED",
+    distribution: str = "Authorized NTRO personnel",
+    requested_pipelines: list[str] | None = None,
+    operation: str = "create",
+    parent_run_id: str | None = None,
+    parent_artifact_id: str | None = None,
+    revision_instruction: str | None = None,
+    revision_scope: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate and enqueue an operation without blocking the Harness call."""
+
+    return get_application().submit(
+        {
+            "query": query,
+            "user_id": user_id,
+            "case_id": case_id,
+            "task_id": task_id,
+            "classification_level": classification_level,
+            "distribution": distribution,
+            "requested_pipelines": requested_pipelines or [],
+            "operation": operation,
+            "parent_run_id": parent_run_id,
+            "parent_artifact_id": parent_artifact_id,
+            "revision_instruction": revision_instruction,
+            "revision_scope": revision_scope or [],
+            "metadata": metadata or {},
+        },
+        operator_id=user_id,
+    )
+
+
+@mcp.tool(
+    name="wait_sudarshan",
+    description="Wait for a bounded period for completion or required user action.",
+)
+def wait_sudarshan(
+    run_id: str,
+    timeout_ms: int = 30_000,
+    after_sequence: int = 0,
+) -> dict[str, Any]:
+    """Return a safe status projection and only events after the cursor."""
+
+    return get_application().wait(
+        run_id,
+        timeout_ms=timeout_ms,
+        after_sequence=after_sequence,
+    )
+
+
+@mcp.tool(
     name="get_sudarshan_health",
     description="Get system operational status, memory connection, and registered pipelines."
 )
 def get_sudarshan_health() -> dict[str, Any]:
     """Operational health check."""
     return get_application().health()
+
+
+@mcp.tool(
+    name="list_sudarshan_skills",
+    description=(
+        "List canonical Sudarshan skills and their safe capabilities. Use this "
+        "before selecting a specialist; unavailable skills are discovery-only."
+    ),
+)
+def list_sudarshan_skills() -> list[dict[str, Any]]:
+    return get_application().list_skills()
+
+
+@mcp.tool(
+    name="get_sudarshan_skill",
+    description="Get the versioned manifest and output contract for one Sudarshan skill.",
+)
+def get_sudarshan_skill(skill_id: str) -> dict[str, Any]:
+    return get_application().get_skill(skill_id)
+
+
+@mcp.tool(
+    name="invoke_sudarshan_skill",
+    description=(
+        "Invoke one available specialist locally through the typed SkillRuntime. "
+        "Use this for a bounded child skill; do not recursively call run_sudarshan."
+    ),
+)
+def invoke_sudarshan_skill(
+    skill_id: str,
+    parent_run_id: str,
+    parent_node_id: str,
+    user_id: str,
+    case_id: str,
+    task_id: str,
+    query: str,
+    classification_level: str = "RESTRICTED",
+    distribution: str = "Authorized NTRO personnel",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return get_application().invoke_skill(
+        {
+            "skill_id": skill_id,
+            "parent_run_id": parent_run_id,
+            "parent_node_id": parent_node_id,
+            "user_id": user_id,
+            "case_id": case_id,
+            "task_id": task_id,
+            "query": query,
+            "classification_level": classification_level,
+            "distribution": distribution,
+            "metadata": metadata or {},
+        },
+        operator_id=user_id,
+    )
+
+
+@mcp.tool(
+    name="start_sudarshan_skill",
+    description=(
+        "Start one available canonical skill as a durable background job. "
+        "Use wait_sudarshan or get_sudarshan_status with the returned run handle."
+    ),
+)
+def start_sudarshan_skill(
+    skill_id: str,
+    query: str,
+    user_id: str,
+    case_id: str,
+    task_id: str,
+    classification_level: str = "RESTRICTED",
+    distribution: str = "Authorized NTRO personnel",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return get_application().submit_skill(
+        {
+            "skill_id": skill_id,
+            "query": query,
+            "user_id": user_id,
+            "case_id": case_id,
+            "task_id": task_id,
+            "classification_level": classification_level,
+            "distribution": distribution,
+            "metadata": metadata or {},
+        },
+        operator_id=user_id,
+    )
 
 
 @mcp.tool(

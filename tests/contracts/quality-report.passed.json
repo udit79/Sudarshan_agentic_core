@@ -1,0 +1,13 @@
+{
+  "quality_report_id": "quality_fixture_passed",
+  "run_id": "run_fixture_completed",
+  "artifact_id": "artifact_fixture_pptx",
+  "status": "passed",
+  "score": 0.92,
+  "issues": [],
+  "required_revisions": [],
+  "validator_ids": ["schema.v1", "ppt.overflow.v1", "evidence.coverage.v1"],
+  "evidence_checks": {"coverage": 1.0},
+  "visual_checks": {"overflow": false, "min_font_size_pt": 18},
+  "created_at": "2026-01-01T00:02:00+00:00"
+}

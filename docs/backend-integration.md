@@ -363,7 +363,10 @@ calls the provider through a small adapter and returns an explicit `pending`
 state when the provider is asynchronous. Provider credentials belong in the
 service environment, never in request metadata, Harness prompts, browser code,
 or artifacts. The MoneyPrinterTurbo integration at
-`integrations/providers/moneyprinterturbo/` is the reference implementation.
+`pipelines/video/skills.py` is the native skill reference. The
+`integrations/providers/moneyprinterturbo/` adapter is an optional legacy
+compatibility boundary and is selected only with
+`SUDARSHAN_VIDEO_BACKEND=moneyprinterturbo`.
 
 ## NTRO deployment checklist
 

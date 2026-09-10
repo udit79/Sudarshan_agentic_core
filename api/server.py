@@ -1,6 +1,8 @@
 """FastAPI production server for the Sudarshan Agentic Core."""
 
 import asyncio
+import json
+import mimetypes
 import os
 import tempfile
 from contextlib import asynccontextmanager
@@ -8,19 +10,22 @@ from uuid import uuid4
 from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, File, Form, HTTPException, FastAPI, Request, UploadFile
+from fastapi import File, Form, HTTPException, FastAPI, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 
 from api.middleware import NTROSecurityMiddleware, AuditMiddleware
+from api.artifacts import ArtifactNotFound, ArtifactPreviewUnavailable, ArtifactStore
+from api.scheduler import SchedulerConflictError
 from integrations.deepseek_harness.application import get_application
 from api.sse import event_generator
 from ingestion_pipelines.extract import SUPPORTED_EXTENSIONS
-from pipelines.common.ntro_policy import require_classification
+from pipelines.common.ntro_policy import require_classification, require_classification_access
 from pipelines.common.contracts import AdvisoryRequest
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 ARTIFACT_ROOT = (Path(__file__).resolve().parents[1] / "artifacts").resolve()
+ARTIFACT_STORE = ArtifactStore(ARTIFACT_ROOT)
 
 
 @asynccontextmanager
@@ -141,14 +146,87 @@ def _artifact_path_from_status(status: dict, artifact_key: str) -> Path | None:
     return None
 
 
-@app.get("/artifacts/{run_id}/{artifact_key}")
-async def serve_artifact(run_id: str, artifact_key: str):
+def _manifest_for_run_artifact(run_id: str, artifact_key: str):
     status = get_application().status(run_id)
     if status.get("status") == "not_found":
         raise HTTPException(status_code=404, detail="Run not found")
     artifact_path = _artifact_path_from_status(status, artifact_key.strip().lower())
     if artifact_path is None:
         raise HTTPException(status_code=404, detail="Artifact is not available for this run")
+    try:
+        return ARTIFACT_STORE.register(
+            artifact_path,
+            run_id=run_id,
+            kind=artifact_key.strip().lower(),
+            classification_level=str(status.get("classification_level", "RESTRICTED")),
+        )
+    except (ArtifactNotFound, PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _check_artifact_access(request: Request, classification_level: str) -> None:
+    """Apply the request clearance check before returning an artifact."""
+
+    try:
+        require_classification_access(
+            request.headers.get("x-classification-level", "RESTRICTED"),
+            classification_level,
+        )
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail="Artifact classification is not accessible") from exc
+
+
+@app.get("/artifacts/{run_id}/{artifact_key}/manifest")
+async def get_run_artifact_manifest(request: Request, run_id: str, artifact_key: str):
+    """Register or return the immutable manifest for a run artifact."""
+
+    manifest = _manifest_for_run_artifact(run_id, artifact_key)
+    _check_artifact_access(request, manifest.classification_level)
+    return manifest.model_dump(mode="json")
+
+
+@app.get("/artifacts/{artifact_id}/manifest")
+async def get_artifact_manifest(request: Request, artifact_id: str):
+    try:
+        manifest, _ = ARTIFACT_STORE.get(artifact_id)
+    except (ArtifactNotFound, PermissionError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=404, detail="Artifact manifest is not available") from exc
+    _check_artifact_access(request, manifest.classification_level)
+    return manifest.model_dump(mode="json")
+
+
+@app.get("/artifacts/{artifact_id}/download")
+async def download_artifact(request: Request, artifact_id: str):
+    try:
+        manifest, source = ARTIFACT_STORE.get(artifact_id)
+    except (ArtifactNotFound, PermissionError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=404, detail="Artifact is not available") from exc
+    _check_artifact_access(request, manifest.classification_level)
+    return FileResponse(source, filename=manifest.name)
+
+
+@app.get("/artifacts/{artifact_id}/preview")
+async def preview_artifact(request: Request, artifact_id: str):
+    """Return a safe image/media/text preview when one is available."""
+
+    try:
+        manifest, preview = ARTIFACT_STORE.preview(artifact_id)
+    except (ArtifactNotFound, ArtifactPreviewUnavailable, PermissionError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=404, detail="Artifact preview is not available") from exc
+    _check_artifact_access(request, manifest.classification_level)
+    media_type = mimetypes.guess_type(preview.name)[0] or "application/octet-stream"
+    return FileResponse(preview, media_type=media_type, filename=preview.name)
+
+
+@app.get("/artifacts/{run_id}/{artifact_key}")
+async def serve_artifact(request: Request, run_id: str, artifact_key: str):
+    status = get_application().status(run_id)
+    if status.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="Run not found")
+    artifact_path = _artifact_path_from_status(status, artifact_key.strip().lower())
+    if artifact_path is None:
+        raise HTTPException(status_code=404, detail="Artifact is not available for this run")
+    _check_artifact_access(request, str(status.get("classification_level", "RESTRICTED")))
     return FileResponse(artifact_path)
 
 
@@ -253,17 +331,13 @@ async def create_run(request: Request):
     if unknown:
         raise HTTPException(status_code=422, detail=f"Unknown pipeline(s): {', '.join(unknown)}")
 
-    background_tasks = BackgroundTasks()
-    background_tasks.add_task(asyncio.to_thread, app_instance.run, payload, operator_id=operator_id)
-    response = JSONResponse(content={
-        "status": "queued",
-        "run_id": run_id,
-        "task_id": payload["task_id"],
-        "pipeline": None,
-        "pipelines": payload.get("requested_pipelines", []),
-    }, status_code=202)
-    response.background = background_tasks
-    return response
+    try:
+        queued = await asyncio.to_thread(app_instance.submit, payload, operator_id=operator_id)
+    except SchedulerConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return JSONResponse(content=queued, status_code=202)
 
 
 @app.get("/runs/{run_id}")
@@ -272,11 +346,30 @@ async def get_run(run_id: str):
     return get_application().status(run_id)
 
 
+@app.get("/runs/{run_id}/wait")
+async def wait_run(
+    run_id: str,
+    timeout_ms: int = Query(default=30_000, ge=0, le=60_000),
+    after_sequence: int = Query(default=0, ge=0),
+):
+    """Bounded wait for completion, user action, or the timeout."""
+
+    try:
+        return await asyncio.to_thread(
+            get_application().wait,
+            run_id,
+            timeout_ms=timeout_ms,
+            after_sequence=after_sequence,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/runs/{run_id}/events")
-async def stream_run_events(run_id: str):
+async def stream_run_events(run_id: str, after_sequence: int = Query(default=0, ge=0)):
     """SSE stream of ProgressEvent values."""
     return StreamingResponse(
-        event_generator(run_id), 
+        event_generator(run_id, after_sequence=after_sequence),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

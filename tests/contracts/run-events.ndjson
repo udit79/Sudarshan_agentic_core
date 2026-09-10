@@ -1,0 +1,2 @@
+{"event_id":"evt_fixture_1","run_id":"run_fixture_running","task_id":"task_fixture_running","sequence":1,"stage":"planning","status":"planning","progress":20,"message":"Deck plan created","requires_action":false,"timestamp":"2026-01-01T00:00:01+00:00"}
+{"event_id":"evt_fixture_2","run_id":"run_fixture_running","task_id":"task_fixture_running","sequence":2,"stage":"slide.1","status":"running","progress":35,"message":"Slide worker admitted","child_id":"slide-1","requires_action":false,"timestamp":"2026-01-01T00:00:02+00:00"}

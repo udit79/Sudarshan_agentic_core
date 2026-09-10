@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any, Mapping
 
 import pytest
@@ -89,6 +90,31 @@ def test_moneyprinter_client_requires_explicit_worker_configuration() -> None:
 
     with pytest.raises(MoneyPrinterTurboError, match="BASE_URL is not configured"):
         client.generate(subject="Synthetic briefing")
+
+
+def test_moneyprinter_polling_stops_when_cancelled() -> None:
+    cancel_event = threading.Event()
+    calls: list[str] = []
+
+    def transport(method: str, url: str, payload: Mapping[str, Any] | None, timeout: float) -> Mapping[str, Any]:
+        del url, payload, timeout
+        calls.append(method)
+        if method == "POST":
+            cancel_event.set()
+            return {"data": {"task_id": "mpt-task-cancelled"}}
+        raise AssertionError("cancelled polling must not issue a status request")
+
+    client = MoneyPrinterTurboClient(
+        "http://moneyprinter.test",
+        transport=transport,
+        wait_for_completion=True,
+        poll_interval_seconds=10,
+        max_wait_seconds=30,
+    )
+    result = client.generate(subject="Synthetic briefing", cancel_event=cancel_event)
+
+    assert result.status == "cancelled"
+    assert calls == ["POST"]
 
 
 def test_video_pipeline_writes_task_and_case_memory_for_real_provider_result() -> None:

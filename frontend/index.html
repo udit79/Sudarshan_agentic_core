@@ -234,6 +234,17 @@
 
           <p class="result-message" id="resultMessage"></p>
 
+          <div class="run-observability" id="runObservability" hidden aria-live="polite">
+            <span class="run-observability-item"><strong>Stage</strong><span id="runStageValue">—</span></span>
+            <span class="run-observability-item"><strong>Children</strong><span id="runChildrenValue">0</span></span>
+            <span class="run-observability-item"><strong>Quality</strong><span id="runQualityValue">pending</span></span>
+            <span class="run-observability-item"><strong>Cursor</strong><span id="runCursorValue">0</span></span>
+          </div>
+          <div class="run-waiting-notice" id="runWaitingNotice" hidden role="status">
+            <strong>Run is waiting</strong>
+            <span id="runWaitingReason">The agent is waiting for the next permitted action.</span>
+          </div>
+
           <div class="task-progress" id="taskProgress" hidden>
             <div class="task-progress-header">
               <span id="taskProgressLabel">Agent progress</span>

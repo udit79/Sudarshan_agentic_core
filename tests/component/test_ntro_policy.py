@@ -2,6 +2,7 @@ import pytest
 from pipelines.common.ntro_policy import (
     validate_classification,
     require_classification,
+    require_classification_access,
     validate_distribution,
     sanitize_text,
     sanitize_output,
@@ -24,6 +25,12 @@ def test_require_classification_rejects_misclassified_requests():
     assert require_classification("secret") == "SECRET"
     with pytest.raises(ValueError, match="classification_level"):
         require_classification("public")
+
+
+def test_classification_access_requires_equal_or_higher_clearance():
+    assert require_classification_access("SECRET", "RESTRICTED") == ("SECRET", "RESTRICTED")
+    with pytest.raises(PermissionError, match="cannot access"):
+        require_classification_access("RESTRICTED", "SECRET")
 
 
 def test_validate_distribution():

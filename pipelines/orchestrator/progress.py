@@ -35,6 +35,7 @@ class ProgressEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: f"evt-{uuid4()}")
     run_id: str = Field(min_length=1)
     task_id: str = Field(min_length=1)
+    sequence: int | None = Field(default=None, ge=1)
     pipeline: str | None = None
     stage: str = Field(min_length=1)
     status: ProgressStatus
@@ -52,6 +53,9 @@ class ProgressSink(Protocol):
     def publish(self, event: ProgressEvent) -> None:
         ...
 
+    def events(self, run_id: str, *, after_sequence: int = 0) -> tuple[ProgressEvent, ...]:
+        ...
+
 
 class InMemoryProgressSink:
     """Thread-safe sink for tests and a single-process development server."""
@@ -62,11 +66,16 @@ class InMemoryProgressSink:
 
     def publish(self, event: ProgressEvent) -> None:
         with self._lock:
-            self._events[event.run_id].append(event)
+            sequence = len(self._events[event.run_id]) + 1
+            self._events[event.run_id].append(event.model_copy(update={"sequence": sequence}))
 
-    def events(self, run_id: str) -> tuple[ProgressEvent, ...]:
+    def events(self, run_id: str, *, after_sequence: int = 0) -> tuple[ProgressEvent, ...]:
         with self._lock:
-            return tuple(self._events.get(run_id, ()))
+            return tuple(
+                event
+                for event in self._events.get(run_id, ())
+                if (event.sequence or 0) > after_sequence
+            )
 
     def clear(self, run_id: str) -> None:
         with self._lock:
@@ -101,16 +110,22 @@ class SQLiteProgressSink:
     def publish(self, event: ProgressEvent) -> None:
         payload = json.dumps(event.model_dump(mode="json"), ensure_ascii=False)
         with self._lock, self._connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 "INSERT INTO progress_events(run_id, event_json) VALUES (?, ?)",
                 (event.run_id, payload),
             )
+            sequence = int(cursor.lastrowid)
+            persisted = event.model_copy(update={"sequence": sequence})
+            conn.execute(
+                "UPDATE progress_events SET event_json = ? WHERE sequence = ?",
+                (json.dumps(persisted.model_dump(mode="json"), ensure_ascii=False), sequence),
+            )
 
-    def events(self, run_id: str) -> tuple[ProgressEvent, ...]:
+    def events(self, run_id: str, *, after_sequence: int = 0) -> tuple[ProgressEvent, ...]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
-                "SELECT event_json FROM progress_events WHERE run_id = ? ORDER BY sequence",
-                (run_id,),
+                "SELECT event_json FROM progress_events WHERE run_id = ? AND sequence > ? ORDER BY sequence",
+                (run_id, after_sequence),
             ).fetchall()
         return tuple(ProgressEvent.model_validate(json.loads(row[0])) for row in rows)
 

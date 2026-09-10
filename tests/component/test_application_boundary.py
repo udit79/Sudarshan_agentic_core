@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pipelines.video.contracts import VideoPackage
+from pipelines import InMemoryProgressSink, ProgressEvent
+from integrations.deepseek_harness.application import SudarshanApplication
 
 
 def test_harness_exposes_lifecycle_tools() -> None:
@@ -11,10 +13,51 @@ def test_harness_exposes_lifecycle_tools() -> None:
 
     assert {
         "run_sudarshan",
+        "start_sudarshan_run",
+        "list_sudarshan_skills",
+        "get_sudarshan_skill",
+        "invoke_sudarshan_skill",
+        "start_sudarshan_skill",
+        "wait_sudarshan",
         "resume_sudarshan",
         "cancel_sudarshan",
         "get_sudarshan_status",
+        "get_sudarshan_artifact",
     } <= names
+
+
+def test_harness_tool_schemas_are_external_client_compatible() -> None:
+    from integrations.deepseek_harness.mcp_server import mcp
+
+    tools = {tool.name: tool for tool in mcp._tool_manager.list_tools()}
+
+    run_parameters = tools["start_sudarshan_run"].parameters
+    assert set(run_parameters["required"]) == {"query", "user_id", "case_id", "task_id"}
+    assert run_parameters["properties"]["classification_level"]["default"] == "RESTRICTED"
+    assert run_parameters["properties"]["distribution"]["default"] == "Authorized NTRO personnel"
+
+    wait_parameters = tools["wait_sudarshan"].parameters["properties"]
+    assert wait_parameters["timeout_ms"]["default"] == 30_000
+    assert wait_parameters["after_sequence"]["default"] == 0
+
+    artifact_parameters = tools["get_sudarshan_artifact"].parameters
+    assert artifact_parameters["required"] == ["artifact_id"]
+    assert artifact_parameters["properties"]["classification_level"]["default"] == "RESTRICTED"
+
+    skill_parameters = tools["invoke_sudarshan_skill"].parameters
+    assert {
+        "skill_id",
+        "parent_run_id",
+        "parent_node_id",
+        "user_id",
+        "case_id",
+        "task_id",
+        "query",
+    } <= set(skill_parameters["required"])
+    start_skill_parameters = tools["start_sudarshan_skill"].parameters
+    assert set(start_skill_parameters["required"]) == {
+        "skill_id", "query", "user_id", "case_id", "task_id"
+    }
 
 
 def test_video_package_compiles_storyboard_into_provider_options() -> None:
@@ -53,3 +96,45 @@ def test_video_package_falls_back_to_transcript_without_storyboard() -> None:
     package = VideoPackage(subject="Case briefing", transcript="Full source transcript")
 
     assert package.provider_payload()["video_script"] == "Full source transcript"
+
+
+def test_application_projects_typed_events_and_run_summary() -> None:
+    application = object.__new__(SudarshanApplication)
+    application.progress_sink = InMemoryProgressSink()
+    application._run_contexts = {}
+    application.progress_sink.publish(
+        ProgressEvent(
+            run_id="run-summary",
+            task_id="task-summary",
+            stage="planning",
+            status="running",
+            progress=20,
+            message="Planning started",
+        )
+    )
+
+    events = application.events("run-summary")
+    summary = application._run_summary(
+        {
+            "run_id": "run-summary",
+            "task_id": "task-summary",
+            "case_id": "case-summary",
+            "pipeline": "presentation",
+            "requested_pipelines": ["presentation"],
+            "status": "running",
+            "stage": "planning",
+            "request": {
+                "case_id": "case-summary",
+                "task_id": "task-summary",
+                "metadata": {"skill_version": "2.0.0"},
+            },
+            "responses": {},
+        },
+        events,
+    )
+
+    assert events[0]["sequence"] == 1
+    assert events[0]["status"] == "running"
+    assert summary.skill_id == "presentation.case-brief"
+    assert summary.skill_version == "2.0.0"
+    assert summary.progress == 20

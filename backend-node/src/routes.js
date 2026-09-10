@@ -207,6 +207,45 @@ router.get("/tasks/:taskId/artifacts/:artifactKey", async (req, res, next) => {
   }
 });
 
+router.get("/tasks/:taskId/artifacts/:artifactKey/manifest", async (req, res, next) => {
+  try {
+    const task = await getTaskForUser(req.auth.sub, req.params.taskId);
+    const key = String(req.params.artifactKey || "").trim().toLowerCase();
+    const manifestKey = key === "ppt" ? "presentation" : key;
+    const manifest = (task.artifactManifests || []).find(
+      (item) => String(item?.kind || "").toLowerCase() === manifestKey,
+    );
+    if (!manifest) return res.status(404).json({ error: "Artifact manifest is not available for this task" });
+    return res.json({
+      ...manifest,
+      gateway_download_uri: `/api/v1/tasks/${encodeURIComponent(task.taskId)}/artifacts/${encodeURIComponent(key)}`,
+      gateway_preview_uri: manifest.preview_uri && /\.(png|jpe?g|gif|webp|svg|mp4|webm|txt|md|json)$/i.test(String(manifest.name || ""))
+        ? `/api/v1/tasks/${encodeURIComponent(task.taskId)}/artifacts/${encodeURIComponent(key)}/preview`
+        : null,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get("/tasks/:taskId/artifacts/:artifactKey/preview", async (req, res, next) => {
+  try {
+    const task = await getTaskForUser(req.auth.sub, req.params.taskId);
+    const key = String(req.params.artifactKey || "").trim().toLowerCase();
+    const manifest = (task.artifactManifests || []).find(
+      (item) => String(item?.kind || "").toLowerCase() === (key === "ppt" ? "presentation" : key),
+    );
+    if (!manifest?.preview_uri) return res.status(404).json({ error: "Artifact preview is not available" });
+    const candidate = artifactCandidates(task, key === "ppt" ? "presentation" : key)
+      .map(resolveArtifactPath)
+      .find((filePath) => filePath && fs.existsSync(filePath));
+    if (!candidate) return res.status(404).json({ error: "Artifact preview is not available" });
+    return res.sendFile(candidate);
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.post("/cases", async (req, res, next) => {
   try {
     const body = parse(caseSchema, req.body);
@@ -312,7 +351,14 @@ router.get("/tasks/:taskId/events", async (req, res, next) => {
   try {
     const task = await getTaskForUser(req.auth.sub, req.params.taskId);
     if (!task.runId) return res.status(409).json({ error: "Task has not been accepted by the Python API yet" });
-    await streamRunEvents(task.runId, res);
+    const rawCursor = Number(req.query.after_sequence ?? req.query.afterSequence ?? 0);
+    if (!Number.isSafeInteger(rawCursor) || rawCursor < 0) {
+      return res.status(422).json({ error: "after_sequence must be a non-negative integer" });
+    }
+    await streamRunEvents(task.runId, res, {
+      afterSequence: rawCursor,
+      classificationLevel: task.classificationLevel || "RESTRICTED",
+    });
   } catch (error) {
     if (!res.headersSent) next(error);
   }

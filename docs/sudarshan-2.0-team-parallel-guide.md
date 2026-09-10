@@ -90,27 +90,49 @@ Events must not contain credentials, raw private memory, unrestricted prompts, h
 }
 ```
 
+### PPT planning and intermediate artifacts
+
+The Harness central agent owns the deck-level plan. Workers own bounded slide tasks. No worker writes the final PPTX directly.
+
+```text
+DeckPlan → SlideTask[] → SlideContentIR[] → VisualTask[] → VisualIR[]
+         → DeckAssembler → PPTX/SVG → QualityReport → RepairPatch?
+```
+
+Minimum contracts for the first vertical slice:
+
+- `DeckPlan`: audience, objective, slide specs, evidence IDs, visual intent, dependencies, theme, budget, and quality policy.
+- `SlideTask`: slide ID, narrative role, compact context pack, evidence references, token/deadline reservation, and parent run ID.
+- `SlideContentIR`: title, claims, notes, layout intent, citations, confidence, and unresolved questions.
+- `VisualTask` and `VisualIR`: semantic visual type, graph/chart/infographic data, renderer target, source hash, and citations.
+- `RepairPatch`: slide ID, diagnostics, bounded edits, and claim IDs that must remain unchanged.
+
+The deck plan should include a visual hint for each slide, then a post-content visual router may upgrade or correct that hint. This keeps slide workers parallel while still allowing the system to discover that a slide needs a diagram or infographic.
+
 ### Shared API/MCP projection
 
 ```text
 POST /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/events?after={sequence}
+GET  /runs/{run_id}/wait?timeout_ms={n}&after_sequence={sequence}
 POST /runs/{run_id}/resume
 POST /runs/{run_id}/cancel
+GET  /artifacts/{run_id}/{artifact_key}/manifest
 GET  /artifacts/{artifact_id}/manifest
-GET  /artifacts/{artifact_id}/preview
+GET  /artifacts/{artifact_id}/download
 ```
 
-MCP tools map to the same operations: `start_sudarshan_run`, `get_sudarshan_status`, `wait_sudarshan`, `resume_sudarshan`, `cancel_sudarshan`, and `get_sudarshan_artifact`.
+The current compatibility tool is `run_sudarshan`. The target asynchronous MCP surface is `start_sudarshan_run`, `get_sudarshan_status`, `wait_sudarshan`, `resume_sudarshan`, `cancel_sudarshan`, and `get_sudarshan_artifact`. Add the target names without removing `run_sudarshan` until external Harness compatibility tests pass.
 
 ## 4. Backend guide
 
 ### Work packages
 
 - **Run coordinator:** submit asynchronously, persist before execution, assign IDs, validate skill/policy/budget, compile a typed DAG, return immediately.
+- **PPT DAG compiler:** compile `DeckPlan` into slide tasks; run independent slides concurrently, serialize declared dependencies, and enforce slide/visual concurrency groups.
 - **Event store:** append monotonic events, build a current run projection, support replay with `after_sequence`, redact before persistence.
-- **Scheduler:** begin with an in-process queue, then add leases, heartbeats, timeouts, retry classes, idempotency, and concurrency groups.
+- **Scheduler:** the local slice now persists admission, idempotency, queued/retrying cancellation, worker leases, heartbeat renewal, stale-lease recovery, retry classes, backoff, dead-letter state, optional execution deadlines, callback cancellation signals, and health counts; provider adapters must honor those signals and use bounded network/process operations. Next add crash injection and a distributed broker/lease store when deployment topology requires it.
 - **Artifact service:** store binaries outside the event table, create immutable manifests/checksums/previews, enforce classification on download.
 - **MCP/API adapter:** keep synchronous compatibility, add async run tools, return structured data/resources, test stdio and Streamable HTTP.
 - **Memory gateway:** keep `MemoryManager` as the only Cognee gateway; add scopes, provenance, freshness, confidence, retrieval traces, and reviewed writes.
@@ -125,9 +147,11 @@ MCP tools map to the same operations: `start_sudarshan_run`, `get_sudarshan_stat
 6. A running run reaches a safe cancelled state.
 7. Only retryable errors retry.
 8. Failed children block dependent nodes.
-9. Artifact access checks authorization and classification.
-10. Credentials never appear in events or artifacts.
-11. Waiting runs resume with structured input.
+9. A healthy long-running worker renews its lease; an expired worker lease is reclaimed after restart.
+10. Artifact access checks authorization and classification.
+11. Credentials never appear in events or artifacts.
+12. Waiting runs resume with structured input.
+13. A cancellation request reaches a compatible worker/provider, and media subprocesses terminate on cancellation or timeout.
 
 ### Backend boundaries
 
@@ -148,6 +172,7 @@ Pipeline code returns typed domain results; it does not format frontend response
 ### Work packages
 
 - **Submission:** show selected skill/version and required inputs; generate an idempotency key; move to a run card immediately after acceptance.
+- **PPT monitor:** show deck-plan progress, slide lanes, child visual skills, dependency waits, render/QA/repair stages, and the final artifact lineage.
 - **Run card:** show skill, status, stage, progress, elapsed time, quality state, artifacts, and required action; support cancel, resume, approve, retry, and open artifact.
 - **Execution Monitor:** build active list, run detail, timeline, parent/child tree, parallel lanes, artifact panel, evidence/quality panel, and audit actions.
 - **Event stream:** connect with `run_id`, retain the last sequence, reconnect with `after_sequence`, merge idempotently, and fall back to bounded polling.
@@ -173,10 +198,15 @@ The UI must render from `RunSummary`, `RunEvent`, `ArtifactManifest`, and `Quali
 ### Agentic/skills team
 
 - Define `presentation.case-brief` and `visual.flowchart` manifests.
-- Define `PresentationSpec` and `FlowchartSpec` schemas.
+- Define `DeckPlan`, `SlideTask`, `SlideContentIR`, `VisualTask`, `VisualIR`, `RepairPatch`, `PresentationSpec`, and `FlowchartSpec` schemas.
 - Compile a typed DAG with evidence, rendering, and QA nodes.
 - Keep skill bodies compact and tools allow-listed.
 - Add planner, validator, token, and repair fixtures.
+- Implement the first hierarchical PPT flow: one deck planner, bounded slide workers, visual routing, and selective final review. Keep the current sequential flow behind a feature flag.
+- Extract the current video pipeline into `video.brief`, `video.script`, `video.storyboard`, `video.assets`, `video.timeline`, and `video.qa` stages.
+- Define `EvidenceLedger`, `ContextPack`, `VideoTimelineIR`, `InfographicIR`, and `DiagramIR` before adding more agents.
+- Ensure the central agent passes compact stage artifacts, not full transcripts, to scene workers; give every worker a budget, deadline, cache key, and parent run ID.
+- Implement diagram/mind-map grammar selection and graph validation; renderer-specific source such as AntV or Mermaid must be compiled from the typed IR.
 
 ### Rendering team
 
@@ -184,6 +214,9 @@ The UI must render from `RunSummary`, `RunEvent`, `ArtifactManifest`, and `Quali
 - Render the same geometry to SVG and editable PPTX shapes/connectors.
 - Add snapshots for process, decision, architecture, timeline, and swimlane diagrams.
 - Add overflow, edge-crossing, contrast, and font-size validators.
+- Add deterministic FFmpeg/ffprobe checks for video duration, codecs, audio presence, scene order, caption safe areas, and manifest hashes.
+- Add infographic SVG/PNG visual QA for overflow, contrast, bilingual text, density, and accessibility metadata.
+- Use a shared diagram layout/export layer for SVG, HTML, PNG, and PPT embedding; record a fidelity ledger when detail is reduced.
 
 ### Memory/evaluation team
 
@@ -192,6 +225,12 @@ The UI must render from `RunSummary`, `RunEvent`, `ArtifactManifest`, and `Quali
 - Define memory write, review, supersession, and deletion states.
 - Compare no memory, raw retrieval, scoped graph retrieval, and improved experience retrieval.
 - Measure groundedness, context tokens, stale-memory rate, and case isolation.
+- Implement L0/L1/L2 `ContextPack` loading over the existing `MemoryManager` and Cognee adapter; keep run state outside Cognee.
+- Benchmark full-context versus top-k Cognee versus progressive context packs for video scene planning and infographic generation.
+- Evaluate agentmemory-inspired episodic capture only behind privacy, deletion, scope, and license checks; treat OpenViking as a progressive-context design reference until legal review is complete.
+- Convert LinkedIn into composable parent/child skills: grounding, hook planning, post writing, visual selection, humanizer audit, quality gate, and approval/publish.
+- Define `SkillCall` and `SkillResult` fixtures so `linkedin.post` can call `diagram.flowchart` or `infographic` without passing the full conversation.
+- Require semantic diffs for humanizer patches; factual changes must return through evidence and quality gates.
 
 ### Platform/security team
 
@@ -213,6 +252,20 @@ tests/contracts/quality-report.failed.json
 tests/contracts/quality-report.passed.json
 tests/contracts/flowchart.ir.json
 tests/contracts/evidence-ledger.json
+tests/contracts/context-pack.json
+tests/contracts/video-timeline.ir.json
+tests/contracts/infographic.ir.json
+tests/contracts/diagram.ir.json
+tests/contracts/video-quality-report.json
+tests/contracts/skill-call.json
+tests/contracts/skill-result.json
+tests/contracts/humanization-report.json
+tests/contracts/deck-plan.json
+tests/contracts/slide-task.json
+tests/contracts/slide-content.ir.json
+tests/contracts/visual-task.json
+tests/contracts/visual-decision.json
+tests/contracts/repair-patch.json
 ```
 
 The frontend can build against static fixtures while the backend implements the service. The backend can validate against the same fixtures without a browser.

@@ -2,10 +2,10 @@ import crypto from "node:crypto";
 import { Case, Task } from "./models.js";
 import { config } from "./config.js";
 import { countResultTokens, countTokens } from "./tokens.js";
-import { createRun, getRunStatus } from "./python-client.js";
+import { createRun, getRunArtifactManifest, getRunStatus } from "./python-client.js";
 import { finalizeQuota, releaseQuota, reserveQuota, quotaHeaders } from "./rate-limit.js";
 
-const TERMINAL = new Set(["succeeded", "partial", "failed", "cancelled"]);
+const TERMINAL = new Set(["succeeded", "partial", "failed", "cancelled", "completed"]);
 
 function inputText(value) {
   if (typeof value === "string") return value.trim();
@@ -20,6 +20,11 @@ export function safeTask(task) {
     prompt: task.inputPreview,
     output_types: task.outputTypes,
     status: task.status,
+    summary: task.runSummary || null,
+    event_cursor: Number(task.eventSequence || 0),
+    artifact_manifests: Array.isArray(task.artifactManifests) ? task.artifactManifests : [],
+    classification_level: task.classificationLevel || "RESTRICTED",
+    distribution: task.distribution || "Authorized NTRO personnel",
     result: task.result,
     error: task.error,
     usage: {
@@ -45,7 +50,55 @@ function resultFromStatus(status) {
   return null;
 }
 
-async function finalizeTask(task, pythonStatus, result) {
+function eventCursorFromStatus(status) {
+  return (Array.isArray(status.events) ? status.events : [])
+    .reduce((cursor, event) => Math.max(cursor, Number(event?.sequence || 0)), 0);
+}
+
+export function projectCanonicalStatus(task, status) {
+  const summary = status.summary || null;
+  return {
+    effectiveStatus: summary?.status || status.status || task.status,
+    summary,
+    eventSequence: Math.max(Number(task.eventSequence || 0), eventCursorFromStatus(status)),
+    result: resultFromStatus(status),
+  };
+}
+
+export function idempotencyRequestMatches(task, { query, outputTypes, classificationLevel, distribution }) {
+  const requestedHash = crypto.createHash("sha256").update(inputText(query)).digest("hex");
+  return task.inputHash === requestedHash
+    && JSON.stringify(task.outputTypes) === JSON.stringify(outputTypes)
+    && (task.classificationLevel || "RESTRICTED") === (classificationLevel || "RESTRICTED")
+    && (task.distribution || "Authorized NTRO personnel") === (distribution || "Authorized NTRO personnel");
+}
+
+export function isTransientPythonError(error) {
+  return error?.name === "AbortError"
+    || [502, 503, 504].includes(Number(error?.status));
+}
+
+async function artifactManifestsForTask(task, status) {
+  const pipelines = Array.isArray(task.outputTypes) ? task.outputTypes : [];
+  const results = await Promise.all(pipelines.map(async (pipeline) => {
+    const artifactKey = pipeline === "ppt" ? "presentation" : pipeline;
+    try {
+      return await getRunArtifactManifest(
+        task.runId,
+        artifactKey,
+        task.classificationLevel || status.classification_level || "RESTRICTED",
+      );
+    } catch (error) {
+      // A pipeline may have no artifact (or may still expose only a typed
+      // result). Missing manifests are not a reason to fail the run.
+      if (error?.status === 404) return null;
+      throw error;
+    }
+  }));
+  return results.filter(Boolean);
+}
+
+async function finalizeTask(task, pythonStatus, result, artifactManifests = []) {
   if (!TERMINAL.has(pythonStatus.status)) return task;
   // A terminal orchestration status can legitimately omit the projection
   // when a worker failed during final serialization. Preserve any partial
@@ -60,6 +113,9 @@ async function finalizeTask(task, pythonStatus, result) {
       await finalizeQuota(current.userId, current.inputTokens, current.reservedTokens, outputTokens, session, current.reservedAt);
       current.status = pythonStatus.status;
       current.result = finalResult;
+      current.runSummary = pythonStatus.summary || null;
+      current.eventSequence = eventCursorFromStatus(pythonStatus);
+      current.artifactManifests = artifactManifests;
       current.error = pythonStatus.error || null;
       current.outputTokens = outputTokens;
       current.totalTokens = current.inputTokens + outputTokens;
@@ -75,10 +131,24 @@ async function finalizeTask(task, pythonStatus, result) {
 
 export async function refreshTask(task) {
   if (!task.runId || TERMINAL.has(task.status)) return task;
-  const status = await getRunStatus(task.runId);
-  const result = resultFromStatus(status);
-  if (TERMINAL.has(status.status)) return finalizeTask(task, status, result);
-  task.status = status.status || task.status;
+  let status;
+  try {
+    status = await getRunStatus(task.runId);
+  } catch (error) {
+    // A reconnect or health blip must not erase the last safe gateway
+    // projection. The next task read will retry Python reconciliation.
+    if (isTransientPythonError(error)) return task;
+    throw error;
+  }
+  const projection = projectCanonicalStatus(task, status);
+  const { effectiveStatus, summary, result } = projection;
+  if (TERMINAL.has(effectiveStatus)) {
+    const manifests = await artifactManifestsForTask(task, status);
+    return finalizeTask(task, { ...status, status: effectiveStatus }, result, manifests);
+  }
+  task.status = effectiveStatus || task.status;
+  task.runSummary = summary;
+  task.eventSequence = projection.eventSequence;
   if (result) task.result = result;
   await task.save();
   return task;
@@ -115,8 +185,12 @@ export async function createTransformation({ user, body, idempotencyKey, wait, r
     ? await Task.findOne({ userId, idempotencyKey })
     : null;
   if (existing) {
-    const requestedHash = crypto.createHash("sha256").update(query).digest("hex");
-    if (existing.inputHash !== requestedHash || JSON.stringify(existing.outputTypes) !== JSON.stringify(outputTypes)) {
+    if (!idempotencyRequestMatches(existing, {
+      query,
+      outputTypes,
+      classificationLevel: body.classification_level,
+      distribution: body.distribution,
+    })) {
       const error = new Error("Idempotency-Key was already used for a different transformation request");
       error.status = 409;
       throw error;
@@ -144,6 +218,8 @@ export async function createTransformation({ user, body, idempotencyKey, wait, r
       inputHash: crypto.createHash("sha256").update(query).digest("hex"),
       inputPreview: query.slice(0, 1000),
       outputTypes,
+      classificationLevel: body.classification_level,
+      distribution: body.distribution,
       status: "queued",
       inputTokens,
       reservedTokens: reservation.reservedTokens,

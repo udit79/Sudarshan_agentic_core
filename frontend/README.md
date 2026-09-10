@@ -36,8 +36,9 @@ define `window.SUDARSHAN_API_ORIGIN` before `api.js` in both HTML files:
 
 ## Frontend structure
 
-- `api.js` — shared gateway client, cookie credentials, one-refresh retry,
-  multipart source upload, errors, and idempotency keys.
+- `api.js` — shared gateway/FastAPI client, canonical run projection, cookie
+  credentials, one-refresh retry, multipart source upload, event-cursor
+  persistence, artifact manifests, errors, and idempotency keys.
 - `login.html` / `login.js` — Google OAuth entry point.
 - `index.html` / `script.js` — authenticated case selector, file attachments,
   output selection, transformation submission, task polling, live agentic
@@ -54,4 +55,24 @@ is not saved in browser storage. Production disables this flow.
 
 Completed artifacts are delivered through the authenticated task artifact
 route. Videos and rendered images are previewed in the result panel; PPTX and
-Markdown artifacts are opened or downloaded from the same panel.
+Markdown artifacts are opened or downloaded from the same panel. The frontend
+stores the last SSE sequence per task in `sessionStorage`, so reconnects ask
+the backend for only events after the last acknowledged sequence. Terminal
+FastAPI runs also hydrate their artifact manifests through the canonical
+manifest endpoint.
+
+## T09 migration boundary
+
+The API client is the first migration boundary for the agentic dashboard. It
+normalizes gateway task responses and FastAPI run summaries into the same
+projection fields (`task_id`, `run_id`, `status`, `stage`, `progress`,
+`event_cursor`, `output_types`, `artifact_manifests`, and quality metadata).
+The richer parent/child execution lanes, quality-report views, and durable
+cross-session history UI remain follow-up work; callers should consume the
+projection instead of depending on either backend's raw response shape.
+
+The projection contract has dependency-free Node tests:
+
+```powershell
+node --test .\frontend\tests\api-projection.test.mjs
+```

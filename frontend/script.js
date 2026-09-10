@@ -34,6 +34,13 @@ document.addEventListener("DOMContentLoaded", () => {
     taskProgressBar: document.getElementById("taskProgressBar"),
     taskProgressValue: document.getElementById("taskProgressValue"),
     taskProgressLabel: document.getElementById("taskProgressLabel"),
+    runObservability: document.getElementById("runObservability"),
+    runStageValue: document.getElementById("runStageValue"),
+    runChildrenValue: document.getElementById("runChildrenValue"),
+    runQualityValue: document.getElementById("runQualityValue"),
+    runCursorValue: document.getElementById("runCursorValue"),
+    runWaitingNotice: document.getElementById("runWaitingNotice"),
+    runWaitingReason: document.getElementById("runWaitingReason"),
     toggleAllOutputsBtn: document.getElementById("toggleAllOutputsBtn"),
     viewAllLabel: document.getElementById("viewAllLabel"),
     recentFilterBar: document.getElementById("recentFilterBar"),
@@ -57,7 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const outputCards = [...document.querySelectorAll(".output-card")];
   const allOutputTypes = ["executive_summary", "presentation", "advisory", "infographic", "video", "linkedin_post"];
   const selectedOutputTypes = new Set(["executive_summary"]);
-  const terminalStates = new Set(["succeeded", "partial", "failed", "cancelled"]);
+  const terminalStates = new Set(["succeeded", "partial", "failed", "cancelled", "completed"]);
 
   let activeTaskId = null;
   let activeChatId = null;
@@ -125,8 +132,47 @@ document.addEventListener("DOMContentLoaded", () => {
     track?.setAttribute("aria-valuenow", "0");
   }
 
+  function renderRunProjectionMeta(task) {
+    if (!task) return;
+    if (elements.runObservability) elements.runObservability.hidden = false;
+    if (elements.runStageValue) elements.runStageValue.textContent = task.stage || "—";
+    if (elements.runChildrenValue) {
+      const childCount = Number.isFinite(Number(task.child_count))
+        ? Number(task.child_count)
+        : (Array.isArray(task.children) ? task.children.length : 0);
+      elements.runChildrenValue.textContent = String(childCount);
+    }
+    if (elements.runQualityValue) {
+      elements.runQualityValue.textContent = task.quality_status || "pending";
+    }
+    if (elements.runCursorValue) {
+      elements.runCursorValue.textContent = String(Number(task.event_cursor || 0));
+    }
+
+    const status = String(task.status || "").toLowerCase();
+    const waiting = ["waiting", "waiting_for_input", "paused"].includes(status) || task.requires_action;
+    if (elements.runWaitingNotice) elements.runWaitingNotice.hidden = !waiting;
+    if (waiting && elements.runWaitingReason) {
+      elements.runWaitingReason.textContent = task.wait_reason || task.message || "The agent is waiting for the next permitted action.";
+    }
+  }
+
   function handleProgressEvent(event) {
     const payload = event && typeof event === "object" ? event : {};
+    if (currentTaskData && payload.sequence != null) {
+      currentTaskData.event_cursor = Math.max(
+        Number(currentTaskData.event_cursor || 0),
+        Number(payload.sequence || 0),
+      );
+      currentTaskData.status = payload.status || currentTaskData.status;
+      currentTaskData.stage = payload.stage || currentTaskData.stage;
+      currentTaskData.progress = Number(payload.progress ?? currentTaskData.progress ?? 0);
+      currentTaskData.child_count = Number(payload.child_count ?? currentTaskData.child_count ?? 0);
+      currentTaskData.quality_status = payload.quality_status || currentTaskData.quality_status;
+      currentTaskData.requires_action = Boolean(payload.requires_action ?? currentTaskData.requires_action ?? false);
+      currentTaskData.wait_reason = payload.wait_reason || currentTaskData.wait_reason || "";
+      renderRunProjectionMeta(currentTaskData);
+    }
     const message = payload.message || "";
     const stepEl = document.getElementById("liveStepIndicator");
     if (stepEl && message) stepEl.textContent = message;
@@ -744,7 +790,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Render the Transformation Viewer
   function renderTaskOutput(task) {
     if (!task) return;
+    task = api.normalizeRunProjection ? api.normalizeRunProjection(task) : task;
     currentTaskData = task;
+    renderRunProjectionMeta(task);
     elements.resultPanel.hidden = false;
     elements.resultTitle.textContent = (task.status || "succeeded").replaceAll("_", " ");
     elements.resultMessage.textContent = `Task ${task.task_id || "Active"} · ${task.output_types?.map(formatName).join(" + ") || "Output"} · ${formatTime(task.created_at)}`;
@@ -843,6 +891,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!artifactTypes.has(type)) return;
     const response = extractResponseForType(currentTaskData.result, type);
     const artifact = response?.artifact && typeof response.artifact === "object" ? response.artifact : {};
+    const manifest = (currentTaskData.artifact_manifests || []).find((candidate) => {
+      const kind = String(candidate?.kind || "").toLowerCase();
+      return kind === (type === "presentation" ? "presentation" : type);
+    });
     const output = response?.output && typeof response.output === "object" ? response.output : data;
     const artifactPath = type === "video"
       ? (artifact.video_path || artifact.path)
@@ -864,6 +916,12 @@ document.addEventListener("DOMContentLoaded", () => {
     heading.className = "artifact-preview-heading";
     heading.textContent = `${formatName(type)} artifact`;
     panel.appendChild(heading);
+    if (manifest) {
+      const metadata = document.createElement("small");
+      metadata.className = "artifact-manifest-summary";
+      metadata.textContent = `${manifest.name || formatName(type)} · ${manifest.quality_status || "pending"} · ${formatBytes(Number(manifest.size_bytes || 0))}`;
+      panel.appendChild(metadata);
+    }
 
     // Failed or syntax-only pipelines must not render a broken image/video URL.
     // Keep the pipeline failure visible instead of presenting a misleading 404.
@@ -1677,7 +1735,9 @@ document.addEventListener("DOMContentLoaded", () => {
   async function pollRemoteTask(taskId, originalPrompt, runId, caseId, chatId, outputTypes) {
     try {
       const response = await api.getTask(taskId);
-      const task = response.task || response;
+      const task = api.normalizeRunProjection
+        ? api.normalizeRunProjection(response.task || response)
+        : (response.task || response);
       task.prompt = originalPrompt;
       task.case_id = caseId || task.case_id;
       task.chat_id = chatId || task.chat_id;
@@ -1691,6 +1751,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Update stage indicator while waiting
       updateTaskProgress(task.progress, task.message || "", task.stage || "");
+      renderRunProjectionMeta(task);
       if (task.stage && !task.message) {
         const stepEl = document.getElementById("liveStepIndicator");
         if (stepEl) stepEl.textContent = `Stage: ${task.stage.replaceAll("_", " ")}...`;

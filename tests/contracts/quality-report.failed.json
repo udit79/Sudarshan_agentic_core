@@ -1,0 +1,13 @@
+{
+  "quality_report_id": "quality_fixture_failed",
+  "run_id": "run_fixture_running",
+  "artifact_id": "artifact_fixture_pptx",
+  "status": "repairable",
+  "score": 0.48,
+  "issues": ["slide-4.flowchart.edge-crossing"],
+  "required_revisions": ["reroute slide-4 connectors without changing claims"],
+  "validator_ids": ["ppt.connector.v1"],
+  "evidence_checks": {"coverage": 1.0},
+  "visual_checks": {"edge_crossing": true},
+  "created_at": "2026-01-01T00:01:00+00:00"
+}

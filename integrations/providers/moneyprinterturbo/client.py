@@ -12,6 +12,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from threading import Event
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -127,7 +128,14 @@ class MoneyPrinterTurboClient:
             return VideoJobResult("succeeded", provider_task_id, data)
         return VideoJobResult("pending", provider_task_id, data)
 
-    def generate(self, *, subject: str, script: str = "", options: Mapping[str, Any] | None = None) -> VideoJobResult:
+    def generate(
+        self,
+        *,
+        subject: str,
+        script: str = "",
+        options: Mapping[str, Any] | None = None,
+        cancel_event: Event | None = None,
+    ) -> VideoJobResult:
         payload: dict[str, Any] = {
             "video_subject": subject[:500],
             "video_script": script[:20000],
@@ -141,7 +149,24 @@ class MoneyPrinterTurboClient:
         deadline = time.monotonic() + self.max_wait_seconds
         latest = submitted
         while time.monotonic() < deadline:
-            time.sleep(max(0.1, self.poll_interval_seconds))
+            if cancel_event is not None and cancel_event.is_set():
+                return VideoJobResult(
+                    status="cancelled",
+                    provider_task_id=submitted.provider_task_id,
+                    data=latest.data,
+                    error="video generation cancelled cooperatively",
+                )
+            wait_seconds = max(0.1, self.poll_interval_seconds)
+            if cancel_event is not None:
+                if cancel_event.wait(wait_seconds):
+                    return VideoJobResult(
+                        status="cancelled",
+                        provider_task_id=submitted.provider_task_id,
+                        data=latest.data,
+                        error="video generation cancelled cooperatively",
+                    )
+            else:
+                time.sleep(wait_seconds)
             latest = self.status(submitted.provider_task_id)
             if latest.status != "pending":
                 return latest

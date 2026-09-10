@@ -1,0 +1,17 @@
+{
+  "run_id": "run_fixture_running",
+  "task_id": "task_fixture_running",
+  "case_id": "case_fixture",
+  "skill_id": "presentation.case-brief",
+  "skill_version": "1.0.0",
+  "execution_version": "2026.1",
+  "status": "running",
+  "stage": "planning",
+  "progress": 20,
+  "requires_action": false,
+  "quality_status": "pending",
+  "artifact_count": 0,
+  "child_count": 0,
+  "created_at": "2026-01-01T00:00:00+00:00",
+  "updated_at": "2026-01-01T00:00:01+00:00"
+}

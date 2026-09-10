@@ -1736,6 +1736,49 @@ body {
   margin-top: 8px;
 }
 
+.run-observability {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.run-observability-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid rgba(129, 140, 248, 0.22);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.46);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.run-observability-item strong {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.run-waiting-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(120, 53, 15, 0.18);
+  color: #fde68a;
+  font-size: 0.76rem;
+}
+
+.run-waiting-notice span {
+  color: var(--text-secondary);
+}
+
 .task-progress {
   margin-top: 14px;
 }

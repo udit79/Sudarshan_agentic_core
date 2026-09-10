@@ -24,7 +24,19 @@ process:
 - `run_sudarshan` starts a create/revise operation;
 - `resume_sudarshan` continues clarification or approval;
 - `cancel_sudarshan` requests cooperative cancellation;
-- `get_sudarshan_status` returns frontend-safe progress events.
+- `get_sudarshan_status` returns frontend-safe progress events;
+- `get_sudarshan_artifact` returns an integrity-verified manifest and stable
+  download URI without exposing filesystem paths or raw bytes.
+- `list_sudarshan_skills` and `get_sudarshan_skill` expose the versioned,
+  canonical skill catalog and output contracts;
+- `invoke_sudarshan_skill` runs an available specialist through the typed local
+  `SkillRuntime`; `start_sudarshan_skill` submits the same skill contract to
+  the durable background scheduler.
+
+The catalog may include planned skills such as `visual.flowchart` with
+`available=false`. Discovery does not imply that an executable adapter has
+been installed; the application rejects unavailable skill execution instead
+of silently routing it to an unrelated pipeline.
 
 The server uses the configured SQLite LangGraph checkpointer, so these tools
 share a durable run identity within the service process instead of creating a

@@ -1,0 +1,17 @@
+{
+  "run_id": "run_fixture_waiting",
+  "task_id": "task_fixture_waiting",
+  "case_id": "case_fixture",
+  "skill_id": "presentation.case-brief",
+  "skill_version": "1.0.0",
+  "execution_version": "2026.1",
+  "status": "waiting_for_approval",
+  "stage": "waiting_for_approval",
+  "progress": 82,
+  "requires_action": true,
+  "quality_status": "pending",
+  "artifact_count": 1,
+  "child_count": 2,
+  "created_at": "2026-01-01T00:00:00+00:00",
+  "updated_at": "2026-01-01T00:01:00+00:00"
+}

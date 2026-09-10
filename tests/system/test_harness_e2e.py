@@ -49,3 +49,10 @@ def test_harness_cancellation(test_app):
     result = test_app.cancel("test-run-cancel", "task-cancel")
     assert "status" in result
     assert result["status"] in {"requested", "not_found", "already_terminal", "cancelled"}
+
+
+def test_harness_bounded_wait_returns_safe_not_found_projection(test_app):
+    result = test_app.wait("missing-run", timeout_ms=0)
+
+    assert result["status"] == "not_found"
+    assert result["wait_timed_out"] is False

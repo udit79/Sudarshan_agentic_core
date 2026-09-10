@@ -1,10 +1,15 @@
-# MoneyPrinterTurbo provider integration
+# Optional MoneyPrinterTurbo compatibility adapter
 
 This directory contains the Sudarshan-side adapter for the upstream
 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo) worker. The
 worker is not vendored and is not imported into the Sudarshan process.
 
-The adapter follows the upstream V1 contract:
+This is not the default Sudarshan video path. Native Sudarshan skills in
+`pipelines/video/skills.py` own storyboard preparation and media rendering.
+Select this adapter only when an operator explicitly sets
+`SUDARSHAN_VIDEO_BACKEND=moneyprinterturbo`.
+
+When selected, the adapter follows the upstream V1 contract:
 
 1. `POST /api/v1/videos` with `video_subject`, optional `video_script`, and
    supported `VideoParams` options;
@@ -21,6 +26,7 @@ Configure the boundary in the application environment:
 ```env
 MONEYPRINTERTURBO_BASE_URL=http://127.0.0.1:8080
 MONEYPRINTERTURBO_API_KEY=
+SUDARSHAN_VIDEO_BACKEND=moneyprinterturbo
 ```
 
 No provider call is made during repository tests or setup. The real worker

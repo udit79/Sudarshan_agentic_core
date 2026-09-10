@@ -21,8 +21,10 @@ import shutil
 import subprocess
 import tempfile
 import base64
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Event
 from typing import Any, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -34,6 +36,10 @@ _ARTIFACT_DIR = Path("artifacts") / "videos"
 
 class NativeVideoError(RuntimeError):
     """Raised when native video generation fails."""
+
+
+class NativeVideoCancelled(NativeVideoError):
+    """Raised when a native media operation observes a cancellation signal."""
 
 
 @dataclass
@@ -94,20 +100,24 @@ class OpenAITTSAdapter:
         api_key: str | None = None,
         model: str | None = None,
         voice: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         self.model = model or os.getenv("OPENAI_TTS_MODEL", "tts-1")
         self.voice = voice or os.getenv("OPENAI_TTS_VOICE", "alloy")
+        self.timeout_seconds = timeout_seconds or float(os.getenv("OPENAI_TTS_TIMEOUT_SECONDS", "60"))
 
     @property
     def configured(self) -> bool:
         return bool(self.api_key)
 
-    def generate(self, text: str, output_path: str) -> str:
+    def generate(self, text: str, output_path: str, *, cancel_event: Event | None = None) -> str:
         """Generate an MP3 audio file from text.  Returns the output path."""
 
         if not self.configured:
             raise NativeVideoError("OPENAI_API_KEY is required for TTS narration")
+        if cancel_event is not None and cancel_event.is_set():
+            raise NativeVideoCancelled("video generation cancelled before TTS")
 
         payload = json.dumps({
             "model": self.model,
@@ -124,7 +134,7 @@ class OpenAITTSAdapter:
         request.add_header("Content-Type", "application/json")
 
         try:
-            with urlopen(request, timeout=60) as response:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
                 audio_data = response.read()
         except (HTTPError, URLError, TimeoutError) as exc:
             raise NativeVideoError(f"OpenAI TTS request failed: {exc}") from exc
@@ -138,10 +148,18 @@ class OpenAITTSAdapter:
 class OpenAIImageAdapter:
     """Generate durable scene images through OpenAI's Images API."""
 
-    def __init__(self, *, api_key: str | None = None, model: str | None = None, client: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+        client: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         self.model = model or os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
         self._client = client
+        self.timeout_seconds = timeout_seconds or float(os.getenv("OPENAI_IMAGE_TIMEOUT_SECONDS", "90"))
 
     @property
     def configured(self) -> bool:
@@ -152,12 +170,14 @@ class OpenAIImageAdapter:
         if self._client is None:
             from openai import OpenAI
 
-            self._client = OpenAI(api_key=self.api_key)
+            self._client = OpenAI(api_key=self.api_key, timeout=self.timeout_seconds)
         return self._client
 
-    def generate(self, prompt: str, output_path: str) -> str:
+    def generate(self, prompt: str, output_path: str, *, cancel_event: Event | None = None) -> str:
         if not self.configured:
             raise NativeVideoError("OPENAI_API_KEY is required for scene image generation")
+        if cancel_event is not None and cancel_event.is_set():
+            raise NativeVideoCancelled("video generation cancelled before image generation")
         response = self.client.images.generate(
             model=self.model,
             prompt=(
@@ -177,8 +197,10 @@ class OpenAIImageAdapter:
             url = getattr(image, "url", None)
             if not url:
                 raise NativeVideoError("OpenAI Images returned neither image data nor a URL")
-            with urlopen(url, timeout=90) as response_stream:
+            with urlopen(url, timeout=self.timeout_seconds) as response_stream:
                 data = response_stream.read()
+        if cancel_event is not None and cancel_event.is_set():
+            raise NativeVideoCancelled("video generation cancelled after image generation")
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(data)
         return output_path
@@ -216,6 +238,7 @@ class NativeVideoGenerator:
         scenes: Sequence[VideoScene],
         artifact_name: str | None = None,
         package_dir: str | Path | None = None,
+        cancel_event: Event | None = None,
     ) -> NativeVideoResult:
         """Generate a complete video from scenes.
 
@@ -248,12 +271,15 @@ class NativeVideoGenerator:
             segment_paths: list[str] = []
 
             for i, scene in enumerate(scenes):
+                self._check_cancelled(cancel_event)
                 try:
                     segment = self._generate_scene(
-                        scene, work, i, ffmpeg, subject, package_root,
+                        scene, work, i, ffmpeg, subject, package_root, cancel_event,
                     )
                     if segment:
                         segment_paths.append(segment)
+                except NativeVideoCancelled:
+                    raise
                 except Exception as exc:
                     # Log but continue — partial videos are acceptable.
                     continue
@@ -270,7 +296,7 @@ class NativeVideoGenerator:
             # source script, storyboard, scene media, and manifest.
             output_path = str(package_root / "final.mp4")
             try:
-                self._concatenate(segment_paths, output_path, work, ffmpeg)
+                self._concatenate(segment_paths, output_path, work, ffmpeg, cancel_event)
             except Exception as exc:
                 return NativeVideoResult(
                     status="failed",
@@ -315,6 +341,7 @@ class NativeVideoGenerator:
         ffmpeg: str,
         subject: str,
         package_root: Path,
+        cancel_event: Event | None = None,
     ) -> str | None:
         """Generate one video segment for a scene."""
 
@@ -323,10 +350,13 @@ class NativeVideoGenerator:
         video_source: str | None = None
 
         # 1. Generate durable TTS audio if narration exists.
+        self._check_cancelled(cancel_event)
         if scene.narration.strip() and self.tts.configured:
             audio_path = str(package_root / "audio" / f"{prefix}.mp3")
             try:
-                self.tts.generate(scene.narration, audio_path)
+                self.tts.generate(scene.narration, audio_path, cancel_event=cancel_event)
+            except NativeVideoCancelled:
+                raise
             except NativeVideoError:
                 audio_path = None
         scene.audio_path = audio_path
@@ -335,9 +365,13 @@ class NativeVideoGenerator:
         if scene.visual_description.strip() and self.image_generator.configured:
             image_path = str(package_root / "images" / f"{prefix}.png")
             try:
-                scene.image_path = self.image_generator.generate(scene.visual_description, image_path)
+                scene.image_path = self.image_generator.generate(
+                    scene.visual_description, image_path, cancel_event=cancel_event,
+                )
                 video_source = str(work_dir / f"{prefix}_image.mp4")
-                self._generate_image_video(scene.image_path, video_source, scene, ffmpeg)
+                self._generate_image_video(scene.image_path, video_source, scene, ffmpeg, cancel_event)
+            except NativeVideoCancelled:
+                raise
             except Exception:
                 scene.image_path = None
                 video_source = None
@@ -345,21 +379,70 @@ class NativeVideoGenerator:
         # 3. Generate a local title card if image generation is unavailable.
         if not video_source:
             video_source = str(work_dir / f"{prefix}_card.mp4")
-            self._generate_title_card(
-                scene, video_source, ffmpeg,
-            )
+            self._generate_title_card(scene, video_source, ffmpeg, cancel_event)
 
         # 4. Add on-screen text overlay if provided.
         segment_path = str(package_root / "segments" / f"{prefix}.mp4")
-        self._compose_segment(
-            video_source, audio_path, segment_path,
-            scene, ffmpeg,
-        )
+        self._compose_segment(video_source, audio_path, segment_path, scene, ffmpeg, cancel_event)
 
         scene.video_path = segment_path if Path(segment_path).exists() else None
         return scene.video_path
 
-    def _generate_image_video(self, image_path: str, output_path: str, scene: VideoScene, ffmpeg: str) -> None:
+    @staticmethod
+    def _check_cancelled(cancel_event: Event | None) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise NativeVideoCancelled("video generation cancelled cooperatively")
+
+    @staticmethod
+    def _run_process(
+        command: list[str],
+        *,
+        timeout_seconds: float,
+        cancel_event: Event | None = None,
+    ) -> subprocess.CompletedProcess[Any]:
+        """Run FFmpeg with a hard process deadline and cooperative cancel."""
+
+        if cancel_event is None:
+            return subprocess.run(command, capture_output=True, timeout=timeout_seconds, check=True)
+
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        started = time.monotonic()
+        try:
+            while process.poll() is None:
+                if cancel_event.is_set():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=2)
+                    raise NativeVideoCancelled("video process cancelled cooperatively")
+                if time.monotonic() - started >= timeout_seconds:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=2)
+                    raise subprocess.TimeoutExpired(command, timeout_seconds)
+                time.sleep(0.05)
+            stdout, stderr = process.communicate()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=2)
+        if process.returncode:
+            raise subprocess.CalledProcessError(process.returncode, command, output=stdout, stderr=stderr)
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+    def _generate_image_video(
+        self,
+        image_path: str,
+        output_path: str,
+        scene: VideoScene,
+        ffmpeg: str,
+        cancel_event: Event | None = None,
+    ) -> None:
         duration = max(1, scene.duration_seconds)
         vf = (
             f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
@@ -370,13 +453,14 @@ class NativeVideoGenerator:
             "-vf", vf, "-r", str(self.fps), "-c:v", "libx264", "-preset", "ultrafast",
             "-pix_fmt", "yuv420p", "-an", output_path,
         ]
-        subprocess.run(cmd, capture_output=True, timeout=120, check=True)
+        self._run_process(cmd, timeout_seconds=120, cancel_event=cancel_event)
 
     def _generate_title_card(
         self,
         scene: VideoScene,
         output_path: str,
         ffmpeg: str,
+        cancel_event: Event | None = None,
     ) -> None:
         """Generate a simple title card video using FFmpeg."""
 
@@ -399,7 +483,7 @@ class NativeVideoGenerator:
             "-pix_fmt", "yuv420p",
             output_path,
         ]
-        subprocess.run(cmd, capture_output=True, timeout=30, check=True)
+        self._run_process(cmd, timeout_seconds=30, cancel_event=cancel_event)
 
     def _compose_segment(
         self,
@@ -408,6 +492,7 @@ class NativeVideoGenerator:
         output_path: str,
         scene: VideoScene,
         ffmpeg: str,
+        cancel_event: Event | None = None,
     ) -> None:
         """Compose a video segment with optional audio and text overlay."""
 
@@ -431,7 +516,7 @@ class NativeVideoGenerator:
                 "-an",
                 output_path,
             ])
-        subprocess.run(cmd, capture_output=True, timeout=120, check=True)
+        self._run_process(cmd, timeout_seconds=120, cancel_event=cancel_event)
 
     def _concatenate(
         self,
@@ -439,6 +524,7 @@ class NativeVideoGenerator:
         output_path: str,
         work_dir: Path,
         ffmpeg: str,
+        cancel_event: Event | None = None,
     ) -> None:
         """Concatenate video segments using FFmpeg concat demuxer."""
 
@@ -457,7 +543,7 @@ class NativeVideoGenerator:
             "-pix_fmt", "yuv420p",
             output_path,
         ]
-        subprocess.run(cmd, capture_output=True, timeout=300, check=True)
+        self._run_process(cmd, timeout_seconds=300, cancel_event=cancel_event)
 
     def _probe_duration(self, video_path: str) -> float:
         """Get video duration in seconds using ffprobe."""

@@ -48,6 +48,13 @@ export async function getRunStatus(runId) {
   return request(`/runs/${encodeURIComponent(runId)}`);
 }
 
+export async function getRunArtifactManifest(runId, artifactKey, classificationLevel = "RESTRICTED") {
+  return request(
+    `/artifacts/${encodeURIComponent(runId)}/${encodeURIComponent(artifactKey)}/manifest`,
+    { headers: { "X-Classification-Level": classificationLevel } },
+  );
+}
+
 export async function resumeRun({ runId, taskId, decision, userId }) {
   return request(`/runs/${encodeURIComponent(runId)}/resume`, {
     method: "POST",
@@ -113,11 +120,20 @@ export async function ingestSource({ request: incomingRequest, userId, caseId, t
   }
 }
 
-export async function streamRunEvents(runId, res) {
-  const upstream = await fetch(`${config.pythonApiBaseUrl}/runs/${encodeURIComponent(runId)}/events`, {
-    headers: { "X-Operator-Id": "gateway" },
+export async function streamRunEvents(runId, res, { afterSequence = 0, classificationLevel = "RESTRICTED" } = {}) {
+  const cursor = Number.isSafeInteger(Number(afterSequence)) && Number(afterSequence) >= 0
+    ? Number(afterSequence)
+    : 0;
+  const upstream = await fetch(
+    `${config.pythonApiBaseUrl}/runs/${encodeURIComponent(runId)}/events?after_sequence=${cursor}`,
+    {
+    headers: {
+      "X-Operator-Id": "gateway",
+      "X-Classification-Level": classificationLevel,
+    },
     signal: res.req.signal,
-  });
+    },
+  );
   if (!upstream.ok || !upstream.body) {
     const error = new Error(`Python event stream returned ${upstream.status}`);
     error.status = upstream.status;

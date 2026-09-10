@@ -1,21 +1,19 @@
-"""Sudarshan pipeline adapter for the isolated MoneyPrinterTurbo worker."""
+"""Sudarshan native video skill composition with legacy adapter support."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from threading import Event
 from typing import Mapping
 
 from memory import KnowledgeUnit, MemoryType, ScopeType, Source, SourceType
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter
 from pipelines.video.contracts import VideoPackage
-from pipelines.video.native_generator import (
-    NativeVideoGenerator, 
-    scenes_from_package, 
-    scenes_from_script
-)
+from pipelines.video.native_generator import NativeVideoGenerator
 from pipelines.video.planner import OpenAIVideoPlanner
+from pipelines.video.skills import NativeVideoRenderSkill, NativeVideoStoryboardSkill
 from integrations.providers.moneyprinterturbo import MoneyPrinterTurboClient
 
 
@@ -34,6 +32,8 @@ class VideoPipeline:
         self.generator = generator or NativeVideoGenerator()
         self.client = client
         self.planner = planner or OpenAIVideoPlanner()
+        self.storyboard_skill = NativeVideoStoryboardSkill(self.planner)
+        self.render_skill = NativeVideoRenderSkill(self.generator)
 
     def _runtime(self, request: AdvisoryRequest) -> MemoryRuntime:
         return MemoryRuntime(
@@ -45,11 +45,13 @@ class VideoPipeline:
             pipeline_name=self.pipeline_name,
         )
 
-    def run(self, request: AdvisoryRequest) -> PipelineResponse:
+    def run(self, request: AdvisoryRequest, *, cancel_event: Event | None = None) -> PipelineResponse:
         runtime = self._runtime(request)
         writer = TaskMemoryWriter(runtime)
         run_id = runtime.run_id
         try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("video generation cancelled cooperatively")
             writer.write("video_generation", "started", "Starting native video generation.")
             memory_context = str(request.metadata.get("resolved_memory_context", ""))[:30000]
             package_data = request.metadata.get("video_package")
@@ -60,60 +62,26 @@ class VideoPipeline:
                 or request.query
             ).strip()[:500]
             
-            if package is not None:
-                scenes = scenes_from_package(package.model_dump())
-            elif self.client is not None:
-                # Preserve the explicit legacy worker contract without
-                # requiring the OpenAI planner for provider-owned jobs.
-                supplied_script = str(
-                    request.metadata.get("video_script") or memory_context or request.query
-                ).strip()[:20000]
-                scenes = scenes_from_script(supplied_script, subject)
-                package = VideoPackage(
-                    subject=subject,
-                    title=subject,
-                    script=supplied_script,
-                    storyboard=[
-                        {
-                            "scene_id": scene.scene_id,
-                            "narration": scene.narration,
-                            "visual_description": scene.visual_description,
-                            "duration_seconds": scene.duration_seconds,
-                            "on_screen_text": scene.on_screen_text,
-                        }
-                        for scene in scenes
-                    ],
-                )
-            else:
-                supplied_script = str(request.metadata.get("video_script") or "").strip()[:20000]
-                if supplied_script:
-                    package = VideoPackage(
-                        subject=subject,
-                        title=subject,
-                        script=supplied_script,
-                        storyboard=[scene.model_dump() if hasattr(scene, "model_dump") else {
-                            "scene_id": scene.scene_id,
-                            "narration": scene.narration,
-                            "visual_description": scene.visual_description,
-                            "duration_seconds": scene.duration_seconds,
-                            "on_screen_text": scene.on_screen_text,
-                        } for scene in scenes_from_script(supplied_script, subject)],
-                    )
-                else:
-                    package = self.planner.plan(
-                        subject=subject,
-                        query=request.query,
-                        memory_context=memory_context,
-                        prompt_plan=dict(request.metadata.get("prompt_plan") or {}),
-                    )
-                scenes = scenes_from_package(package.model_dump())
+            package, scenes = self.storyboard_skill.prepare(
+                request,
+                subject=subject,
+                memory_context=memory_context,
+                package_data=package.model_dump() if package is not None else None,
+                prefer_query_script=self.client is not None,
+                cancel_event=cancel_event,
+            )
                 
             if self.client is not None:
                 provider_options = package.provider_payload() if package is not None else {}
                 script = str(provider_options.pop("video_script", "") or "\n\n".join(
                     scene.narration for scene in scenes if scene.narration
                 ) or memory_context).strip()[:20000]
-                result = self.client.generate(subject=subject, script=script, options=provider_options)
+                result = self.client.generate(
+                    subject=subject,
+                    script=script,
+                    options=provider_options,
+                    cancel_event=cancel_event,
+                )
                 artifact = {
                     "provider": "moneyprinterturbo",
                     "provider_task_id": result.provider_task_id,
@@ -134,14 +102,24 @@ class VideoPipeline:
                         run_id=run_id, artifact=artifact,
                         metadata={"provider": "moneyprinterturbo", "human_approval_required": False},
                     )
+                if result.status == "cancelled":
+                    return PipelineResponse(
+                        status="failed", pipeline=self.pipeline_name, task_id=request.task_id,
+                        run_id=run_id, failure=result.error or "video generation cancelled",
+                        artifact=artifact,
+                        metadata={
+                            "provider": "moneyprinterturbo",
+                            "cancellation_requested": True,
+                            "human_approval_required": False,
+                        },
+                    )
                 output = {"provider": "moneyprinterturbo", "subject": subject, "status": "succeeded"}
             else:
-                package_dir = Path("artifacts") / "videos" / str(run_id)
-                result = self.generator.generate(
-                    subject=subject,
+                result = self.render_skill.render(
+                    package,
                     scenes=scenes,
-                    artifact_name=f"video-{run_id}",
-                    package_dir=package_dir,
+                    run_id=run_id,
+                    cancel_event=cancel_event,
                 )
                 if result.status == "failed":
                     writer.write("video_generation", "failed", result.error or "Native video generation failed")
@@ -158,7 +136,9 @@ class VideoPipeline:
                     "storyboard": [scene.model_dump() for scene in scenes],
                 }
                 package_payload["storyboard"] = scene_records or package_payload.get("storyboard", [])
-                package_root = Path(result.metadata.get("package_dir", package_dir))
+                package_root = Path(
+                    result.metadata.get("package_dir", Path("artifacts") / "videos" / str(run_id))
+                )
                 package_root.mkdir(parents=True, exist_ok=True)
                 script_path = package_root / "script.txt"
                 storyboard_path = package_root / "storyboard.json"

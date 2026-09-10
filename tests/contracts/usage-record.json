@@ -1,0 +1,17 @@
+{
+  "usage_id": "usage_fixture_1",
+  "run_id": "run_fixture_completed",
+  "node_id": "slide-1",
+  "provider": "test",
+  "model": "test-model",
+  "input_tokens": 100,
+  "output_tokens": 50,
+  "reasoning_tokens": 0,
+  "cache_read_tokens": 25,
+  "cache_write_tokens": 50,
+  "tool_calls": 1,
+  "latency_ms": 800,
+  "estimated_cost": 0.001,
+  "is_estimate": true,
+  "recorded_at": "2026-01-01T00:00:10+00:00"
+}

@@ -10,6 +10,7 @@ from pipelines.orchestrator import (
     PipelineAdapter,
     PipelineRegistry,
     RequestUnderstandingAgent,
+    SQLiteProgressSink,
 )
 
 from tests.conftest import FakeRecallManager, make_request
@@ -141,3 +142,42 @@ def test_progress_contract_accepts_clarification_waiting_state() -> None:
     )
 
     assert event.requires_action is True
+
+
+def test_in_memory_progress_sink_assigns_and_filters_sequences() -> None:
+    sink = InMemoryProgressSink()
+    for stage in ("planning", "running", "completed"):
+        sink.publish(
+            ProgressEvent(
+                run_id="run-sequence",
+                task_id="task-sequence",
+                stage=stage,
+                status="running" if stage != "completed" else "completed",
+            )
+        )
+
+    events = sink.events("run-sequence")
+    assert [event.sequence for event in events] == [1, 2, 3]
+    assert [event.stage for event in sink.events("run-sequence", after_sequence=1)] == [
+        "running",
+        "completed",
+    ]
+
+
+def test_sqlite_progress_sink_persists_sequences_and_cursor(tmp_path) -> None:
+    sink = SQLiteProgressSink(str(tmp_path / "progress.db"))
+    for stage in ("planning", "completed"):
+        sink.publish(
+            ProgressEvent(
+                run_id="run-sqlite-sequence",
+                task_id="task-sqlite-sequence",
+                stage=stage,
+                status="completed" if stage == "completed" else "running",
+            )
+        )
+
+    events = sink.events("run-sqlite-sequence")
+    assert [event.sequence for event in events] == [1, 2]
+    assert [event.stage for event in sink.events("run-sqlite-sequence", after_sequence=1)] == [
+        "completed",
+    ]

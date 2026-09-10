@@ -8,20 +8,38 @@ SSE/WebSocket bridge owned by the backend.
 
 from __future__ import annotations
 
-from threading import Lock
+from threading import Event, Lock
 import os
+from datetime import datetime, timezone
+import time
 from uuid import uuid4
 from typing import Any, Mapping
 
 from memory import MemoryManager
 from pipelines.common.contracts import AdvisoryRequest
 from pipelines.common.audit_logger import get_audit_logger
+from api.scheduler import LocalRunScheduler
 from pipelines.orchestrator import (
+    PipelineAdapter,
+    RunContext,
+    RunEvent,
+    RunSummary,
+    RunPolicy,
     PipelineOrchestrator,
+    SkillCall,
+    SkillRuntime,
     SQLiteProgressSink,
     create_sqlite_checkpointer,
     event_dict,
+    project_progress_event,
     orchestration_result_to_dict,
+)
+from pipelines.orchestrator.progress import ProgressEvent
+from integrations.deepseek_harness.skill_catalog import (
+    build_skill_manifests,
+    canonical_skill_id,
+    skill_pipeline,
+    skill_summary,
 )
 
 
@@ -35,8 +53,33 @@ class SudarshanApplication:
             progress_sink=self.progress_sink,
             checkpointer=create_sqlite_checkpointer(),
         )
+        self.skill_manifests = build_skill_manifests()
+        runtime_adapters: dict[str, PipelineAdapter] = {}
+        for skill_id, manifest in self.skill_manifests.items():
+            pipeline = skill_pipeline(skill_id)
+            adapter = self.orchestrator.registry.get(pipeline) if pipeline else None
+            if adapter is not None:
+                runtime_adapters[skill_id] = PipelineAdapter(
+                    skill_id,
+                    adapter.run,
+                    adapter.resume,
+                )
+        self.skill_runtime = SkillRuntime(
+            runtime_adapters,
+            self.skill_manifests,
+            event_sink=self._publish_skill_event,
+        )
         self._run_contexts: dict[str, dict[str, str]] = {}
         self._run_context_lock = Lock()
+        self.scheduler = LocalRunScheduler(
+            self.run,
+            db_path=os.getenv("SUDARSHAN_QUEUE_DB_PATH", "artifacts/.state/run_queue.db"),
+            max_workers=int(os.getenv("SUDARSHAN_MAX_CONCURRENT_RUNS", "2")),
+            lease_ms=int(os.getenv("SUDARSHAN_RUN_LEASE_MS", "900000")),
+            max_attempts=int(os.getenv("SUDARSHAN_MAX_ATTEMPTS", "1")),
+            retry_backoff_ms=int(os.getenv("SUDARSHAN_RETRY_BACKOFF_MS", "250")),
+            execution_timeout_ms=int(os.getenv("SUDARSHAN_EXECUTION_TIMEOUT_MS", "0")),
+        )
 
     def _prepare_request(
         self, payload: Mapping[str, Any]
@@ -77,6 +120,7 @@ class SudarshanApplication:
         payload: Mapping[str, Any],
         *,
         operator_id: str | None = None,
+        cancel_event: Event | None = None,
     ) -> dict[str, Any]:
         request, run_id = self._prepare_request(payload)
         operator = (operator_id or request.user_id).strip()
@@ -102,7 +146,24 @@ class SudarshanApplication:
             query=request.query,
         )
         try:
-            result = self.orchestrator.run(request, run_id=run_id)
+            if request.metadata.get("skill_job") is True:
+                output = self._invoke_skill_request(request, run_id=run_id, cancel_event=cancel_event)
+                result_status = str(output.get("status", "failed"))
+                audit.log_run_complete(
+                    operator_id=operator,
+                    case_id=request.case_id,
+                    task_id=request.task_id,
+                    run_id=run_id,
+                    classification=request.classification_level,
+                    pipeline=str(request.metadata.get("skill_id", "")),
+                    status=result_status,
+                )
+                return output
+            result = self.orchestrator.run(
+                request,
+                run_id=run_id,
+                cancellation_event=cancel_event,
+            )
         except Exception:
             audit.log_run_complete(
                 operator_id=operator,
@@ -124,6 +185,194 @@ class SudarshanApplication:
             status=result.status,
         )
         return orchestration_result_to_dict(result)
+
+    def list_skills(self) -> list[dict[str, Any]]:
+        """Return safe skill summaries for Harness discovery."""
+
+        registered = set(self.skill_runtime._adapters)
+        return [
+            skill_summary(manifest, available=skill_id in registered)
+            for skill_id, manifest in sorted(self.skill_manifests.items())
+        ]
+
+    def get_skill(self, skill_id: str) -> dict[str, Any]:
+        canonical = canonical_skill_id(skill_id)
+        manifest = self.skill_manifests.get(canonical)
+        if manifest is None:
+            raise ValueError(f"Unknown skill: {skill_id}")
+        payload = manifest.model_dump(mode="json")
+        payload["available"] = canonical in self.skill_runtime._adapters
+        payload["pipeline"] = skill_pipeline(canonical)
+        return payload
+
+    def submit_skill(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        operator_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit a canonical skill job through the same durable scheduler."""
+
+        data = dict(payload)
+        canonical = canonical_skill_id(str(data.get("skill_id", "")))
+        manifest = self.skill_manifests.get(canonical)
+        pipeline = skill_pipeline(canonical)
+        if manifest is None or pipeline is None or canonical not in self.skill_runtime._adapters:
+            raise ValueError(f"Skill is not available for execution: {canonical}")
+        metadata = dict(data.get("metadata") or {})
+        metadata.update({
+            "skill_id": canonical,
+            "skill_version": manifest.version,
+            "skill_job": True,
+        })
+        data["metadata"] = metadata
+        data["requested_pipelines"] = [pipeline]
+        return self.submit(data, operator_id=operator_id or str(data.get("user_id", "")))
+
+    def invoke_skill(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        operator_id: str | None = None,
+        cancel_event: Event | None = None,
+    ) -> dict[str, Any]:
+        """Invoke a local child skill through SkillRuntime, without Run API recursion."""
+
+        data = dict(payload)
+        canonical = canonical_skill_id(str(data.get("skill_id", "")))
+        manifest = self.skill_manifests.get(canonical)
+        if manifest is None or canonical not in self.skill_runtime._adapters:
+            raise ValueError(f"Skill is not available for local invocation: {canonical}")
+        user_id = str(data.get("user_id", "")).strip()
+        if operator_id and operator_id != user_id:
+            raise PermissionError("user_id must match the authenticated operator")
+        parent_run_id = str(data.get("parent_run_id", "")).strip()
+        if not parent_run_id:
+            raise ValueError("parent_run_id is required for a local child skill")
+        return self._invoke_skill_request(
+            AdvisoryRequest(
+                query=str(data.get("query", "")),
+                user_id=user_id,
+                case_id=str(data.get("case_id", "")),
+                task_id=str(data.get("task_id", "")),
+                classification_level=str(data.get("classification_level", "RESTRICTED")),
+                distribution=str(data.get("distribution", "Authorized NTRO personnel")),
+                token_budget=manifest.budget_policy.max_model_tokens,
+                metadata=dict(data.get("metadata") or {}),
+                requested_pipelines=(skill_pipeline(canonical) or canonical,),
+            ),
+            run_id=parent_run_id,
+            skill_id=canonical,
+            cancel_event=cancel_event,
+        )
+
+    def _invoke_skill_request(
+        self,
+        request: AdvisoryRequest,
+        *,
+        run_id: str,
+        skill_id: str | None = None,
+        cancel_event: Event | None = None,
+    ) -> dict[str, Any]:
+        canonical = canonical_skill_id(skill_id or str(request.metadata.get("skill_id", "")))
+        manifest = self.skill_manifests.get(canonical)
+        if manifest is None:
+            raise ValueError(f"Unknown skill: {canonical}")
+        call = SkillCall(
+            skill_call_id=f"call-{uuid4().hex}",
+            parent_run_id=run_id,
+            parent_node_id=str(request.metadata.get("parent_node_id", "harness-skill")),
+            skill_id=canonical,
+            skill_version=manifest.version,
+            input_payload={
+                "query": request.query,
+                "metadata": dict(request.metadata),
+            },
+            policy=manifest.budget_policy,
+        )
+        context = RunContext(
+            run_id=run_id,
+            task_id=request.task_id,
+            user_id=request.user_id,
+            case_id=request.case_id,
+            classification_level=request.classification_level,
+            distribution=request.distribution,
+            policy=manifest.budget_policy,
+            ancestors=tuple(request.metadata.get("ancestor_skills", ())),
+            allowed_capabilities=frozenset(manifest.required_capabilities),
+            allowed_tools=frozenset(manifest.allowed_tools),
+            cancel_event=cancel_event or Event(),
+        )
+        result = self.skill_runtime.invoke(call, parent_context=context)
+        top_level_status = {
+            "succeeded": "succeeded",
+            "waiting": "pending",
+            "blocked": "failed",
+            "failed": "failed",
+            "cancelled": "cancelled",
+        }[result.status]
+        return {
+            "status": top_level_status,
+            "run_id": run_id,
+            "task_id": request.task_id,
+            "skill_id": canonical,
+            "skill_version": manifest.version,
+            "skill_result": result.model_dump(mode="json"),
+        }
+
+    def _publish_skill_event(self, name: str, payload: Mapping[str, Any]) -> None:
+        """Project child-runtime lifecycle into the existing safe event stream."""
+
+        run_id = str(payload.get("parent_run_id", "")).strip()
+        context = self._run_contexts.get(run_id, {})
+        task_id = context.get("task_id") or str(payload.get("parent_node_id", "skill"))
+        status_map = {
+            "skill.started": ("running", 10, False),
+            "skill.waiting": ("pending", 50, True),
+            "skill.completed": ("succeeded", 100, False),
+            "skill.failed": ("failed", 100, False),
+            "skill.blocked": ("failed", 100, True),
+            "skill.cancelled": ("cancelled", 100, False),
+        }
+        status, progress, requires_action = status_map.get(name, ("running", 0, False))
+        self.progress_sink.publish(
+            ProgressEvent(
+                run_id=run_id or "skill-runtime",
+                task_id=task_id,
+                pipeline=str(payload.get("skill_id", "")),
+                stage=name,
+                status=status,
+                progress=progress,
+                message=f"Child skill event: {name}",
+                requires_action=requires_action,
+                error_code=payload.get("error_code"),
+            )
+        )
+
+    def submit(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        operator_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate and durably enqueue a run without executing it inline."""
+
+        request, run_id = self._prepare_request(payload)
+        operator = (operator_id or request.user_id).strip()
+        if operator != request.user_id:
+            raise PermissionError("user_id must match the authenticated operator")
+        queued_payload = dict(payload)
+        queued_payload["metadata"] = dict(request.metadata)
+        state = self.scheduler.submit(run_id, queued_payload, operator_id=operator)
+        return {
+            "status": state.get("status", "queued"),
+            "run_id": run_id,
+            "task_id": request.task_id,
+            "pipeline": None,
+            "pipelines": list(request.requested_pipelines),
+            "classification_level": request.classification_level,
+            "distribution": request.distribution,
+        }
 
     def resume(
         self,
@@ -166,6 +415,15 @@ class SudarshanApplication:
         current = self.status(run_id)
         if current.get("status") != "not_found" and current.get("task_id") != task_id:
             raise PermissionError("task_id does not match the run")
+        queued = getattr(self, "scheduler", None)
+        if queued is not None and current.get("status") == "queued":
+            cancelled = queued.cancel(run_id)
+            if cancelled and cancelled.get("status") == "cancelled":
+                return {
+                    "run_id": run_id,
+                    "task_id": task_id,
+                    "status": "cancelled",
+                }
         result = self.orchestrator.cancel(run_id, task_id)
         if result.get("status") in {"requested", "cancelled"}:
             context = self._run_contexts.get(run_id, {})
@@ -178,14 +436,133 @@ class SudarshanApplication:
             )
         return result
 
-    def events(self, run_id: str) -> list[dict[str, Any]]:
-        return [event_dict(event) for event in self.progress_sink.events(run_id)]
+    def events(self, run_id: str, *, after_sequence: int = 0) -> list[dict[str, Any]]:
+        projected: list[dict[str, Any]] = []
+        for index, event in enumerate(
+            self.progress_sink.events(run_id, after_sequence=after_sequence),
+            start=1,
+        ):
+            payload = event_dict(event)
+            sequence = int(payload.get("sequence") or after_sequence + index)
+            projected.append(
+                RunEvent.model_validate(
+                    project_progress_event(payload, sequence=sequence).model_dump(mode="json")
+                ).model_dump(mode="json")
+            )
+        return projected
+
+    @staticmethod
+    def _skill_id(pipeline: Any) -> str:
+        aliases = {
+            "presentation": "presentation.case-brief",
+            "ppt": "presentation.case-brief",
+            "video": "video.storyboard",
+            "infographic": "infographic",
+            "linkedin_post": "linkedin.post",
+            "executive_summary": "executive.summary",
+            "advisory": "advisory.brief",
+        }
+        value = str(pipeline or "").strip().lower()
+        return aliases.get(value, value or "sudarshan.request")
+
+    def _run_summary(
+        self,
+        values: Mapping[str, Any],
+        events: list[dict[str, Any]],
+    ) -> RunSummary:
+        request = values.get("request") if isinstance(values.get("request"), Mapping) else {}
+        pipeline = values.get("pipeline") or next(iter(values.get("requested_pipelines", ())), None)
+        response = values.get("response") if isinstance(values.get("response"), Mapping) else {}
+        responses = values.get("responses") if isinstance(values.get("responses"), Mapping) else {}
+        status = str(values.get("status") or "queued")
+        valid_statuses = {
+            "accepted", "queued", "planning", "running", "waiting_on_dependency",
+            "waiting_on_child_skill", "waiting_for_input", "waiting_for_approval",
+            "retrying", "validating", "rendering", "quality_check", "repairing",
+            "pending", "succeeded", "partial", "failed", "cancelled", "completed",
+        }
+        if status not in valid_statuses:
+            status = "running"
+        progress = max((int(event.get("progress", 0)) for event in events), default=0)
+        if status in {"succeeded", "completed"}:
+            progress = max(progress, 100)
+        requires_action = bool(
+            values.get("clarification_required")
+            or (response.get("metadata") or {}).get("human_approval_required") is True
+        )
+        artifact_count = sum(
+            1
+            for candidate in [response, *responses.values()]
+            if isinstance(candidate, Mapping) and candidate.get("artifact")
+        )
+        timestamps = [str(event["timestamp"]) for event in events if event.get("timestamp")]
+        now = datetime.now(timezone.utc).isoformat()
+        return RunSummary(
+            run_id=str(values.get("run_id") or request.get("metadata", {}).get("run_id") or "run-unknown"),
+            task_id=str(values.get("task_id") or request.get("task_id") or "task-unknown"),
+            case_id=str(request.get("case_id") or self._run_contexts.get(str(values.get("run_id")), {}).get("case_id") or "case-unknown"),
+            skill_id=self._skill_id(pipeline),
+            skill_version=str(request.get("metadata", {}).get("skill_version") or "legacy"),
+            execution_version=os.getenv("SUDARSHAN_EXECUTION_VERSION", "2026.1"),
+            status=status,
+            stage=str(values.get("stage") or "queued"),
+            progress=progress,
+            requires_action=requires_action,
+            quality_status=str(values.get("quality_status") or "pending"),
+            artifact_count=artifact_count,
+            child_count=len(responses),
+            error_code=values.get("error_code"),
+            created_at=timestamps[0] if timestamps else now,
+            updated_at=timestamps[-1] if timestamps else now,
+        )
 
     def status(self, run_id: str) -> dict[str, Any]:
         snapshot = self.orchestrator.graph.get_state({"configurable": {"thread_id": run_id}})
         values = dict(snapshot.values or {})
         if not values:
+            queued = getattr(self, "scheduler", None)
+            queue_state = queued.status(run_id) if queued is not None else None
+            if queue_state:
+                pipelines = list(queue_state.get("requested_pipelines") or [])
+                pipeline = pipelines[0] if pipelines else None
+                status = str(queue_state.get("status") or "queued")
+                if status not in {"queued", "running", "retrying", "succeeded", "partial", "failed", "cancelled", "completed", "pending"}:
+                    status = "queued"
+                summary = RunSummary(
+                    run_id=run_id,
+                    task_id=str(queue_state.get("task_id") or "task-unknown"),
+                    case_id=str(queue_state.get("case_id") or "case-unknown"),
+                    skill_id=str(queue_state.get("skill_id") or self._skill_id(pipeline)),
+                    skill_version=str(queue_state.get("skill_version") or "legacy"),
+                    execution_version=os.getenv("SUDARSHAN_EXECUTION_VERSION", "2026.1"),
+                    status=status,
+                    stage=(
+                        "queued" if status in {"queued", "retrying"}
+                        else "completed" if status in {"succeeded", "completed"}
+                        else status
+                    ),
+                    progress=0,
+                    quality_status="pending",
+                )
+                return {
+                    "run_id": run_id,
+                    "task_id": queue_state.get("task_id"),
+                    "status": status,
+                    "stage": summary.stage,
+                    "pipeline": pipeline,
+                    "pipelines": pipelines,
+                    "classification_level": queue_state.get("classification_level", "RESTRICTED"),
+                    "clarification_required": False,
+                    "clarification_questions": [],
+                    "error": queue_state.get("error"),
+                    "dead_letter": bool(queue_state.get("dead_letter", False)),
+                    "skill_result": queue_state.get("skill_result"),
+                    "events": [],
+                    "summary": summary.model_dump(mode="json"),
+                }
             return {"run_id": run_id, "status": "not_found", "events": self.events(run_id)}
+        events = self.events(run_id)
+        summary = self._run_summary(values, events)
         status_response = {
             "run_id": run_id,
             "task_id": values.get("task_id"),
@@ -193,10 +570,15 @@ class SudarshanApplication:
             "stage": values.get("stage"),
             "pipeline": values.get("pipeline"),
             "pipelines": values.get("requested_pipelines", []),
+            "classification_level": str(
+                (values.get("request") or {}).get("classification_level")
+                or self._run_contexts.get(run_id, {}).get("classification_level", "RESTRICTED")
+            ),
             "clarification_required": values.get("clarification_required", False),
             "clarification_questions": values.get("clarification_questions", []),
             "error": values.get("error"),
-            "events": self.events(run_id),
+            "events": events,
+            "summary": summary.model_dump(mode="json"),
         }
         # The projection is already serialized through the NTRO response
         # sanitizer and contains no prompts, raw memory, credentials, or
@@ -214,6 +596,34 @@ class SudarshanApplication:
             }
         return status_response
 
+    def wait(
+        self,
+        run_id: str,
+        *,
+        timeout_ms: int = 30_000,
+        after_sequence: int = 0,
+    ) -> dict[str, Any]:
+        """Wait for terminal/actionable state without holding an HTTP request."""
+
+        if timeout_ms < 0 or timeout_ms > 60_000:
+            raise ValueError("timeout_ms must be between 0 and 60000")
+        deadline = time.monotonic() + timeout_ms / 1000
+        terminal = {"succeeded", "partial", "failed", "cancelled", "completed"}
+        actionable = {"waiting_for_input", "waiting_for_approval", "pending"}
+        while True:
+            current = self.status(run_id)
+            current_status = str(current.get("status", "not_found"))
+            if current_status == "not_found" or current_status in terminal or current_status in actionable:
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+        current["events"] = self.events(run_id, after_sequence=after_sequence)
+        current["wait_timed_out"] = (
+            current.get("status") not in {"not_found", *terminal, *actionable}
+        )
+        return current
+
     def health(self) -> dict[str, Any]:
         """Return system health for operational monitoring."""
         pipelines = self.list_pipelines()
@@ -223,6 +633,7 @@ class SudarshanApplication:
             "registered_pipelines": len(pipelines),
             "pipelines": pipelines,
             "routing_engine": "langgraph",
+            "scheduler": self.scheduler.metrics(),
             "configuration": {
                 "openai_api_key": bool(os.getenv("OPENAI_API_KEY", "").strip()),
                 "cognee_api_key": bool(os.getenv("COGNEE_API_KEY", "").strip()),
@@ -233,6 +644,31 @@ class SudarshanApplication:
     def list_pipelines(self) -> list[str]:
         """Return registered pipeline names for frontend discovery."""
         return list(self.orchestrator.registry.keys())
+
+    def get_artifact(
+        self,
+        artifact_id: str,
+        *,
+        classification_level: str = "RESTRICTED",
+    ) -> dict[str, Any]:
+        """Return a verified, frontend-safe artifact manifest.
+
+        The MCP boundary exposes the stable download URI and integrity metadata,
+        never the controlled filesystem path or artifact bytes.
+        """
+
+        from api.artifacts import ArtifactStore
+        from pipelines.common.ntro_policy import require_classification_access
+
+        root = os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts")
+        manifest, _source = ArtifactStore(root).get(str(artifact_id).strip())
+        require_classification_access(classification_level, manifest.classification_level)
+        return {
+            "artifact_id": manifest.artifact_id,
+            "manifest": manifest.model_dump(mode="json"),
+            "download_uri": manifest.uri,
+            "integrity_verified": True,
+        }
 
     def remember_context(self, user_id: str, case_id: str, context: str) -> None:
         """Persist User/Case-scoped session context."""

@@ -1,0 +1,18 @@
+{
+  "pack_id": "pack_fixture_1",
+  "run_id": "run_fixture_completed",
+  "stage_id": "grounding",
+  "query": "case facts for the presentation",
+  "records": [
+    {
+      "record_id": "evidence-1",
+      "content": "Verified source claim",
+      "source_reference": "source-1",
+      "confidence": 0.9
+    }
+  ],
+  "source_artifact_ids": [],
+  "token_budget": 500,
+  "retrieval_trace_id": "retrieval-1",
+  "scope": {"user_id": "user-1", "case_id": "case_fixture"}
+}

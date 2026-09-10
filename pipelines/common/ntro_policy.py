@@ -29,6 +29,8 @@ CLASSIFICATION_LEVELS: tuple[str, ...] = (
 
 DEFAULT_CLASSIFICATION = "RESTRICTED"
 
+_CLASSIFICATION_RANK = {level: index for index, level in enumerate(CLASSIFICATION_LEVELS)}
+
 
 def validate_classification(level: str, *, strict: bool = False) -> str:
     """Normalise and validate a classification level string.
@@ -52,6 +54,18 @@ def require_classification(level: str) -> str:
     """Validate a caller-supplied classification without silent downgrading."""
 
     return validate_classification(level, strict=True)
+
+
+def require_classification_access(access_level: str, artifact_level: str) -> tuple[str, str]:
+    """Require a caller clearance at least as high as an artifact marking."""
+
+    access = require_classification(access_level)
+    required = require_classification(artifact_level)
+    if _CLASSIFICATION_RANK[access] < _CLASSIFICATION_RANK[required]:
+        raise PermissionError(
+            f"{access} clearance cannot access {required} artifact"
+        )
+    return access, required
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,8 @@ from typing import Any
 from crewai import Agent
 from crewai.tools import BaseTool
 
+from pipelines.common.prompt_policy import NTRO_AGENT_GUARDRAILS
+
 
 def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
     common = {"verbose": False, "allow_delegation": False, "tools": tools}
@@ -20,7 +22,8 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
             goal="Extract the smallest set of verified facts that a visual can communicate clearly.",
             backstory=(
                 "You identify relationships, sequences, comparisons, and hierarchies in case information. "
-                "You preserve provenance and never invent facts, labels, statistics, or official insignia."
+                "You preserve provenance and never invent facts, labels, statistics, or official insignia. "
+                f"{NTRO_AGENT_GUARDRAILS}"
             ),
             **common,
         ),
@@ -31,7 +34,8 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
                 "You are an information designer using AntV Infographic's declarative syntax. You choose a "
                 "structure that improves comprehension, keep text legible, and use restrained official styling "
                 "(the Indian Government color palette). You must support and retain bilingual (English/Hindi) "
-                "labels from the case information if present."
+                "labels from the case information if present. "
+                f"{NTRO_AGENT_GUARDRAILS}"
             ),
             **common,
         ),
@@ -40,7 +44,8 @@ def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
             goal="Reject invalid syntax, misleading visuals, unsupported claims, and poor visual hierarchy.",
             backstory=(
                 "You check syntax structure, source linkage, completeness, readability, and professional visual "
-                "tone before the renderer is called."
+                "tone before the renderer is called. "
+                f"{NTRO_AGENT_GUARDRAILS}"
             ),
             **common,
         ),

@@ -1,0 +1,19 @@
+{
+  "artifact_id": "artifact_fixture_pptx",
+  "run_id": "run_fixture_completed",
+  "kind": "pptx",
+  "name": "case-brief.pptx",
+  "uri": "/artifacts/artifact_fixture_pptx/download",
+  "preview_uri": "/artifacts/artifact_fixture_pptx/preview",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "size_bytes": 1024,
+  "classification_level": "RESTRICTED",
+  "quality_status": "passed",
+  "source_ir_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "renderer_version": "ppt-renderer@2.0.0",
+  "schema_version": "1",
+  "parent_artifact_ids": [],
+  "evidence_ids": ["evidence-1"],
+  "created_at": "2026-01-01T00:02:00+00:00",
+  "metadata": {"slide_count": 8}
+}
