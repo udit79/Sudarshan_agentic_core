@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentic Engineering Loop"
+  short_description: "Research, plan, implement, test, and verify changes safely"
+  default_prompt: "Use the agentic engineering loop: research, plan, split into executable tickets, implement, test, and check regressions. Do not commit unless explicitly requested."
