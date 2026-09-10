@@ -448,7 +448,7 @@ describe('workspace browser rows', () => {
     }
   })
 
-  it('session row menu opens without opening the session and dispatches rename, fork, and delete', () => {
+  it('session row menu opens without opening the session and dispatches rename, fork, and archive', () => {
     const onOpen = vi.fn()
     const onRename = vi.fn()
     const onFork = vi.fn()
@@ -461,9 +461,8 @@ describe('workspace browser rows', () => {
       onRename={onRename} onFork={onFork} onArchive={onArchive} t={t} />)
     fireEvent.click(screen.getByRole('button', { name: '会话“One”的操作' }))
     expect(onOpen).not.toHaveBeenCalled()
-    // Delete removes the chat from the visible list while the archive-backed
-    // host contract keeps its log and accounting slot intact.
-    expect(screen.getByRole('menuitem', { name: '删除聊天' }).className).toMatch(/danger/)
+    // Archive is not destructive (log and accounting slot remain): no danger styling.
+    expect(screen.getByRole('menuitem', { name: '归档会话' }).className).not.toMatch(/danger/)
     // Rename dispatches with the current display title (dialog prefill).
     fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
     expect(screen.queryByRole('menu')).toBeNull()
@@ -472,9 +471,9 @@ describe('workspace browser rows', () => {
     fireEvent.click(screen.getByRole('button', { name: '会话“One”的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '分叉会话' }))
     expect(onFork).toHaveBeenCalledWith(node.id)
-    // Delete dispatches without opening the session.
+    // Archive dispatches without opening the session.
     fireEvent.click(screen.getByRole('button', { name: '会话“One”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '删除聊天' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档会话' }))
     expect(onArchive).toHaveBeenCalledWith(node.id)
     expect(onRename).toHaveBeenCalledOnce()
     expect(onOpen).not.toHaveBeenCalled()

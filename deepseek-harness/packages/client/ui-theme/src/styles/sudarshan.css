@@ -1,0 +1,517 @@
+/* Sudarshan 1.0 visual layer.
+ *
+ * The original Sudarshan 1.0 stylesheet targets the standalone frontend's
+ * class names. The harness keeps its existing component structure, so this
+ * sheet ports the same visual language through the harness theme tokens:
+ * cosmic obsidian, indigo/violet accents, glass surfaces, and soft neon glow.
+ */
+
+:root {
+  /* Reference-locked atmosphere palette. These tokens are used only by the
+   * background field and Chakra lighting below. Existing UI tokens stay
+   * unchanged so the interface keeps its current visual and functional form. */
+  --sudarshan-atmosphere-base: #050713;
+  --sudarshan-atmosphere-deep: #060a18;
+  --sudarshan-atmosphere-navy: #0a0e26;
+  --sudarshan-atmosphere-elevated: #0f163c;
+  --sudarshan-atmosphere-blue: #575bde;
+  --sudarshan-atmosphere-electric: #4d7cff;
+  --sudarshan-atmosphere-lavender: #8a8fea;
+  --sudarshan-atmosphere-purple: #433878;
+  --sudarshan-atmosphere-violet: #6356a4;
+  --sudarshan-atmosphere-lilac: #7e69d0;
+  --sudarshan-atmosphere-warm-deep: #a9727f;
+  --sudarshan-atmosphere-warm: #e0a497;
+  --sudarshan-atmosphere-warm-light: #f0dad6;
+  --sudarshan-bg-space-dark: var(--sudarshan-atmosphere-base);
+  --sudarshan-bg-card-glass: rgba(13, 17, 34, 0.72);
+  --sudarshan-bg-card-hover: rgba(20, 26, 52, 0.86);
+  --sudarshan-bg-card-active: rgba(22, 30, 64, 0.92);
+  --sudarshan-border-subtle: rgba(255, 255, 255, 0.06);
+  --sudarshan-border-specular: rgba(255, 255, 255, 0.1);
+  --sudarshan-border-bright: rgba(255, 255, 255, 0.18);
+  --sudarshan-border-glass: rgba(129, 140, 248, 0.24);
+  --sudarshan-primary-indigo: #6366f1;
+  --sudarshan-primary-purple: #8b5cf6;
+  --sudarshan-primary-violet: #a855f7;
+  --sudarshan-accent-cyan: #38bdf8;
+  --sudarshan-accent-blue: #60a5fa;
+  --sudarshan-accent-amber: #f59e0b;
+  --sudarshan-accent-emerald: #10b981;
+  --sudarshan-accent-pink: #ec4899;
+  --sudarshan-font-main: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --sudarshan-text-main: #f1f5f9;
+  --sudarshan-text-secondary: #94a3b8;
+  --sudarshan-text-muted: #64748b;
+  --sudarshan-glow-primary: 0 0 24px rgba(99, 102, 241, 0.35);
+  --sudarshan-glow-card: 0 12px 28px -6px rgba(0, 0, 0, 0.6),
+    0 0 24px rgba(99, 102, 241, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+/* Keep both appearance modes on the Sudarshan 1.0 dark visual system. The
+ * existing preference still controls settings/state, while this product skin
+ * remains intentionally cosmic rather than switching to the old white theme.
+ */
+body,
+body[data-ds-dark-theme] {
+  color-scheme: dark;
+  --dsw-font-family: var(--sudarshan-font-main);
+
+  --dsw-alias-bg-base: var(--sudarshan-bg-space-dark);
+  --dsw-alias-bg-layer-1: rgba(9, 13, 28, 0.88);
+  --dsw-alias-bg-layer-2: var(--sudarshan-bg-card-glass);
+  --dsw-alias-bg-layer-3: rgba(20, 26, 52, 0.92);
+  --dsw-alias-bg-layer-4: rgba(22, 30, 64, 0.96);
+  --dsw-alias-bg-module-platform: rgba(13, 17, 34, 0.7);
+  --dsw-alias-bg-multi-select: rgba(20, 26, 52, 0.78);
+  --dsw-alias-bg-overlay: rgba(30, 41, 78, 0.92);
+  --dsw-alias-bg-skeleton: rgba(255, 255, 255, 0.08);
+
+  --dsw-alias-border-inverted: rgba(255, 255, 255, 0.08);
+  --dsw-alias-border-inverted2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l1: var(--sudarshan-border-subtle);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.1);
+  --dsw-alias-border-l2-darkmode-thin: rgba(255, 255, 255, 0.08);
+  --dsw-alias-border-l3: var(--sudarshan-border-specular);
+  --dsw-alias-border-l4: var(--sudarshan-border-bright);
+
+  --dsw-alias-brand-primary: var(--sudarshan-primary-indigo);
+  --dsw-alias-brand-primary-invert: #f8fafc;
+  --dsw-alias-brand-primary-new-colorprimary-new-color: var(--sudarshan-primary-indigo);
+  --dsw-alias-brand-text: var(--sudarshan-text-main);
+  --dsw-alias-button-primary-fill: var(--sudarshan-primary-indigo);
+  --dsw-alias-button-primary-hover: var(--sudarshan-primary-purple);
+  --dsw-alias-button-primary-dimmed: rgba(99, 102, 241, 0.2);
+  --dsw-alias-button-info-fill: var(--sudarshan-accent-blue);
+  --dsw-alias-button-info-hover: var(--sudarshan-accent-cyan);
+  --dsw-alias-button-elevated-fill: rgba(20, 26, 52, 0.72);
+  --dsw-alias-button-floating-fill: rgba(13, 17, 34, 0.84);
+  --dsw-alias-button-floating-hover: rgba(30, 41, 78, 0.92);
+  --dsw-alias-button-contrast-fill: #f1f5f9;
+  --dsw-alias-button-tool-bar-fill: rgba(30, 41, 78, 0.7);
+  --dsw-alias-button-tool-bar-fill-invisible: rgba(30, 41, 78, 0.32);
+  --dsw-alias-button-tool-bar-hover: rgba(51, 65, 105, 0.86);
+
+  --dsw-alias-interactive-bg-active: rgba(99, 102, 241, 0.24);
+  --dsw-alias-interactive-bg-hover: rgba(129, 140, 248, 0.14);
+  --dsw-alias-interactive-bg-hover-accent: rgba(56, 189, 248, 0.14);
+  --dsw-alias-interactive-bg-hover-solid: rgba(30, 41, 78, 0.92);
+  --dsw-alias-interactive-bg-hover-danger: rgba(239, 68, 68, 0.14);
+
+  --dsw-alias-label-primary: var(--sudarshan-text-main);
+  --dsw-alias-label-primary-bluish: #a5b4fc;
+  --dsw-alias-label-primary-dimmed: #cbd5e1;
+  --dsw-alias-label-primary-foreground: #ffffff;
+  --dsw-alias-label-primary-inverted: #080911;
+  --dsw-alias-label-secondary: var(--sudarshan-text-secondary);
+  --dsw-alias-label-tertiary: var(--sudarshan-text-muted);
+  --dsw-alias-label-caption: #64748b;
+  --dsw-alias-label-dimmed: #475569;
+  --dsw-alias-label-quaternary: #334155;
+  --dsw-alias-label-error: #f87171;
+
+  --dsw-alias-markdown-code-block: rgba(9, 13, 28, 0.86);
+  --dsw-alias-markdown-code-block-banner: rgba(20, 26, 52, 0.9);
+  --dsw-alias-markdown-inline-code: rgba(99, 102, 241, 0.18);
+  --dsw-alias-markdown-placeholder: #64748b;
+  --dsw-alias-markdown-tag: rgba(129, 140, 248, 0.18);
+  --dsw-alias-markdown-citation: #a5b4fc;
+
+  --dsw-alias-scrollbar-bg-l1: rgba(148, 163, 184, 0.24);
+  --dsw-alias-scrollbar-bg-l2: rgba(148, 163, 184, 0.36);
+  --dsw-alias-scrollbar-hover-l1: rgba(148, 163, 184, 0.42);
+  --dsw-alias-scrollbar-hover-l2: rgba(148, 163, 184, 0.56);
+
+  --dsw-alias-state-business-primary: var(--sudarshan-primary-indigo);
+  --dsw-alias-state-business-tertiary: rgba(99, 102, 241, 0.18);
+  --dsw-alias-state-error-primary: #ef4444;
+  --dsw-alias-state-error-secondary: #f87171;
+  --dsw-alias-state-success-primary: var(--sudarshan-accent-emerald);
+  --dsw-alias-state-success-secondary: #34d399;
+  --dsw-alias-state-success-tertiary: rgba(16, 185, 129, 0.16);
+  --dsw-alias-state-warn-label: #fbbf24;
+  --dsw-alias-state-warn-primary: var(--sudarshan-accent-amber);
+  --dsw-alias-state-warn-secondary: #fbbf24;
+  --dsw-alias-state-warn-tertiary: rgba(245, 158, 11, 0.16);
+  --dsw-alias-state-warning-primary: var(--sudarshan-accent-amber);
+  --dsw-alias-toast-bg: rgba(20, 26, 52, 0.96);
+  --dsw-alias-tooltip-bg: rgba(9, 13, 28, 0.96);
+
+  --dsw-specific-bubble: rgba(99, 102, 241, 0.16);
+  --dsw-specific-bubble-highlight: rgba(129, 140, 248, 0.24);
+  --dsw-specific-input-major: rgba(13, 17, 34, 0.78);
+  --dsw-specific-login-input: rgba(13, 17, 34, 0.78);
+  --dsw-specific-menu: rgba(13, 17, 34, 0.96);
+  --dsw-specific-selector: rgba(30, 41, 78, 0.86);
+  --dsw-specific-sidebar-fill: rgba(9, 13, 28, 0.76);
+  --dsw-specific-sidebar-nav-item-active: rgba(99, 102, 241, 0.2);
+  --dsw-specific-sidebar-nav-item-active-accent: rgba(129, 140, 248, 0.26);
+  --dsw-specific-sidebar-nav-item-hover: rgba(129, 140, 248, 0.12);
+  --dsw-specific-tip: rgba(30, 41, 78, 0.72);
+
+  --dsw-shadow-lv1: 0 4px 12px rgba(0, 0, 0, 0.28);
+  --dsw-shadow-lv1-blur: 0 8px 24px rgba(0, 0, 0, 0.2);
+  --dsw-shadow-lv2: 0 8px 20px rgba(0, 0, 0, 0.34), 0 0 18px rgba(99, 102, 241, 0.12);
+  --dsw-shadow-lv3: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 28px rgba(99, 102, 241, 0.18);
+  --dsw-elevation-stroke-color: var(--sudarshan-border-glass);
+  --dsw-elevation-panel: 0 0 0 0.5px var(--dsw-elevation-stroke-color), var(--dsw-shadow-lv2);
+  --dsw-elevation-prominent: 0 0 0 0.5px var(--dsw-elevation-stroke-color), var(--dsw-shadow-lv3);
+  --dsw-elevation-soft: 0 0 0 0.5px var(--dsw-elevation-stroke-color), var(--dsw-shadow-lv1-blur);
+}
+
+html {
+  background: var(--sudarshan-atmosphere-base);
+}
+
+body {
+  position: relative;
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-family: var(--sudarshan-font-main);
+  background: var(--sudarshan-atmosphere-base);
+  color: var(--sudarshan-text-main);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body::before,
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+}
+
+body::before {
+  background:
+    radial-gradient(
+      circle at 82% 45%,
+      rgba(67, 56, 120, 0.32) 0%,
+      rgba(44, 42, 120, 0.18) 20%,
+      rgba(15, 22, 60, 0.1) 40%,
+      transparent 65%
+    ),
+    radial-gradient(
+      ellipse at 92% 82%,
+      rgba(44, 42, 120, 0.14) 0%,
+      rgba(15, 22, 60, 0.08) 26%,
+      transparent 56%
+    );
+  filter: blur(18px);
+  animation: sudarshan-ambient-float 26s ease-in-out infinite alternate;
+}
+
+body::after {
+  opacity: 0.22;
+  background-image:
+    radial-gradient(1px 1px at 15% 15%, rgba(255, 255, 255, 0.7) 50%, transparent),
+    radial-gradient(1.5px 1.5px at 35% 25%, rgba(126, 105, 208, 0.55) 50%, transparent),
+    radial-gradient(1px 1px at 60% 12%, rgba(255, 255, 255, 0.5) 50%, transparent),
+    radial-gradient(1.5px 1.5px at 80% 40%, rgba(77, 124, 255, 0.58) 50%, transparent),
+    radial-gradient(1px 1px at 70% 75%, rgba(224, 164, 151, 0.38) 50%, transparent);
+  background-size: 550px 550px;
+  animation: sudarshan-stars-drift 70s linear infinite;
+}
+
+@keyframes sudarshan-ambient-float {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(25px, -18px, 0) scale(1.04); }
+  100% { transform: translate3d(-20px, 20px, 0) scale(0.98); }
+}
+
+@keyframes sudarshan-stars-drift {
+  from { background-position: 0 0; }
+  to { background-position: 220px 140px; }
+}
+
+/* Port the large Sudarshan 1.0 chakra watermark into the existing app shell.
+ * It is deliberately a theme pseudo-element so it does not add a component or
+ * compete with the harness' interaction and layout ownership. */
+@keyframes sudarshan-chakra-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+#root::before {
+  position: fixed;
+  top: 72px;
+  right: -112px;
+  z-index: 2;
+  width: min(460px, 38vw);
+  aspect-ratio: 1306 / 1204;
+  pointer-events: none;
+  content: '';
+  background: url('/assets/sudarshan.PNG') center / contain no-repeat;
+  opacity: 0.18;
+  mix-blend-mode: screen;
+  filter: blur(0.45px)
+    drop-shadow(0 0 25px rgba(87, 91, 222, 0.25))
+    drop-shadow(0 0 70px rgba(67, 56, 120, 0.22));
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 48%, rgba(0, 0, 0, 0.86) 62%, transparent 78%);
+  mask-image: radial-gradient(ellipse at center, #000 48%, rgba(0, 0, 0, 0.86) 62%, transparent 78%);
+  transform-origin: center;
+  animation: sudarshan-chakra-spin 200s linear infinite;
+}
+
+/* Let the Sudarshan atmosphere show through the existing shell while keeping
+ * the component geometry and interaction ownership unchanged. */
+[class*='_frame_'],
+[class*='_centerCol_'] {
+  background: transparent !important;
+}
+
+[class*='_sidebarCol_'],
+[class*='_detailsCol_'] {
+  background: rgba(9, 13, 28, 0.68) !important;
+  border-color: var(--sudarshan-border-specular) !important;
+  box-shadow: inset 0 0 30px rgba(99, 102, 241, 0.04);
+}
+
+[class*='_card_'] {
+  border-color: var(--sudarshan-border-glass) !important;
+}
+
+[class*='_headline_'] {
+  text-shadow: 0 0 18px rgba(129, 140, 248, 0.28);
+}
+
+[class*='_brandName_'],
+[class*='_fallbackBrandName_'] {
+  background: linear-gradient(120deg, #f8fafc 0%, #a5b4fc 52%, #c084fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+[data-sudarshan-brand-mark] {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.7));
+}
+
+[data-sudarshan-brand-mark] .sudarshan-brand-orbit {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sudarshan-logo-spin 18s linear infinite;
+}
+
+[data-sudarshan-brand-mark] .sudarshan-brand-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sudarshan-logo-breathe 3.2s ease-in-out infinite;
+}
+
+[data-sudarshan-brand-mark] .sudarshan-brand-rays {
+  opacity: 0.86;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sudarshan-logo-rays 4.8s ease-in-out infinite alternate;
+}
+
+[data-sudarshan-brand-mark] .sudarshan-brand-core-glow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sudarshan-logo-core-glow 2.2s ease-in-out infinite;
+}
+
+[data-sudarshan-brand-mark] .sudarshan-brand-core {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sudarshan-logo-core-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes sudarshan-logo-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes sudarshan-logo-breathe {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
+
+@keyframes sudarshan-logo-rays {
+  from { transform: rotate(-4deg) scale(0.96); opacity: 0.64; }
+  to { transform: rotate(4deg) scale(1.04); opacity: 1; }
+}
+
+@keyframes sudarshan-logo-core-glow {
+  0%, 100% { transform: scale(0.84); opacity: 0.12; }
+  50% { transform: scale(1.32); opacity: 0.42; }
+}
+
+@keyframes sudarshan-logo-core-pulse {
+  0%, 100% { transform: scale(0.86); opacity: 0.84; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
+.sudarshan-brand-name {
+  background: linear-gradient(120deg, #f8fafc 0%, #a5b4fc 52%, #c084fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.sudarshan-brand-tag {
+  align-self: flex-start;
+  margin-top: 1px;
+  padding: 1px 5px 0;
+  border: 1px solid rgba(129, 140, 248, 0.34);
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.16);
+  color: #a5b4fc;
+  font-family: var(--ds-font-family-code);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 14px;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[contenteditable='true']:focus-visible {
+  outline: 2px solid var(--sudarshan-accent-cyan);
+  outline-offset: 2px;
+}
+
+/* Cinematic background redesign. The application surfaces remain owned by
+ * their existing components; this layer changes only the environment behind
+ * them and the lighting treatment of the existing Chakra asset. */
+html,
+body {
+  background: #050713;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 86% 44%, rgba(45, 37, 94, 0.42) 0%, rgba(15, 22, 60, 0.22) 28%, transparent 68%),
+    radial-gradient(ellipse at 91% 91%, rgba(44, 42, 120, 0.18) 0%, rgba(15, 22, 60, 0.08) 30%, transparent 56%),
+    linear-gradient(112deg, #050713 0%, #060a18 55%, #0a0e26 100%);
+}
+
+body::before {
+  background:
+    radial-gradient(circle at 82% 45%, rgba(67, 56, 120, 0.42) 0%, rgba(44, 42, 120, 0.24) 22%, rgba(15, 22, 60, 0.12) 43%, transparent 69%),
+    radial-gradient(ellipse at 86% 82%, rgba(77, 124, 255, 0.12), transparent 42%),
+    conic-gradient(from 186deg at 82% 49%, transparent 0deg, rgba(87, 91, 222, 0.09) 26deg, transparent 54deg, rgba(126, 105, 208, 0.08) 86deg, transparent 118deg);
+  filter: blur(28px);
+  animation: sudarshan-cinematic-field 32s ease-in-out infinite alternate;
+}
+
+body::after {
+  opacity: 0.2;
+  background-image:
+    radial-gradient(1px 1px at 15% 15%, rgba(240, 218, 214, 0.58) 50%, transparent),
+    radial-gradient(1.5px 1.5px at 35% 25%, rgba(126, 105, 208, 0.54) 50%, transparent),
+    radial-gradient(1px 1px at 60% 12%, rgba(138, 143, 234, 0.5) 50%, transparent),
+    radial-gradient(1.5px 1.5px at 80% 40%, rgba(77, 124, 255, 0.54) 50%, transparent),
+    radial-gradient(1px 1px at 70% 75%, rgba(224, 164, 151, 0.32) 50%, transparent);
+  background-size: 620px 620px;
+  animation: sudarshan-cinematic-stars 110s linear infinite;
+}
+
+@keyframes sudarshan-cinematic-field {
+  0% { transform: translate3d(-1.5%, 0, 0) scale(1); }
+  50% { transform: translate3d(1%, -1%, 0) scale(1.05); }
+  100% { transform: translate3d(-0.5%, 1.5%, 0) scale(0.99); }
+}
+
+@keyframes sudarshan-cinematic-stars {
+  from { background-position: 0 0; }
+  to { background-position: 280px 190px; }
+}
+
+#root::before {
+  top: -2%;
+  right: -15%;
+  z-index: 2;
+  width: min(720px, 62vw);
+  opacity: 0.25;
+  mix-blend-mode: screen;
+  filter: blur(0.35px)
+    drop-shadow(0 0 25px rgba(87, 91, 222, 0.25))
+    drop-shadow(0 0 70px rgba(67, 56, 120, 0.22));
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 34%, transparent 40%, transparent 61%, #000 68%, #000 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 34%, transparent 40%, transparent 61%, #000 68%, #000 100%);
+  animation: sudarshan-chakra-bloom 26s ease-in-out infinite;
+}
+
+@keyframes sudarshan-chakra-bloom {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(0.985); opacity: 0.2; }
+  50% { transform: translate3d(-18px, 12px, 0) scale(1.025); opacity: 0.3; }
+}
+
+#root::after {
+  position: fixed;
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+  opacity: 0.82;
+  background:
+    repeating-radial-gradient(ellipse at 80% 49%, transparent 0 112px, rgba(87, 91, 222, 0.075) 113px 114px, transparent 115px 184px),
+    radial-gradient(ellipse at 80% 49%, transparent 0 28%, rgba(126, 105, 208, 0.075) 28.2% 28.35%, transparent 28.8% 42%, rgba(77, 124, 255, 0.055) 42.2% 42.35%, transparent 42.9% 58%),
+    conic-gradient(from 208deg at 80% 49%, transparent 0deg, rgba(77, 124, 255, 0.09) 16deg, transparent 40deg, rgba(126, 105, 208, 0.08) 68deg, transparent 96deg, rgba(87, 91, 222, 0.06) 132deg, transparent 166deg),
+    linear-gradient(142deg, transparent 42%, rgba(77, 124, 255, 0.045) 43%, transparent 44%),
+    linear-gradient(132deg, transparent 55%, rgba(126, 105, 208, 0.04) 56%, transparent 57%);
+  background-size: 100% 100%;
+  animation: sudarshan-orbital-depth 120s ease-in-out infinite alternate;
+  -webkit-mask-image: linear-gradient(180deg, transparent 2%, #000 18%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 2%, #000 18%, #000 88%, transparent 100%);
+}
+
+@keyframes sudarshan-orbital-depth {
+  from { transform: translate3d(0, 0, 0) rotate(0deg); }
+  to { transform: translate3d(-18px, 12px, 0) rotate(2deg); }
+}
+
+@media (max-width: 900px) {
+  #root::before {
+    right: -28%;
+    width: min(620px, 78vw);
+    opacity: 0.2;
+  }
+}
+
+@media (max-width: 600px) {
+  #root::before {
+    top: 4%;
+    right: -52%;
+    width: 540px;
+    opacity: 0.16;
+  }
+
+  #root::after {
+    opacity: 0.58;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after,
+  #root::before,
+  #root::after {
+    animation: none;
+  }
+
+  [data-sudarshan-brand-mark] * {
+    animation: none;
+  }
+}
