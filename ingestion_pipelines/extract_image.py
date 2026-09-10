@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Callable
 
 from ingestion_pipelines.config import load_env
-from ingestion_pipelines.runtime import IngestionBudgetExceededError
+from ingestion_pipelines.runtime import (
+    IngestionBudgetExceededError,
+    optional_stage_attempts,
+    optional_stage_backoff_seconds,
+    run_optional_stage_with_retry,
+)
 
 _MIME_MAP: dict[str, str] = {
     ".jpg": "image/jpeg",
@@ -66,29 +71,38 @@ def extract_text_from_image_openai(
     client = OpenAI(api_key=api_key)
     mime = _mime_type(file_path)
     b64_data = _encode_image_b64(file_path)
-    if stage_charger is not None:
-        stage_charger("vision", 1, 4096, 0)
-
-    print(f"   [Vision OCR] Calling OpenAI gpt-4o-mini for '{Path(file_path).name}' (~1-3s)...", flush=True)
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": _TRANSCRIPTION_PROMPT},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime};base64,{b64_data}",
-                            "detail": "high",
+    def request(attempt: int):
+        if stage_charger is not None:
+            stage_charger("vision", 1, 4096, 0)
+        print(
+            f"   [Vision OCR] Calling OpenAI gpt-4o-mini for '{Path(file_path).name}' "
+            f"(attempt {attempt})...",
+            flush=True,
+        )
+        return client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": _TRANSCRIPTION_PROMPT},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime};base64,{b64_data}",
+                                "detail": "high",
+                            },
                         },
-                    },
-                ],
-            }
-        ],
-        max_tokens=4096,
+                    ],
+                }
+            ],
+            max_tokens=4096,
+        )
+
+    response = run_optional_stage_with_retry(
+        request,
+        max_attempts=optional_stage_attempts("vision"),
+        backoff_seconds=optional_stage_backoff_seconds(),
     )
     if usage_recorder is not None:
         usage = getattr(response, "usage", None)

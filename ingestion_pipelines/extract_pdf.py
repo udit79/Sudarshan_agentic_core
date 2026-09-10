@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Callable
 
 from ingestion_pipelines.config import load_env
+from ingestion_pipelines.runtime import (
+    optional_stage_attempts,
+    optional_stage_backoff_seconds,
+    run_optional_stage_with_retry,
+)
 
 _TRANSCRIPTION_PROMPT = (
     "Transcribe all text on this document page exactly as written, including "
@@ -29,6 +34,7 @@ def _ocr_page_image_bytes(
     img_bytes: bytes,
     page_num: int,
     *,
+    stage_charger: Callable[[str, int, int, int], object] | None = None,
     usage_recorder: Callable[[str, str, str, int, int, bool], object] | None = None,
 ) -> str:
     """Transcribe a scanned page with OpenAI's vision-capable model."""
@@ -40,24 +46,34 @@ def _ocr_page_image_bytes(
         client = OpenAI(api_key=openai_key)
         b64_data = base64.b64encode(img_bytes).decode("utf-8")
         print(f"   [PDF Hybrid OCR] Page {page_num}: Scanned page detected, calling OpenAI gpt-4o-mini...", flush=True)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": _TRANSCRIPTION_PROMPT},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{b64_data}",
-                                "detail": "high",
+        def request(attempt: int):
+            if stage_charger is not None:
+                stage_charger("vision", 1, 4096, 0)
+            print(f"   [PDF Hybrid OCR] Page {page_num}: vision attempt {attempt}...", flush=True)
+            return client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": _TRANSCRIPTION_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{b64_data}",
+                                    "detail": "high",
+                                },
                             },
-                        },
-                    ],
-                }
-            ],
-            max_tokens=4096,
+                        ],
+                    }
+                ],
+                max_tokens=4096,
+            )
+
+        response = run_optional_stage_with_retry(
+            request,
+            max_attempts=optional_stage_attempts("vision"),
+            backoff_seconds=optional_stage_backoff_seconds(),
         )
         if usage_recorder is not None:
             usage = getattr(response, "usage", None)
@@ -136,14 +152,13 @@ def extract_text_from_pdf(
             os.environ.get("OPENAI_API_KEY")
             and not os.environ.get("OPENAI_API_KEY", "").startswith("replace-")
         )
-        if stage_charger is not None and vision_available:
-            stage_charger("vision", len(scanned_tasks), 4096 * len(scanned_tasks), 0)
         with ThreadPoolExecutor(max_workers=min(5, len(scanned_tasks))) as executor:
             future_to_page = {
                 executor.submit(
                     _ocr_page_image_bytes,
                     img_bytes,
                     p_num,
+                    stage_charger=stage_charger if vision_available else None,
                     usage_recorder=usage_recorder,
                 ): p_num
                 for p_num, img_bytes in scanned_tasks

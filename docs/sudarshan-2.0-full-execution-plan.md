@@ -3386,6 +3386,11 @@ abandoned-artifact cleanup. The local usage ledger already separates
 preflight estimates from actual image/PDF provider response usage when
 available, and the local scheduler already records
 `queue_wait_ms` per job and average/maximum queue wait in health metrics.
+Optional vision-provider stages now use a bounded, opt-in retry seam; each
+attempt charges the stage budget again, transient failures may retry with a
+bounded backoff, and auth/budget/invalid-request failures go directly to the
+existing fallback path. Shared retry reservations, distributed leases, and
+abandoned-artifact cleanup remain deployment work.
 
 `T38` now has a deterministic local evaluation slice in
 `ingestion_pipelines/evaluation.py`. It runs the same reviewed query cases

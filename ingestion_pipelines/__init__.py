@@ -37,6 +37,10 @@ from ingestion_pipelines.runtime import (
     IngestionStageCacheEntry,
     IngestionUsageRecorder,
     build_ingestion_stage_fingerprint,
+    is_retryable_optional_error,
+    optional_stage_attempts,
+    optional_stage_backoff_seconds,
+    run_optional_stage_with_retry,
 )
 from ingestion_pipelines.evaluation import (
     BenchmarkCase,
@@ -86,6 +90,10 @@ __all__ = [
     "IngestionStageCacheEntry",
     "IngestionUsageRecorder",
     "build_ingestion_stage_fingerprint",
+    "is_retryable_optional_error",
+    "optional_stage_attempts",
+    "optional_stage_backoff_seconds",
+    "run_optional_stage_with_retry",
     "BenchmarkCase",
     "BenchmarkMetrics",
     "BenchmarkObservation",

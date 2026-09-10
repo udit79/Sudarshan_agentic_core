@@ -9,6 +9,7 @@ from ingestion_pipelines import (
     IngestionStageCache,
     IngestionUsageRecorder,
     build_ingestion_stage_fingerprint,
+    run_optional_stage_with_retry,
 )
 
 
@@ -108,3 +109,41 @@ def test_usage_recorder_separates_estimates_from_actual_provider_usage() -> None
     assert snapshot["actual_tokens"] == 1380
     assert snapshot["by_stage"]["vision"]["calls"] == 2
     assert snapshot["usage_is_estimate"] is True
+
+
+def test_optional_stage_retry_is_bounded_and_reports_attempts() -> None:
+    attempts: list[int] = []
+    retries: list[int] = []
+    controller = IngestionBudgetController()
+    controller.register("retry-ingestion", IngestionBudget(vision_calls=3))
+
+    def operation(attempt: int) -> str:
+        attempts.append(attempt)
+        controller.charge("retry-ingestion", "vision")
+        if attempt < 3:
+            raise TimeoutError("provider timed out")
+        return "ready"
+
+    result = run_optional_stage_with_retry(
+        operation,
+        max_attempts=3,
+        backoff_seconds=0,
+        on_retry=lambda attempt, _error: retries.append(attempt),
+    )
+
+    assert result == "ready"
+    assert attempts == [1, 2, 3]
+    assert retries == [1, 2]
+    assert controller.snapshot("retry-ingestion").stage_units["vision"] == 3
+
+
+def test_optional_stage_does_not_retry_non_transient_errors() -> None:
+    attempts: list[int] = []
+
+    def operation(attempt: int) -> str:
+        attempts.append(attempt)
+        raise ValueError("invalid request")
+
+    with pytest.raises(ValueError, match="invalid request"):
+        run_optional_stage_with_retry(operation, max_attempts=4, backoff_seconds=0)
+    assert attempts == [1]

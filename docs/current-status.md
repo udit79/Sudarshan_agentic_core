@@ -122,7 +122,9 @@ profile use the same Sudarshan application boundary.
   evidence and recording extraction coverage, evidence recall/faithfulness,
   tokens, cost, P50/P95 latency, cache hits, queue wait, repairs, and
   human-correction time. It is an offline evaluation slice, not production
-  benchmark evidence.
+  benchmark evidence. Optional vision-provider stages now have a bounded,
+  opt-in retry seam that re-charges each attempt and preserves fallback
+  behavior for non-retryable failures.
 
 ### Backend work still required
 
@@ -186,7 +188,7 @@ sequenceDiagram
 The current local verification snapshot is:
 
 ```text
-Python: 208 passed, 1 skipped
+Python: 210 passed, 1 skipped
 T28 reliability focus: 21 passed
 Frontend projection/cursor tests: 3 passed
 Node gateway tests: 9 passed

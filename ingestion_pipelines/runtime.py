@@ -9,18 +9,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping, TypeVar
 
 from ingestion_pipelines.contracts import IngestionBudget
 
 
 IngestionStage = Literal["parser", "ocr", "vision", "summary", "embedding"]
 _STAGES: tuple[IngestionStage, ...] = ("parser", "ocr", "vision", "summary", "embedding")
+_RetryValue = TypeVar("_RetryValue")
 
 
 class IngestionBudgetExceededError(RuntimeError):
@@ -29,6 +31,75 @@ class IngestionBudgetExceededError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
+
+
+def optional_stage_attempts(stage: IngestionStage) -> int:
+    """Return a bounded opt-in attempt count for an optional provider stage."""
+
+    if stage not in _STAGES:
+        raise ValueError(f"unsupported ingestion stage: {stage}")
+    specific = os.getenv(f"SUDARSHAN_INGESTION_{stage.upper()}_RETRIES")
+    raw = specific if specific is not None else os.getenv("SUDARSHAN_INGESTION_OPTIONAL_STAGE_RETRIES", "0")
+    try:
+        retries = int(raw)
+    except (TypeError, ValueError):
+        retries = 0
+    return min(5, max(1, retries + 1))
+
+
+def optional_stage_backoff_seconds() -> float:
+    """Return a small bounded backoff; tests and local runs may set it to zero."""
+
+    try:
+        value = float(os.getenv("SUDARSHAN_INGESTION_RETRY_BACKOFF_SECONDS", "0.25"))
+    except (TypeError, ValueError):
+        value = 0.25
+    return min(30.0, max(0.0, value))
+
+
+def is_retryable_optional_error(error: Exception) -> bool:
+    """Classify transient provider failures without retrying bad requests/auth."""
+
+    if isinstance(error, (IngestionBudgetExceededError, PermissionError, ValueError)):
+        return False
+    if isinstance(error, (TimeoutError, ConnectionError)):
+        return True
+    message = f"{type(error).__name__}: {error}".lower()
+    if any(marker in message for marker in ("authentication", "unauthorized", "forbidden", "invalid api key")):
+        return False
+    return any(marker in message for marker in ("429", "rate limit", "temporarily", "timeout", "timed out", "503", "connection"))
+
+
+def run_optional_stage_with_retry(
+    operation: Callable[[int], _RetryValue],
+    *,
+    max_attempts: int,
+    backoff_seconds: float = 0.0,
+    should_retry: Callable[[Exception], bool] = is_retryable_optional_error,
+    on_retry: Callable[[int, Exception], None] | None = None,
+) -> _RetryValue:
+    """Run a provider stage with cooperative, bounded retries.
+
+    ``operation`` receives a one-based attempt number so callers can charge a
+    fresh budget unit before every provider request. The final exception is
+    raised unchanged; callers decide whether to publish a fallback marker.
+    """
+
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be positive")
+    if backoff_seconds < 0:
+        raise ValueError("backoff_seconds must not be negative")
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return operation(attempt)
+        except Exception as error:
+            if attempt >= max_attempts or not should_retry(error):
+                raise
+            if on_retry is not None:
+                on_retry(attempt, error)
+            if backoff_seconds:
+                time.sleep(backoff_seconds * attempt)
+    raise RuntimeError("optional stage retry loop exited unexpectedly")
 
 
 @dataclass(frozen=True, slots=True)
@@ -419,4 +490,8 @@ __all__ = [
     "IngestionUsageRecorder",
     "IngestionStage",
     "build_ingestion_stage_fingerprint",
+    "is_retryable_optional_error",
+    "optional_stage_attempts",
+    "optional_stage_backoff_seconds",
+    "run_optional_stage_with_retry",
 ]
