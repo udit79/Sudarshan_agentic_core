@@ -186,7 +186,7 @@ sequenceDiagram
 The current local verification snapshot is:
 
 ```text
-Python: 178 passed, 1 skipped
+Python: 208 passed, 1 skipped
 T28 reliability focus: 21 passed
 Frontend projection/cursor tests: 3 passed
 Node gateway tests: 9 passed
