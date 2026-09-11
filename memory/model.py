@@ -117,6 +117,9 @@ class Memory:
     provenance: Mapping[str, Any] = field(default_factory=dict)
     lifecycle: MemoryLifecycle = MemoryLifecycle.ACTIVE
     superseded_by: str | None = None
+    importance: float = 0.5
+    confidence: float = 0.5
+    expires_at: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "memory_type", MemoryType(self.memory_type))
@@ -125,5 +128,9 @@ class Memory:
         object.__setattr__(self, "content", _required(self.content, "content"))
         object.__setattr__(self, "metadata", dict(self.metadata))
         object.__setattr__(self, "provenance", dict(self.provenance))
+        if not 0.0 <= self.importance <= 1.0:
+            raise ValueError("importance must be between 0 and 1")
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("confidence must be between 0 and 1")
         if self.superseded_by is not None:
             object.__setattr__(self, "superseded_by", _required(self.superseded_by, "superseded_by"))

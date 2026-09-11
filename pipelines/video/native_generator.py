@@ -34,9 +34,19 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from pipelines.video.contracts import VideoRunManifest, VideoSceneManifest
+from pipelines.video.timeline import build_video_timeline
+from integrations.providers.router import ProviderRouter
 
 
 _ARTIFACT_DIR = Path("artifacts") / "videos"
+
+
+def _provider_failure_class(error: Exception) -> str:
+    """Return a stable failure class without exposing provider payloads."""
+
+    from integrations.providers.receipts import classify_provider_error
+
+    return classify_provider_error(error)
 
 
 class NativeVideoError(RuntimeError):
@@ -56,9 +66,14 @@ class VideoScene:
     visual_description: str = ""
     duration_seconds: int = 5
     on_screen_text: str = ""
+    material_references: list[str] = field(default_factory=list)
     image_path: str | None = None
     audio_path: str | None = None
     video_path: str | None = None
+    image_fallback: str | None = None
+    image_failure_class: str | None = None
+    audio_fallback: str | None = None
+    audio_failure_class: str | None = None
 
 
 @dataclass
@@ -106,9 +121,11 @@ class OpenAITTSAdapter:
         model: str | None = None,
         voice: str | None = None,
         timeout_seconds: float | None = None,
+        provider_router: ProviderRouter | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
-        self.model = model or os.getenv("OPENAI_TTS_MODEL", "tts-1")
+        self.provider_router = provider_router or ProviderRouter()
+        self.model = self.provider_router.select_model("tts", model).model
         self.voice = voice or os.getenv("OPENAI_TTS_VOICE", "alloy")
         self.timeout_seconds = timeout_seconds or float(os.getenv("OPENAI_TTS_TIMEOUT_SECONDS", "60"))
 
@@ -138,11 +155,14 @@ class OpenAITTSAdapter:
         request.add_header("Authorization", f"Bearer {self.api_key}")
         request.add_header("Content-Type", "application/json")
 
+        self.provider_router.before_call("openai", "tts")
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 audio_data = response.read()
         except (HTTPError, URLError, TimeoutError) as exc:
+            self.provider_router.record_failure("openai", "tts", exc)
             raise NativeVideoError(f"OpenAI TTS request failed: {exc}") from exc
+        self.provider_router.record_success("openai", "tts")
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "wb") as f:
@@ -160,9 +180,11 @@ class OpenAIImageAdapter:
         model: str | None = None,
         client: Any = None,
         timeout_seconds: float | None = None,
+        provider_router: ProviderRouter | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
-        self.model = model or os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
+        self.provider_router = provider_router or ProviderRouter()
+        self.model = self.provider_router.select_model("image", model).model
         self._client = client
         self.timeout_seconds = timeout_seconds or float(os.getenv("OPENAI_IMAGE_TIMEOUT_SECONDS", "90"))
 
@@ -183,17 +205,22 @@ class OpenAIImageAdapter:
             raise NativeVideoError("OPENAI_API_KEY is required for scene image generation")
         if cancel_event is not None and cancel_event.is_set():
             raise NativeVideoCancelled("video generation cancelled before image generation")
-        response = self.client.images.generate(
-            model=self.model,
-            prompt=(
-                "Create a restrained, factual, government-quality visual for a case briefing. "
-                "Do not add logos, seals, invented people, statistics, labels, or readable text. "
-                f"Visual brief: {prompt[:2000]}"
-            ),
-            size="1536x1024",
-            quality="high",
-            output_format="png",
-        )
+        self.provider_router.before_call("openai", "image")
+        try:
+            response = self.client.images.generate(
+                model=self.model,
+                prompt=(
+                    "Create a restrained, factual, government-quality visual for a case briefing. "
+                    "Do not add logos, seals, invented people, statistics, labels, or readable text. "
+                    f"Visual brief: {prompt[:2000]}"
+                ),
+                size="1536x1024",
+                quality="high",
+                output_format="png",
+            )
+        except Exception as exc:
+            self.provider_router.record_failure("openai", "image", exc)
+            raise NativeVideoError(f"OpenAI image generation failed: {exc}") from exc
         image = response.data[0]
         encoded = getattr(image, "b64_json", None)
         if encoded:
@@ -204,6 +231,7 @@ class OpenAIImageAdapter:
                 raise NativeVideoError("OpenAI Images returned neither image data nor a URL")
             with urlopen(url, timeout=self.timeout_seconds) as response_stream:
                 data = response_stream.read()
+        self.provider_router.record_success("openai", "image")
         if cancel_event is not None and cancel_event.is_set():
             raise NativeVideoCancelled("video generation cancelled after image generation")
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -230,9 +258,11 @@ class NativeVideoGenerator:
         fps: int = 24,
         max_parallel_scenes: int | None = None,
         renderer_version: str | None = None,
+        provider_router: ProviderRouter | None = None,
     ) -> None:
-        self.tts = tts or OpenAITTSAdapter()
-        self.image_generator = image_generator or OpenAIImageAdapter()
+        self.provider_router = provider_router or ProviderRouter()
+        self.tts = tts or OpenAITTSAdapter(provider_router=self.provider_router)
+        self.image_generator = image_generator or OpenAIImageAdapter(provider_router=self.provider_router)
         self.output_dir = Path(output_dir or os.getenv("SUDARSHAN_VIDEO_ARTIFACT_DIR", str(_ARTIFACT_DIR)))
         self.width = width
         self.height = height
@@ -331,6 +361,14 @@ class NativeVideoGenerator:
             manifest.status = "partial" if failed_scene_ids else "succeeded"
             manifest.output_video = output_path
             manifest.failed_scene_ids = failed_scene_ids
+            timeline = build_video_timeline(
+                artifact_name,
+                subject,
+                scenes,
+                renderer_version=self.renderer_version,
+                status="partial" if failed_scene_ids else "verified",
+            )
+            manifest.timeline = timeline
             self._persist_manifest(manifest_path, manifest)
 
             return NativeVideoResult(
@@ -347,7 +385,22 @@ class NativeVideoGenerator:
                     "manifest_path": str(manifest_path),
                     "cache_hits": cache_hits,
                     "failed_scene_ids": failed_scene_ids,
-                    "degraded": bool(failed_scene_ids),
+                    "degraded": bool(
+                        failed_scene_ids
+                        or any(scene.image_fallback or scene.audio_fallback for scene in scenes)
+                    ),
+                    "degradation_reasons": [
+                        {
+                            "scene_id": scene.scene_id,
+                            "image_fallback": scene.image_fallback,
+                            "image_failure_class": scene.image_failure_class,
+                            "audio_fallback": scene.audio_fallback,
+                            "audio_failure_class": scene.audio_failure_class,
+                        }
+                        for scene in scenes
+                        if scene.image_fallback or scene.audio_fallback
+                    ],
+                    "timeline": timeline.model_dump(mode="json"),
                     "scenes": [
                         {
                             "scene_id": scene.scene_id,
@@ -358,6 +411,10 @@ class NativeVideoGenerator:
                             "image_path": scene.image_path,
                             "audio_path": scene.audio_path,
                             "video_path": scene.video_path,
+                            "image_fallback": scene.image_fallback,
+                            "image_failure_class": scene.image_failure_class,
+                            "audio_fallback": scene.audio_fallback,
+                            "audio_failure_class": scene.audio_failure_class,
                         }
                         for scene in scenes
                     ],
@@ -532,8 +589,10 @@ class NativeVideoGenerator:
                 self.tts.generate(scene.narration, audio_path, cancel_event=cancel_event)
             except NativeVideoCancelled:
                 raise
-            except NativeVideoError:
+            except Exception as exc:
                 audio_path = None
+                scene.audio_fallback = "silent"
+                scene.audio_failure_class = _provider_failure_class(exc)
         scene.audio_path = audio_path
 
         # 2. Generate a durable OpenAI image for this scene.
@@ -547,9 +606,11 @@ class NativeVideoGenerator:
                 self._generate_image_video(scene.image_path, video_source, scene, ffmpeg, cancel_event)
             except NativeVideoCancelled:
                 raise
-            except Exception:
+            except Exception as exc:
                 scene.image_path = None
                 video_source = None
+                scene.image_fallback = "title_card"
+                scene.image_failure_class = _provider_failure_class(exc)
 
         # 3. Generate a local title card if image generation is unavailable.
         if not video_source:
@@ -750,6 +811,7 @@ def scenes_from_package(package_data: Mapping[str, Any]) -> list[VideoScene]:
             visual_description=scene_data.get("visual_description", ""),
             duration_seconds=int(scene_data.get("duration_seconds", 5)),
             on_screen_text=scene_data.get("on_screen_text", ""),
+            material_references=list(scene_data.get("material_references", [])),
             image_path=scene_data.get("image_path"),
             audio_path=scene_data.get("audio_path"),
             video_path=scene_data.get("video_path"),

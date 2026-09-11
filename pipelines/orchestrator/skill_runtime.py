@@ -22,12 +22,14 @@ from uuid import uuid4
 
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.orchestrator.contracts import (
+    ChildTaskSpec,
     RunPolicy,
     SkillCall,
     SkillManifest,
     SkillResult,
     UsageRecord,
 )
+from integrations.providers.receipts import normalize_provider_response
 from pipelines.orchestrator.budget import BudgetController, BudgetExceededError
 from pipelines.orchestrator.cache import CacheStore, build_cache_fingerprint, stable_hash
 from pipelines.orchestrator.types import PipelineAdapter
@@ -335,6 +337,24 @@ class SkillRuntime:
             # failed skill result. The cache is an optimization, not truth.
             self._emit("skill.cache_write_failed", call, fingerprint=fingerprint)
 
+    def invoke_child_task(self, spec: ChildTaskSpec, *, parent_context: RunContext) -> SkillResult:
+        """Execute a planner-produced child spec through the same bounded runtime."""
+
+        if spec.parent_run_id != parent_context.run_id:
+            raise SkillRuntimeError("PARENT_SCOPE", "child task parent_run_id does not match the active run")
+        manifest = self._manifests.get(spec.skill_id)
+        call = SkillCall(
+            skill_call_id=spec.child_id,
+            parent_run_id=spec.parent_run_id,
+            parent_node_id=spec.parent_node_id,
+            skill_id=spec.skill_id,
+            skill_version=manifest.version if manifest is not None else "unknown",
+            input_artifact_ids=list(spec.input_evidence_ids),
+            input_payload=dict(spec.input_payload),
+            policy=spec.policy,
+        )
+        return self.invoke(call, parent_context=parent_context)
+
     def _validate_call(
         self,
         call: SkillCall,
@@ -515,6 +535,8 @@ class SkillRuntime:
         if not artifact_ids and isinstance(raw_metadata_ids, (list, tuple)):
             artifact_ids = [str(item) for item in raw_metadata_ids if str(item).strip()]
         status = {"pending": "waiting", "failed": "failed", "succeeded": "succeeded"}.get(response.status, "failed")
+        raw_child_plan = artifact.get("child_plan", []) if isinstance(artifact, Mapping) else []
+        child_plan = [dict(item) for item in raw_child_plan if isinstance(item, Mapping)]
         return SkillResult(
             skill_call_id=call.skill_call_id,
             child_run_id=child_run_id,
@@ -524,6 +546,7 @@ class SkillRuntime:
             usage_ids=[str(item) for item in metadata.get("usage_ids", []) if str(item).strip()],
             failure_code=metadata.get("failure_code") if status != "succeeded" else None,
             failure_message=response.failure if status != "succeeded" else None,
+            child_plan=child_plan,
         )
 
     @staticmethod
@@ -531,28 +554,35 @@ class SkillRuntime:
         metadata = dict(response.metadata or {})
         raw_usage = metadata.get("usage")
         usage = dict(raw_usage) if isinstance(raw_usage, Mapping) else metadata
-        return UsageRecord(
+        receipt = normalize_provider_response(
+            str(usage.get("provider", "unknown")),
+            usage,
+            model=str(usage.get("model", "unknown")),
+            latency_ms=int(usage.get("latency_ms", 0) or 0),
+        )
+        return receipt.to_usage_record(
             usage_id=str(usage.get("usage_id", f"usage-{uuid4().hex}")),
             run_id=call.parent_run_id,
             node_id=call.parent_node_id,
-            provider=str(usage.get("provider", "unknown")),
-            model=str(usage.get("model", "unknown")),
-            input_tokens=int(usage.get("input_tokens", 0) or 0),
-            output_tokens=int(usage.get("output_tokens", 0) or 0),
-            reasoning_tokens=(
-                int(usage["reasoning_tokens"])
-                if usage.get("reasoning_tokens") is not None else None
-            ),
-            cache_read_tokens=int(usage.get("cache_read_tokens", 0) or 0),
-            cache_write_tokens=int(usage.get("cache_write_tokens", 0) or 0),
-            tool_calls=int(usage.get("tool_calls", 0) or 0),
-            latency_ms=int(usage.get("latency_ms", 0) or 0),
             estimated_cost=(
                 float(usage["estimated_cost"])
                 if usage.get("estimated_cost") is not None else None
             ),
-            is_estimate=bool(usage.get("is_estimate", True)),
-        )
+        ).model_copy(update={
+            "tool_calls": int(usage.get("tool_calls", 0) or 0),
+            "is_estimate": bool(usage.get("is_estimate", receipt.is_estimate)),
+            "charge_type": str(usage.get("charge_type", "provider")),
+            "parent_usage_id": (
+                str(usage["parent_usage_id"])
+                if usage.get("parent_usage_id") is not None else None
+            ),
+            "billing_status": str(usage.get("billing_status", "unreconciled")),
+            "provider_request_id": usage.get("provider_request_id") or receipt.request_id,
+            "reasoning_tokens": (
+                int(usage["reasoning_tokens"])
+                if usage.get("reasoning_tokens") is not None else receipt.reasoning_tokens
+            ),
+        })
 
     def _cancelled(self, call: SkillCall, child_run_id: str, code: str) -> SkillResult:
         result = SkillResult(

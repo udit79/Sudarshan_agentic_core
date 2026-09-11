@@ -144,6 +144,32 @@ def test_linkedin_image_option_returns_prompt_or_optional_asset() -> None:
     assert asset_result.image.asset_uri == "asset://image-1"
 
 
+def test_linkedin_image_quota_failure_is_explicitly_degraded() -> None:
+    draft = LinkedInPostOutput(
+        post_id="post-quota",
+        title="Case update",
+        post_text="A concise case-grounded update.",
+        audience="Professional audience",
+        call_to_action="Read the case update.",
+        source_references=["case://1"],
+        confidence_statement="Based on supplied information.",
+        image=LinkedInImageSpec(
+            requested=True,
+            strategy="generate",
+            image_type="illustration",
+            alt_text="Illustration of the case update",
+            generation_prompt="A restrained illustration based only on the case facts.",
+        ),
+    )
+
+    def exhausted(_: str) -> str:
+        raise RuntimeError("insufficient_quota: exceeded your current quota")
+
+    result = LinkedInPostFlow(None, image_generator=exhausted).enrich_output(draft)
+    assert result.image.strategy == "prompt"
+    assert "quota_exhausted" in result.caveats[-1]
+
+
 def test_linkedin_image_policy_defaults_to_internal_auto_decision() -> None:
     request = AdvisoryRequest(
         query="Create a case-grounded post",

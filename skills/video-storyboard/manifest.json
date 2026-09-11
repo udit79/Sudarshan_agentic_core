@@ -10,5 +10,9 @@
   "risk_class": "RESTRICTED",
   "model_policy": {"delegation": "scene-bounded", "temperature": 0.3},
   "budget_policy": {"max_model_tokens": 6000, "max_wall_time_ms": 600000, "max_parallel_children": 4},
-  "coordination": {"pipeline": "video", "stages": ["script", "scene-media", "composition", "qa"]}
+  "coordination": {"pipeline": "video", "children": ["visual.flowchart"], "stages": ["script", "scene-media", "composition", "qa"]},
+  "context_policy": {"default_level": "L1", "max_level": "L2"},
+  "references": {"load_order": ["SKILL.md"], "max_chars": 8000},
+  "renderers": ["video.ffmpeg"],
+  "checkers": ["schema", "evidence", "timeline", "media"]
 }

@@ -14,6 +14,8 @@ depth.
 - MongoDB Atlas access when the Node gateway is enabled.
 - Cognee Cloud or self-hosted endpoint credentials for live memory operations.
 - OpenAI credentials for live model and media operations.
+- Redis 7+ and the optional Python extra (`pip install -e ".[redis]"`) when
+  running more than one scheduler process.
 
 ## Local setup
 
@@ -32,6 +34,13 @@ MongoDB collections/indexes and starts:
 | FastAPI | http://127.0.0.1:8000 | Python application and orchestrator |
 | Node gateway | http://127.0.0.1:8080 | OAuth, cases, quotas, browser API |
 | Static frontend | http://127.0.0.1:3000 | Login and output UI |
+
+When services are started, `startup.ps1` writes
+`artifacts/.state/sudarshan-processes.json` containing only service names,
+PIDs, ports, and log paths. This is used by shutdown so it stops the processes
+started by Sudarshan rather than unrelated applications using the same ports.
+The startup also creates the presentation, video, quality-report, and memory
+event state directories used by the native renderers and lifecycle layer.
 
 Useful switches:
 
@@ -73,10 +82,59 @@ python -m http.server 3000 --directory frontend
 | OpenAI media | OPENAI_API_KEY, OPENAI_IMAGE_MODEL, OPENAI_TTS_MODEL, OPENAI_TTS_VOICE | image, speech, video assets |
 | Python API | SUDARSHAN_API_HOST, SUDARSHAN_API_PORT, SUDARSHAN_CORS_ORIGINS | orchestrator service |
 | State and audit | LANGGRAPH_CHECKPOINT_DB_PATH, CREWAI_FLOW_DB_PATH, SUDARSHAN_AUDIT_DB_PATH | local durable state |
+| Shared control plane | SUDARSHAN_CONTROL_PLANE, SUDARSHAN_REDIS_URL, SUDARSHAN_CONTROL_PLANE_PREFIX | Redis Stream discovery, leases, fencing, idempotency, progress replay, DAG state, and ingestion budgets |
+| Object storage | SUDARSHAN_OBJECT_STORE_MODE, SUDARSHAN_OBJECT_STORE_ROOT | restart-safe source/artifact copies and metadata catalog |
+| Observability | SUDARSHAN_OBSERVABILITY_DB_PATH, SUDARSHAN_OBSERVABILITY_RETENTION_SECONDS, SUDARSHAN_TELEMETRY_ACCESS_LEVEL | safe telemetry collector, retention, and dashboard clearance |
 | Gateway | MONGODB_URI, MONGODB_DB_NAME, PYTHON_API_BASE_URL, PYTHON_API_TIMEOUT_MS, PYTHON_INGEST_TIMEOUT_MS | browser-facing backend and Python request/upload timeouts |
 | Google OAuth | GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALLBACK_URL | sign-in |
 | Browser security | JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, COOKIE_SECURE, CORS_ORIGINS | sessions and origin policy |
 | Optional worker | MONEYPRINTERTURBO_BASE_URL and related variables | legacy asynchronous video mode |
+
+### Shared scheduler deployment
+
+SQLite is the safe default for one local process. For multiple scheduler
+processes, install the optional Redis extra and point every process at the same
+Redis instance:
+
+@@@powershell
+python -m pip install -e ".[redis]"
+$env:SUDARSHAN_CONTROL_PLANE = "redis"
+$env:SUDARSHAN_REDIS_URL = "redis://localhost:6379/0"
+$env:SUDARSHAN_OBJECT_STORE_MODE = "durable"
+@@@
+
+Stop the services through the manifest:
+
+@@@powershell
+.\stop-servers.ps1
+@@@
+
+If the manifest is missing or stale, inspect the port owners first. The
+explicit fallback is available with `-ByPort`:
+
+@@@powershell
+.\stop-servers.ps1 -ByPort -Ports 3000,8000,8080
+@@@
+
+Use a unique `SUDARSHAN_CONTROL_PLANE_PREFIX` per environment. Redis Streams
+provide admission discovery and pending-entry recovery; SQLite remains each
+worker's local execution projection. Redis also coordinates cache claims and
+run-level and ingestion stage budget reservations. Do not use the Redis mode as
+a billing ledger; provider reconciliation is still a separate step.
+Artifact storage remains a separate deployment concern.
+
+Durable local object storage keeps immutable source, evidence, and artifact
+copies below `SUDARSHAN_OBJECT_STORE_ROOT` and indexes them in its catalog.
+For multi-host production set `SUDARSHAN_OBJECT_STORE_MODE=s3`, provide
+`SUDARSHAN_OBJECT_STORE_S3_BUCKET` (and optionally endpoint, region, and
+prefix), install the boto3 extra used by the deployment, and configure
+server-side encryption plus bucket versioning/backup. The adapter downloads
+objects into a verified local cache before a renderer reads them.
+
+Set `SUDARSHAN_OBSERVABILITY_EXPORT_URL` to a controlled collector endpoint to
+receive the redacted event envelope. The local SQLite chain remains the audit
+source; the Redis/HTTP projections are dashboard transport and should not be
+treated as immutable audit storage.
 
 OpenAI is the supported native model/media provider. DeepSeek Harness is the
 session, MCP, and runtime boundary, not a second model provider. Leave

@@ -15,6 +15,13 @@ The web bundle registers both packages in
 white-label build, replace those two package rows with another brand/theme
 pair; the core Harness packages and the Sudarshan backend remain unchanged.
 
+The execution monitor and evidence drawer currently live in Sudarshan's
+standalone reference dashboard under `frontend/`. They are not yet a Harness
+slot plugin. Keep that distinction explicit: the Harness plugins own product
+presentation, while the backend/MCP projection remains the source of truth.
+The next UI ticket should add a dedicated Harness slot/plugin for those safe
+projections rather than copying the backend dashboard into the Harness fork.
+
 ## Local build
 
 From `deepseek-harness/`:

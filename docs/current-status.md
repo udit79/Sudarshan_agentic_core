@@ -13,7 +13,7 @@ same claims.
 | Harness/MCP boundary | Implemented locally | DeepSeek Harness and external MCP clients use the same Sudarshan application boundary. |
 | Python backend | Strong local vertical slice | Ingestion, memory, routing, pipelines, quality gates, artifacts, scheduler, cache, telemetry, audit, and recovery are wired and tested locally. |
 | Reference frontend | Functional dashboard | Authenticated gateway mode, case/source flow, run progress, cancellation, artifact preview/download, and safe telemetry are available. |
-| Production deployment | Not complete | Shared queue/leases, object storage, distributed tracing, sandboxing, signed skills, asynchronous evidence ingestion, live external-service smoke tests, and release benchmarks remain. |
+| Production deployment | Release-candidate code present; deployment gates open | T43–T52 code paths and local tests are present. Live Redis/object-storage, provider reconciliation, signed-sandbox drills, real-corpus benchmarks, external MCP/A2A, visual approval, backup/restore, and release sign-off remain environment gates. |
 
 ## Frontend capabilities
 
@@ -89,6 +89,23 @@ profile use the same Sudarshan application boundary.
 - Durable local SQLite scheduler with leases, renewal, stale-lease recovery,
   retries, dead-letter state, cancellation, duplicate submission protection,
   and execution deadlines.
+- T39 shared control-plane contract with an optional Redis lease/idempotency
+  adapter and Redis Stream queue discovery; run and ingestion schedulers use
+  separate stream names and can discover work admitted by another process,
+  recover pending entries after consumer loss with `XAUTOCLAIM`, and retain
+  entries for actively leased runs. The typed progress stream now has a
+  Redis-backed sink with reconnectable per-run cursors; the application still
+  defaults to SQLite. `DependencyDAG` and the PPT vertical accept the shared
+  control plane for fenced node claims, dependent-node admission, and atomic
+  per-run DAG snapshot replication. Exact-match cache entries and stampede
+  claims use Redis in shared mode. Budget reservations and usage reconciliation
+  for the main run controller use atomic Redis scripts in shared mode; provider
+  estimates remain explicitly marked and are not billing truth. The ingestion
+  queue is shared in Redis mode, but its parser/OCR/vision/summary/embedding
+  stage budget and usage ledger now use Redis in shared mode; estimates remain
+  explicitly separated from observed usage.
+  Optional live Redis tests cover cross-process discovery and stale-worker
+  fencing.
 - Persisted dependency DAG with bounded parallel admission, dependency
   blocking, repair limits, and restarted-bridge dependent-node recovery.
 - Verified artifact manifests, checksum validation, safe path checks, previews,
@@ -102,6 +119,17 @@ profile use the same Sudarshan application boundary.
 - DeepSeek Harness JSONL/MCP integration, skill discovery, local skill calls,
   durable background skill jobs, bounded waiting, artifact lookup, health, and
   memory tools.
+- OpenViking-inspired L0/L1/L2 context selection with stage defaults,
+  safe legacy fallback, retrieval trace reporting, and typed `ContextPack`
+  context levels. Skill manifests also declare bounded reference loading,
+  renderer capabilities, and checker ownership; the reference repositories
+  remain design inputs rather than runtime dependencies.
+- T56–T60 local slices are present: a shared renderer capability registry,
+  semantic diagram-family planner, slide-job/presentation quality workflow,
+  provider-neutral video timeline and asset ledger, plus content-free memory
+  lifecycle events and offline retrieval/cost evaluation. These are locally
+  tested contracts; visual approval, real-corpus measurements, and distributed
+  deployment remain release gates.
 - DeepSeek Harness web composition through replaceable Sudarshan brand and
   theme plugins; generated preview credentials and session state are ignored.
 - Current source upload and extraction compatibility path for text, PDF, PPTX,
@@ -115,7 +143,9 @@ profile use the same Sudarshan application boundary.
   receipts. Optional image/PDF/video provider failures now preserve explicit
   fallback metadata and can finish as `PARTIAL`. Scheduler status and health
   metrics include queue-wait telemetry. Shared indexing, full provider-usage
-  reconciliation, and distributed ingestion remain open in T36–T38. The
+  reconciliation and production retrieval benchmarks remain open in T36–T38;
+  T39–T42 now provide shared queue/budget/object-storage/observability seams.
+  The
   ingestion receipt now separates preflight token estimates from provider
   response usage when available. T38 now has a deterministic multimodal
   benchmark and promotion gate comparing flat-text retrieval with typed
@@ -137,34 +167,28 @@ profile use the same Sudarshan application boundary.
 
 These are real engineering gaps, not cosmetic follow-ups:
 
-1. Complete the post-T38 production backlog in
-   [the remaining-work plan](sudarshan-2.0-remaining-work-plan.md), starting
-   with shared queue/cache/DAG/progress control-plane services for
-   multi-worker/multi-host deployment.
-2. Add kill-9, host-loss, concurrent duplicate-worker, lease-fencing, and
+1. Run the live Redis/worker smoke suite and add kill-9, host-loss, concurrent
+   duplicate-worker, lease-fencing, and
    abandoned-artifact cleanup tests against the production-like control plane.
-3. Add shared object storage, encryption at rest, retention policy, artifact
-   garbage collection, and operational backup/restore procedures.
-4. Move telemetry to a controlled collector/control plane, add retention and
-   role-based access, and reconcile estimated usage with provider billing.
-5. Add signed skill/package manifests, package integrity verification,
-   authenticated distributed authorization, and OS/container sandboxing for
-   untrusted skills.
-6. Finish visual production gates: rasterized PPT QA, font-aware measurement,
-   infographic PNG/visual regression, rendered-media QA, and renderer version
-   promotion policy.
-7. Finish cross-skill execution: executable LinkedIn visual-child
-   reconciliation, full PPT child routing/assembly, and external MCP-client
-   lifecycle smoke tests.
-8. Complete the T34–T38 ingestion workstream in production-like infrastructure:
+2. Configure and drill S3/MinIO server-side encryption, versioned backup and
+   restore; the adapter and local verified cache are implemented.
+3. Operate the optional redacted telemetry collector and reconcile estimated
+   usage with provider billing receipts.
+4. Operate production key management, authenticated distributed authorization,
+   and Docker/resource-limit drills for untrusted skills. The signing and
+   sandbox policy code is present.
+5. Run font/raster/video visual regression snapshots and human approvals. The
+   shared deterministic visual-QA and renderer-promotion gate is present.
+6. Wire every production PPT/LinkedIn/video planner to the typed child-plan
+   adapter and run the external MCP/A2A lifecycle smoke test. The contracts,
+   A2A boundary, fallback reconciliation, and monitor are present.
+7. Complete the T34–T38 ingestion workstream in production-like infrastructure:
    shared evidence/object storage, modality provenance, structure-aware
    indexing, Cognee projection, cache/budget controls, security, and benchmark
-   runs on reviewed real or sanitized sources. The local T38 evaluator is
-   ready, but it is not a substitute for these runs.
-9. Run T29 matched evaluations and the post-T38 T47 benchmark across legacy/
-   staged pipelines for quality, groundedness, tokens, cost, latency, cache
-   savings, retries, and human correction time; then complete T52
-   release/rollback sign-off.
+   runs on reviewed real or sanitized sources. The local T38 evaluator and T47
+   archive schema are ready, but are not a substitute for those runs.
+8. Execute the T47 benchmark and T52 backup/restore, rollback, ownership, and
+   final release sign-off gates.
 
 ## Request and data flow
 
@@ -198,7 +222,7 @@ sequenceDiagram
 The current local verification snapshot is:
 
 ```text
-Python: 212 passed, 1 skipped
+Python: 252 passed, 7 skipped
 T28 reliability focus: 21 passed
 Frontend projection/cursor tests: 3 passed
 Node gateway tests: 9 passed

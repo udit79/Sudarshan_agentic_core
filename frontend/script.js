@@ -45,6 +45,9 @@ document.addEventListener("DOMContentLoaded", () => {
     runWaitsValue: document.getElementById("runWaitsValue"),
     runWaitingNotice: document.getElementById("runWaitingNotice"),
     runWaitingReason: document.getElementById("runWaitingReason"),
+    executionMonitor: document.getElementById("executionMonitor"),
+    executionLanes: document.getElementById("executionLanes"),
+    evidenceList: document.getElementById("evidenceList"),
     toggleAllOutputsBtn: document.getElementById("toggleAllOutputsBtn"),
     viewAllLabel: document.getElementById("viewAllLabel"),
     recentFilterBar: document.getElementById("recentFilterBar"),
@@ -169,6 +172,61 @@ document.addEventListener("DOMContentLoaded", () => {
     if (waiting && elements.runWaitingReason) {
       elements.runWaitingReason.textContent = task.wait_reason || task.message || "The agent is waiting for the next permitted action.";
     }
+    renderExecutionMonitor(task);
+  }
+
+  function renderExecutionMonitor(task) {
+    if (!elements.executionMonitor || !elements.executionLanes || !elements.evidenceList) return;
+    elements.executionMonitor.hidden = false;
+    elements.executionLanes.replaceChildren();
+    const parent = document.createElement("div");
+    parent.className = "execution-lane parent-lane";
+    const parentTitle = document.createElement("strong");
+    parentTitle.textContent = "Parent run";
+    const parentMeta = document.createElement("span");
+    parentMeta.textContent = `${task.status || "queued"} · ${task.stage || "planning"}`;
+    parent.append(parentTitle, parentMeta);
+    elements.executionLanes.appendChild(parent);
+    const children = Array.isArray(task.children) ? task.children : [];
+    children.slice(0, 32).forEach((child) => {
+      if (!child || typeof child !== "object") return;
+      const lane = document.createElement("div");
+      lane.className = "execution-lane child-lane";
+      const title = document.createElement("strong");
+      title.textContent = String(child.skill_id || child.node_id || child.task_id || "Child skill");
+      const meta = document.createElement("span");
+      meta.textContent = `${String(child.status || "pending").replaceAll("_", " ")} · ${String(child.wait_reason || child.stage || "")}`;
+      lane.append(title, meta);
+      elements.executionLanes.appendChild(lane);
+    });
+
+    elements.evidenceList.replaceChildren();
+    const evidence = Array.isArray(task.evidence) ? task.evidence : [];
+    const artifactEvidence = (task.artifact_manifests || []).flatMap((manifest) => (
+      Array.isArray(manifest?.evidence_ids)
+        ? manifest.evidence_ids.map((evidenceId) => ({ evidence_id: evidenceId, source_reference: manifest.name || "artifact" }))
+        : []
+    ));
+    const safeEvidence = [...evidence, ...artifactEvidence].filter((item, index, all) => (
+      item && item.evidence_id && all.findIndex((candidate) => candidate.evidence_id === item.evidence_id) === index
+    )).slice(0, 64);
+    if (!safeEvidence.length) {
+      const empty = document.createElement("span");
+      empty.className = "evidence-empty";
+      empty.textContent = "No evidence references were returned for this run.";
+      elements.evidenceList.appendChild(empty);
+    }
+    safeEvidence.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "evidence-row";
+      const id = document.createElement("strong");
+      id.textContent = String(item.evidence_id);
+      const source = document.createElement("span");
+      const location = item.location?.page ? `page ${item.location.page}` : "authorized reference";
+      source.textContent = `${String(item.modality || "source")} · ${String(item.source_reference || location)}`;
+      row.append(id, source);
+      elements.evidenceList.appendChild(row);
+    });
   }
 
   function handleProgressEvent(event) {

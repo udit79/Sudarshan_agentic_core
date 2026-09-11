@@ -20,6 +20,12 @@ def test_workspace_discovers_validated_versioned_packages_and_loads_body_on_dema
     }.issubset(packages)
     assert "flowchart" in packages["visual.flowchart"].load_body().lower()
     assert packages["presentation.case-brief"].load_json("schema.json")["child_calls"] == ["visual.flowchart"]
+    visual = packages["visual.flowchart"]
+    assert visual.manifest.context_policy["default_level"] == "L1"
+    assert visual.manifest.renderers == ["diagram.native-svg", "diagram.pptx"]
+    assert "Visual flowchart" in visual.load_text("SKILL.md", max_chars=200)
+    with pytest.raises(ValueError, match="path traversal|escapes"):
+        visual.load_text("../README.md")
 
 
 def test_workspace_rejects_incomplete_or_mismatched_packages(tmp_path) -> None:
@@ -31,4 +37,3 @@ def test_workspace_rejects_incomplete_or_mismatched_packages(tmp_path) -> None:
     )
     with pytest.raises(ValueError, match="missing"):
         SkillWorkspace(tmp_path).discover()
-

@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 import hashlib
 import json
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Literal, Mapping
 
 from memory.model import ScopeType
 
@@ -19,6 +19,8 @@ _PROMPT_INJECTION_PATTERNS: tuple[tuple[str, str], ...] = (
     ("tool_override", "call this tool"),
     ("role_override", "you are now"),
 )
+
+ContextLevel = Literal["L0", "L1", "L2"]
 
 
 def detect_prompt_injection(text: str) -> tuple[str, ...]:
@@ -38,11 +40,20 @@ class RetrievedMemory:
     provenance: Mapping[str, Any] | None = None
     memory_id: str | None = None
     lifecycle: str = "active"
+    context_layers: Mapping[str, str] | None = None
+    context_level: ContextLevel = "L2"
 
     def __post_init__(self) -> None:
         if self.scope_type is not None:
             object.__setattr__(self, "scope_type", ScopeType(self.scope_type))
         object.__setattr__(self, "provenance", dict(self.provenance or {}))
+        object.__setattr__(self, "context_layers", {
+            str(key).upper(): str(value)
+            for key, value in (self.context_layers or {}).items()
+            if str(key).upper() in {"L0", "L1", "L2"} and str(value).strip()
+        })
+        if self.context_level not in {"L0", "L1", "L2"}:
+            raise ValueError("context_level must be L0, L1, or L2")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +62,7 @@ class BuiltContext:
     items: tuple[RetrievedMemory, ...]
     estimated_tokens: int
     trace: "ContextBuildTrace | None" = None
+    context_level: ContextLevel = "L2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +76,8 @@ class ContextBuildTrace:
     duplicate_count: int
     budget_dropped_count: int
     estimated_tokens: int
+    context_level: ContextLevel = "L2"
+    layer_fallback_count: int = 0
 
 
 class ContextBuilder:
@@ -80,6 +94,13 @@ class ContextBuilder:
         "visual": (10, 1800),
         "quality": (12, 1800),
         "delivery": (6, 1000),
+    }
+    STAGE_CONTEXT_LEVELS: dict[str, ContextLevel] = {
+        "understanding": "L1",
+        "grounding": "L2",
+        "visual": "L1",
+        "quality": "L1",
+        "delivery": "L0",
     }
 
     def __init__(self, chars_per_token: int = 4) -> None:
@@ -111,21 +132,31 @@ class ContextBuilder:
         query: str = "",
         stage_id: str = "default",
         max_items: int | None = None,
+        context_level: ContextLevel | None = None,
     ) -> BuiltContext:
         if token_budget < 1:
             raise ValueError("token_budget must be positive")
         limit = token_budget * self.chars_per_token
+        requested_level: ContextLevel = context_level or self.STAGE_CONTEXT_LEVELS.get(
+            stage_id.strip().lower(), "L2"
+        )
+        if requested_level not in {"L0", "L1", "L2"}:
+            raise ValueError("context_level must be L0, L1, or L2")
         candidates = list(results)
         selected: list[RetrievedMemory] = []
         formatted: list[str] = []
         seen: set[str] = set()
         duplicate_count = 0
         budget_dropped_count = 0
+        layer_fallback_count = 0
         used = 0
         ranked: list[tuple[float, int, RetrievedMemory, str]] = []
         query_terms = self._terms(query)
         for index, result in enumerate(candidates):
-            content = " ".join(result.content.split())
+            content, used_level = self._layer_content(result, requested_level)
+            if used_level != requested_level:
+                layer_fallback_count += 1
+            content = " ".join(content.split())
             normalized = content.casefold()
             if not content or normalized in seen:
                 duplicate_count += 1
@@ -137,6 +168,9 @@ class ContextBuilder:
                 provenance = dict(result.provenance or {})
                 provenance["security_flags"] = list(injection_flags)
                 result = replace(result, provenance=provenance)
+            # Keep the selected representation attached to the item so callers
+            # can audit which context level actually entered the prompt.
+            result = replace(result, context_level=used_level)
             ranked.append((backend_score + lexical, -index, result, content))
             seen.add(normalized)
 
@@ -164,7 +198,9 @@ class ContextBuilder:
                                          scope_id=result.scope_id,
                                          source_reference=result.source_reference,
                                          score=result.score, provenance=result.provenance,
-                                         memory_id=result.memory_id, lifecycle=result.lifecycle)
+                                         memory_id=result.memory_id, lifecycle=result.lifecycle,
+                                         context_layers=result.context_layers,
+                                         context_level=used_level)
                 line = (compact_prefix + content)[:limit]
             selected.append(result)
             formatted.append(line)
@@ -183,9 +219,22 @@ class ContextBuilder:
             duplicate_count=duplicate_count,
             budget_dropped_count=budget_dropped_count,
             estimated_tokens=estimated_tokens,
+            context_level=requested_level,
+            layer_fallback_count=layer_fallback_count,
         )
         return BuiltContext(text=text, items=tuple(selected),
-                            estimated_tokens=estimated_tokens, trace=trace)
+                            estimated_tokens=estimated_tokens, trace=trace,
+                            context_level=requested_level)
+
+    @staticmethod
+    def _layer_content(result: RetrievedMemory, requested: ContextLevel) -> tuple[str, ContextLevel]:
+        layers = dict(result.context_layers or {})
+        order = {"L0": ("L0",), "L1": ("L1", "L0", "L2"), "L2": ("L2", "L1", "L0")}[requested]
+        for level in order:
+            content = layers.get(level)
+            if content:
+                return content, level  # type: ignore[return-value]
+        return result.content, result.context_level
 
     @staticmethod
     def _terms(query: str) -> set[str]:

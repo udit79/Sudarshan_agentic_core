@@ -5,6 +5,7 @@ from __future__ import annotations
 from threading import Event, Lock
 from typing import Any, Callable, Mapping
 
+from api.control_plane import ControlPlane
 from api.scheduler import LocalRunScheduler
 from pipelines.orchestrator.contracts import NodeSpec
 from pipelines.orchestrator.dag import DAGNodeState, DependencyDAG
@@ -24,6 +25,7 @@ class DAGSchedulerBridge:
         queue_db_path: str = "artifacts/.state/dag_queue.db",
         max_workers: int = 2,
         lease_ms: int = 900_000,
+        control_plane: ControlPlane | None = None,
     ) -> None:
         self.dag = dag
         self.execute_node = execute_node
@@ -35,6 +37,8 @@ class DAGSchedulerBridge:
             db_path=queue_db_path,
             max_workers=max_workers,
             lease_ms=lease_ms,
+            control_plane=control_plane,
+            queue_name="dag",
         )
 
     def start_run(

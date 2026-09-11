@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import replace
 from threading import RLock
 
+from datetime import datetime
+
 from memory.model import Memory, MemoryLifecycle, utc_now
 
 
@@ -90,4 +92,21 @@ class MemoryStore:
             return True
         with self._lock:
             memory = self._memory.get(memory_id)
-            return memory is None or memory.lifecycle is MemoryLifecycle.ACTIVE
+            return (
+                memory is None
+                or (
+                    memory.lifecycle is MemoryLifecycle.ACTIVE
+                    and (memory.expires_at is None or memory.expires_at > utc_now())
+                )
+            )
+
+    def expire_due(self, *, now: datetime | None = None) -> list[Memory]:
+        """Mark due records expired while retaining their audit rows."""
+
+        cutoff = now or utc_now()
+        expired: list[Memory] = []
+        with self._lock:
+            for memory in list(self._memory.values()):
+                if memory.lifecycle is MemoryLifecycle.ACTIVE and memory.expires_at is not None and memory.expires_at <= cutoff:
+                    expired.append(self.transition(memory.id, MemoryLifecycle.EXPIRED))
+        return expired

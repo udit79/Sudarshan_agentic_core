@@ -208,6 +208,17 @@ def get_sudarshan_health() -> dict[str, Any]:
 
 
 @mcp.tool(
+    name="cleanup_sudarshan_lifecycle",
+    description="Preview or execute safe retention cleanup for expired derived data.",
+)
+def cleanup_sudarshan_lifecycle(dry_run: bool = True, older_than_seconds: int = 86400) -> dict[str, Any]:
+    return get_application().cleanup_lifecycle(
+        dry_run=dry_run,
+        older_than_seconds=older_than_seconds,
+    )
+
+
+@mcp.tool(
     name="get_sudarshan_usage",
     description="Read safe token, tool, wall-time, cost, and concurrency budget counters for a skill run.",
 )

@@ -18,6 +18,7 @@ from threading import Lock
 from typing import Any, Callable, Literal, Mapping, TypeVar
 
 from ingestion_pipelines.contracts import IngestionBudget
+from api.control_plane import ControlPlane
 
 
 IngestionStage = Literal["parser", "ocr", "vision", "summary", "embedding"]
@@ -115,17 +116,22 @@ class IngestionBudgetSnapshot:
 class IngestionBudgetController:
     """Thread-safe per-ingestion accounting with a hard fan-out guard."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, control_plane: ControlPlane | None = None) -> None:
         self._budgets: dict[str, IngestionBudget] = {}
         self._stage_units: dict[str, dict[str, int]] = {}
         self._stage_tokens: dict[str, dict[str, int]] = {}
         self._fan_out: dict[str, int] = {}
         self._lock = Lock()
+        self._control_plane = control_plane
 
     def register(self, ingestion_id: str, budget: IngestionBudget) -> IngestionBudgetSnapshot:
         key = str(ingestion_id).strip()
         if not key:
             raise ValueError("ingestion_id must be non-empty")
+        if self._control_plane is not None:
+            result = self._control_plane.ingestion_budget_register(key, budget.model_dump(mode="json"))
+            self._raise_remote_error(result)
+            return self._snapshot_from_remote(key, result)
         with self._lock:
             existing = self._budgets.get(key)
             if existing is not None and existing != budget:
@@ -151,6 +157,12 @@ class IngestionBudgetController:
             raise ValueError(f"unsupported ingestion stage: {stage}")
         if units < 0 or tokens < 0 or fan_out < 0:
             raise IngestionBudgetExceededError("INVALID_BUDGET", "charge values must be non-negative")
+        if self._control_plane is not None:
+            result = self._control_plane.ingestion_budget_charge(
+                str(ingestion_id), stage=stage, units=units, tokens=tokens, fan_out=fan_out
+            )
+            self._raise_remote_error(result)
+            return self._snapshot_from_remote(str(ingestion_id), result)
         with self._lock:
             key = str(ingestion_id).strip()
             budget = self._budgets.get(key)
@@ -181,6 +193,11 @@ class IngestionBudgetController:
             return self._snapshot_locked(key)
 
     def snapshot(self, ingestion_id: str) -> IngestionBudgetSnapshot:
+        if self._control_plane is not None:
+            result = self._control_plane.ingestion_budget_snapshot(str(ingestion_id))
+            if result is None:
+                raise IngestionBudgetExceededError("NOT_REGISTERED", f"ingestion '{ingestion_id}' is not registered")
+            return self._snapshot_from_remote(str(ingestion_id), result)
         with self._lock:
             key = str(ingestion_id).strip()
             if key not in self._budgets:
@@ -195,6 +212,26 @@ class IngestionBudgetController:
             stage_tokens=dict(self._stage_tokens[ingestion_id]),
             fan_out_used=self._fan_out[ingestion_id],
             total_tokens=sum(self._stage_tokens[ingestion_id].values()),
+        )
+
+    @staticmethod
+    def _raise_remote_error(result: Mapping[str, Any]) -> None:
+        code = result.get("error")
+        if code:
+            raise IngestionBudgetExceededError(str(code), f"Distributed ingestion budget rejected operation: {code}")
+
+    @staticmethod
+    def _snapshot_from_remote(ingestion_id: str, values: Mapping[str, Any]) -> IngestionBudgetSnapshot:
+        budget = IngestionBudget.model_validate(values.get("budget") or values)
+        stage_units = dict(values.get("stage_units") or {})
+        stage_tokens = dict(values.get("stage_tokens") or {})
+        return IngestionBudgetSnapshot(
+            ingestion_id=ingestion_id,
+            budget=budget,
+            stage_units={stage: int(stage_units.get(stage, 0)) for stage in _STAGES},
+            stage_tokens={stage: int(stage_tokens.get(stage, 0)) for stage in _STAGES},
+            fan_out_used=int(values.get("fan_out_used", 0)),
+            total_tokens=int(values.get("total_tokens", 0)),
         )
 
 
@@ -413,9 +450,10 @@ class IngestionStageCache:
 class IngestionUsageRecorder:
     """Thread-safe usage ledger separating preflight estimates from actuals."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, control_plane: ControlPlane | None = None) -> None:
         self._records: dict[str, list[dict[str, Any]]] = {}
         self._lock = Lock()
+        self._control_plane = control_plane
 
     def record(
         self,
@@ -427,6 +465,8 @@ class IngestionUsageRecorder:
         input_tokens: int = 0,
         output_tokens: int = 0,
         is_estimate: bool = False,
+        charge_type: str = "provider",
+        parent_usage_id: str | None = None,
     ) -> None:
         if input_tokens < 0 or output_tokens < 0:
             raise ValueError("usage token counts must be non-negative")
@@ -438,7 +478,12 @@ class IngestionUsageRecorder:
             "output_tokens": int(output_tokens),
             "total_tokens": int(input_tokens + output_tokens),
             "is_estimate": bool(is_estimate),
+            "charge_type": str(charge_type),
+            "parent_usage_id": parent_usage_id,
         }
+        if self._control_plane is not None:
+            self._control_plane.ingestion_usage_record(str(ingestion_id), record)
+            return
         with self._lock:
             self._records.setdefault(str(ingestion_id), []).append(record)
 
@@ -453,6 +498,8 @@ class IngestionUsageRecorder:
         )
 
     def snapshot(self, ingestion_id: str) -> dict[str, Any]:
+        if self._control_plane is not None:
+            return self._control_plane.ingestion_usage_snapshot(str(ingestion_id))
         with self._lock:
             records = [dict(item) for item in self._records.get(str(ingestion_id), [])]
         estimates = [item for item in records if item["is_estimate"]]

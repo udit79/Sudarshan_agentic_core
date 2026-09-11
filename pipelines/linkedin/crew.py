@@ -86,9 +86,23 @@ class LinkedInPostFlow(TextTransformationFlow):
 
     def enrich_output(self, output: Any) -> LinkedInPostOutput:
         """Attach deterministic humanizer state and optionally materialize an image."""
+        from pipelines.orchestrator.cross_skill import build_child_plan
+
 
         if not isinstance(output, LinkedInPostOutput):
             return output
+
+        def finalize(value: LinkedInPostOutput) -> LinkedInPostOutput:
+            child_plan = build_child_plan(
+                "linkedin.post",
+                value,
+                parent_run_id=self.state.run_id or self.state.task_id or "unbound-linkedin",
+                parent_node_id="linkedin_post",
+            )
+            self.state.artifact = {
+                "child_plan": [item.model_dump(mode="json") for item in child_plan],
+            }
+            return value
 
         updates: dict[str, Any] = {
             "humanizer_report": audit_linkedin_text(output.post_text),
@@ -99,23 +113,29 @@ class LinkedInPostFlow(TextTransformationFlow):
             updates["visual_child"] = output.visual_child.model_copy(update={"status": "eligible"})
 
         if not output.image.requested:
-            return output.model_copy(update=updates)
+            return finalize(output.model_copy(update=updates))
         image = output.image
         if self.image_generator is None:
             if image.strategy == "generate":
                 updates["image"] = image.model_copy(update={"strategy": "prompt"})
-                return output.model_copy(update=updates)
-            return output.model_copy(update=updates)
+                return finalize(output.model_copy(update=updates))
+            return finalize(output.model_copy(update=updates))
         try:
             asset_uri = self.image_generator(image.generation_prompt)
             if not asset_uri:
                 raise ValueError("image generator returned no asset URI")
             updates["image"] = image.model_copy(update={"strategy": "asset", "asset_uri": str(asset_uri)})
-            return output.model_copy(update=updates)
-        except Exception:
+            return finalize(output.model_copy(update=updates))
+        except Exception as exc:
             updates["image"] = image.model_copy(update={"strategy": "prompt", "asset_uri": None})
-            updates["caveats"] = [*output.caveats, "Image asset generation was unavailable; use the supplied prompt."]
-            return output.model_copy(update=updates)
+            from integrations.providers.receipts import classify_provider_error
+
+            failure_class = classify_provider_error(exc)
+            updates["caveats"] = [
+                *output.caveats,
+                f"Image asset generation was unavailable ({failure_class}); use the supplied prompt.",
+            ]
+            return finalize(output.model_copy(update=updates))
 
     def prepare_quality_output(self, output: Any) -> LinkedInPostOutput:
         """Run the deterministic humanizer before the model quality verdict."""

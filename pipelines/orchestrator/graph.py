@@ -245,6 +245,11 @@ def build_default_pipeline_registry(
         progress_callback=progress_callback(request),
     ).run(request)
 
+    def visual_flowchart_runner(request: AdvisoryRequest, *, cancel_event=None) -> PipelineResponse:
+        from pipelines.ppt.child_skill import run_visual_flowchart
+
+        return run_visual_flowchart(request, cancel_event=cancel_event)
+
     return {
         "advisory": PipelineAdapter(
             "advisory",
@@ -291,6 +296,10 @@ def build_default_pipeline_registry(
         "ppt": PipelineAdapter(
             "ppt",
             presentation_runner,
+        ),
+        "visual_flowchart": PipelineAdapter(
+            "visual_flowchart",
+            visual_flowchart_runner,
         ),
         "video": PipelineAdapter(
             "video",

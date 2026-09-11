@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from pipelines.video.timeline import VideoTimeline
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -74,6 +76,7 @@ class VideoRunManifest(BaseModel):
     segment_order: list[str] = Field(default_factory=list, max_length=100)
     output_video: str | None = None
     failed_scene_ids: list[str] = Field(default_factory=list, max_length=100)
+    timeline: VideoTimeline | None = None
     created_at: str = Field(default_factory=_utc_now)
     updated_at: str = Field(default_factory=_utc_now)
 

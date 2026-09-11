@@ -46,6 +46,8 @@ class VideoPipeline:
         )
 
     def run(self, request: AdvisoryRequest, *, cancel_event: Event | None = None) -> PipelineResponse:
+        from pipelines.orchestrator.cross_skill import build_child_plan
+
         runtime = self._runtime(request)
         writer = TaskMemoryWriter(runtime)
         run_id = runtime.run_id
@@ -177,6 +179,14 @@ class VideoPipeline:
                     "status_url": f"file://{Path(result.video_path).resolve()}" if result.video_path else None,
                 }
                 output = {"provider": "openai-native", "subject": subject, "status": "succeeded"}
+
+            child_plan = build_child_plan(
+                "video.storyboard",
+                package,
+                parent_run_id=run_id,
+                parent_node_id="video.storyboard",
+            )
+            artifact["child_plan"] = [item.model_dump(mode="json") for item in child_plan]
             
             writer.write("video_generation", "succeeded", json.dumps(output, ensure_ascii=False))
             unit = KnowledgeUnit(

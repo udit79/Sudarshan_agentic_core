@@ -249,6 +249,21 @@
             <span id="runWaitingReason">The agent is waiting for the next permitted action.</span>
           </div>
 
+          <section class="execution-monitor" id="executionMonitor" hidden aria-label="Execution monitor">
+            <div class="execution-monitor-header">
+              <div>
+                <p class="result-eyebrow">EXECUTION MONITOR</p>
+                <h4>Parent and child work</h4>
+              </div>
+              <span class="monitor-scope-note">Authorized projections only</span>
+            </div>
+            <div class="execution-lanes" id="executionLanes"></div>
+            <details class="evidence-drawer" id="evidenceDrawer">
+              <summary>Evidence and provenance</summary>
+              <div class="evidence-list" id="evidenceList"></div>
+            </details>
+          </section>
+
           <div class="task-progress" id="taskProgress" hidden>
             <div class="task-progress-header">
               <span id="taskProgressLabel">Agent progress</span>

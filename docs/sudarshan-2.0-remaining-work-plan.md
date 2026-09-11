@@ -6,6 +6,35 @@ multi-worker release.
 
 ## Release position
 
+### T43–T52 implementation ledger (current branch)
+
+The code slices for T43–T52 are implemented and covered by local component,
+pipeline, frontend, and compile checks. They are not yet a production claim:
+the live gates below require the team’s deployed Redis/object store,
+sanitized real corpus, provider receipts, sandbox host, and human visual
+approval.
+
+| Ticket | Code now present | Remaining release gate |
+| --- | --- | --- |
+| T43 | `api/lifecycle.py` dry-run, lineage-aware cleanup, MCP operation | Kill-9/host-loss drill on deployed storage and retention policy review |
+| T44 | `integrations/providers/receipts.py` common receipt/error mapping | Import real provider invoices and reconcile observed vs estimated cost |
+| T45 | Native parent/child execution lanes and evidence drawer | Browser reconnect/E2E test through gateway and external MCP |
+| T46 | Object-backed ingestion references and restart-safe resolution | Shared object-store migration, OCR/VLM measurements, long-video load test |
+| T47 | Report archive schema and promotion metrics | Run reviewed sanitized corpora and approve per-artifact thresholds |
+| T48 | Signed package verification and Docker/local sandbox policy | Production key management, resource limits, and hostile-package drills |
+| T49 | Agent Card and A2A task/status/cancel adapter | Staging test with an independent MCP/A2A client |
+| T50 | Shared SVG/raster/PDF/PPTX/video integrity gate and renderer promotion | Font/raster/video visual regression snapshots and human approval |
+| T51 | Typed child-task specs, dependency validation, fallback reconciliation, runtime adapter | Wire every PPT/LinkedIn/video planner to the typed child plan and run full DAG demo |
+| T52 | Release preflight models plus release/rollback runbooks | Execute all environment gates, backup/restore, and final owner sign-off |
+| T53 | Capability-aware model/provider health router for image and TTS calls | Persist health across workers, add provider failover priorities, and validate with real quota/rate-limit receipts |
+| T54 | Hierarchical L0/L1/L2 memory context selection | Run stage-policy checks against reviewed multimodal corpora and measure token/quality trade-offs |
+| T55 | Lazy, bounded skill reference/resource policy | Expand pilot metadata to every built-in skill and add hostile-package/resource-limit drills |
+| T56 | Shared renderer capability registry | Register deployed adapter versions and run visual promotion snapshots |
+| T57 | Semantic diagram family and self-checker | Add reviewed examples for all diagram kinds and accessibility/human approval checks |
+| T58 | Slide jobs and presentation quality workflow | Run editable PPTX visual regression and targeted repair loop on real decks |
+| T59 | Provider-neutral video timeline and asset ledger | Run long-video/codec tests and verify shared object-store resume behavior |
+| T60 | Memory lifecycle events and evaluation report | Run reviewed corpus benchmarks and connect event projection to production retention |
+
 ### Ready now
 
 - Native DeepSeek Harness and external MCP application boundary.
@@ -22,8 +51,8 @@ multi-worker release.
 - SQLite is still process/local-instance state.
 - Raw sources, derived evidence, and artifacts need shared durable storage.
 - External MCP/A2A clients need staging interoperability evidence.
-- Visual production QA and real-corpus quality thresholds are incomplete.
-- Untrusted skill execution needs signed packages and an OS/container sandbox.
+- Visual production QA and real-corpus quality thresholds need deployed runs.
+- Untrusted skill execution needs production key management and sandbox drills.
 - Provider billing reconciliation is not yet authoritative.
 
 ## Non-negotiable architecture rules
@@ -86,6 +115,38 @@ Acceptance:
 - Restart and host-loss recovery preserve idempotency and event ordering.
 - A contract test runs against both SQLite and the production-like adapter.
 
+Current implementation slice (T39.11): `api/control_plane.py` freezes the
+shared admission, lease, fencing, retry, terminal-transition, event, Redis
+Stream discovery, `XAUTOCLAIM` recovery, and progress-projection contract.
+`LocalRunScheduler` can use that adapter for shared admission, worker claims,
+renewals, retries, terminal fencing, discovery of jobs admitted by another
+process, and recovery of pending messages after consumer loss. The existing
+typed `ProgressEvent` contract now has a Redis-backed sink with monotonic
+per-run cursors, so SSE/replay consumers can reconnect to any worker. Run and
+ingestion jobs use separate stream names, while SQLite remains the local
+durable queue and default development mode. A reclaimed message whose fenced
+run is still actively running is deliberately retained instead of
+acknowledged. `DependencyDAG` and the PPT vertical can now accept the same
+control plane for shared node claims, fenced completion, dependent-node
+unlocking, and atomic per-run snapshot replication. A run snapshot is created
+once and changed nodes are merged through Redis transactions, so a restarted
+bridge can sync sibling completions without overwriting unrelated progress.
+The exact-match cache
+now uses Redis for shared entries, TTL, stampede claims, release, and
+invalidation when the shared mode is enabled; SQLite remains the local
+projection in default mode. Budget reservations, commits, releases, and
+snapshots for the main run budget now use atomic Redis scripts in shared mode;
+`UsageRecord.is_estimate` remains explicit and is not treated as billing truth.
+The ingestion queue is shared, and parser/OCR/vision/summary/embedding stage
+budgets and usage receipts now use the same Redis control-plane boundary when
+shared mode is enabled. Optional live Redis
+tests in `tests/integration/test_redis_control_plane.py` cover cross-process
+discovery, single execution, stale-worker fencing, and DAG dependent unlock
+when `REDIS_URL` (or
+`SUDARSHAN_REDIS_URL`) and the `redis` extra are available. The code and
+contract tests for T39 are complete; live deployment smoke and crash/host-loss
+evidence remain an environment release gate.
+
 ### T40 — Shared source, evidence, and artifact storage
 
 Owner: backend/data. Depends on: T32, T36, T39.
@@ -101,6 +162,15 @@ Acceptance:
 - Download/preview requires scope and classification authorization.
 - Restarted workers can resolve inputs without a process-local path.
 - Encryption, backup, restore, and retention configuration are documented.
+
+Current implementation slice (T40): `api/storage.py` provides an `ObjectStore`
+contract, an opaque-ID/checksum-verified local backend, and an injected-client
+S3-compatible backend with classification/scope checks, lineage metadata,
+restart-safe materialization, and expiry cleanup. `ArtifactStore` and
+ingestion can use `SUDARSHAN_OBJECT_STORE_MODE=durable` or `s3`; local
+development remains backward-compatible. At-rest encryption is delegated to
+the configured filesystem volume or S3/MinIO server-side encryption policy;
+backup/restore drills remain an environment release gate.
 
 ### T41 — Distributed budget and usage ledger
 
@@ -119,6 +189,14 @@ Acceptance:
 - Retries, cache hits, provider cache reads/writes, and estimates are separate.
 - A billing reconciliation report identifies missing or estimated fields.
 
+Current implementation slice (T41): `IngestionBudgetController` and
+`IngestionUsageRecorder` delegate to the shared control plane in Redis mode.
+Atomic stage-unit/token/fan-out checks, shared registration, separate
+estimated versus observed usage receipts, and the typed usage charge taxonomy
+(`provider`, `retry`, `cache_hit`, `cache_write`, `orchestration`) are covered
+by component tests. Reconciliation remains explicitly non-billing-truth until
+provider invoices or gateway receipts are imported by T44.
+
 ### T42 — Production observability and audit retention
 
 Owner: backend/operations. Depends on: T26, T39, T41.
@@ -136,6 +214,16 @@ Acceptance:
 - Queue wait, provider wait, worker time, retries, cache savings, and quality
   status are queryable by run and skill.
 - Audit records are tamper-evident and retention-expired records are removed.
+
+Current implementation slice (T42): the safe observability collector now
+stores allow-listed correlated events with a per-run hash chain, classification
+and operator checks, dashboard-safe summaries, integrity verification, and
+retention dry-run/purge. Redis provides a bounded cross-worker dashboard
+projection while SQLite remains the tamper-evident audit source. An optional
+dependency-free HTTP collector is configured by
+`SUDARSHAN_OBSERVABILITY_EXPORT_URL`; export failures are isolated from work.
+Collector authentication, retention, and deployment topology remain
+environment configuration gates.
 
 ### T43 — Retention, garbage collection, and abandoned-work cleanup
 
@@ -307,6 +395,33 @@ Acceptance:
   quality failure/repair, final artifact, and safe logs without secrets.
 - Product claims say “measured on our benchmark” and include the benchmark
   date/version.
+
+### T53 — Capability-aware model/provider routing
+
+Owner: backend/provider. Depends on: T13, T21, T26, T44.
+
+The local slice adds `ProviderRouter`, model resolution for media capabilities,
+quota/rate-limit/authentication classification, cooldown protection, and
+explicit LinkedIn/video degradation metadata. It deliberately does not create
+a second scheduler or hide provider failures behind a successful-looking
+artifact.
+
+Acceptance for the local slice:
+
+- Repeated quota failures are blocked during cooldown instead of creating a
+  parallel retry storm.
+- LinkedIn falls back to prompt-only output with a stable failure class.
+- Video falls back to a local title card or silent narration and reports
+  `degraded` plus per-scene reasons.
+- Model/provider state is safe for concurrent in-process scene execution.
+
+Remaining release work:
+
+- Move health state into the shared control plane for multi-worker deployment.
+- Add provider priority/failover configuration when a second media provider is
+  approved.
+- Reconcile provider receipts and expose safe health/fallback events in the
+  operator dashboard.
 
 ## Parallel team plan
 

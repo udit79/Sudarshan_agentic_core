@@ -3330,9 +3330,9 @@ T28 reliability tests: passed, 21 focused tests; full Python suite after T28: 17
 `T23` has a locally implemented first slice. The memory layer now applies Sudarshan-owned ranking, deduplication, progressive stage budgets, provenance-bearing records, and typed pack propagation around Cognee. T24 adds the first local lifecycle/supersession/retraction slice; full Cognee graph/search integration, contradiction detection beyond explicit supersession, deletion guarantees, retrieval benchmarks, and distributed dataset controls remain open.
 `T24` has a locally implemented and tested first slice. Lifecycle transitions, explicit supersession, pending-review exclusion, scope-checked retraction, and non-destructive forgetting are covered locally; shared lifecycle persistence, restart reconciliation, true Cognee deletion, expiry workers, and contradiction detection beyond explicit supersession remain open.
 `T25` has a locally implemented and tested first slice. Claim-binding fields, transparent humanizer findings, approval-separated draft state, humanizer CrewAI task wiring, and optional visual-child call construction are covered; executable visual registration, child-result reconciliation, and staging evidence for publish approval remain open.
-`T26` has a locally implemented and tested first slice. Correlated safe telemetry, durable local storage, aggregate run/status projections, a telemetry endpoint, and dashboard metric pills are covered; distributed collection, OpenTelemetry export, retention/access controls, and billing reconciliation remain open.
+`T26` has a locally implemented and tested first slice. Correlated safe telemetry, durable local storage, aggregate run/status projections, a telemetry endpoint, and dashboard metric pills are covered; T42 now adds Redis cross-worker projection, retention/access controls, hash-chain verification, and an optional redacted HTTP collector. Provider billing reconciliation remains open.
 `T27` has a locally implemented and tested first slice. Trusted child identity propagation, trust-tier and publish-approval enforcement, source prompt-injection markers, recursive secret redaction, hashed audit query records, and credential-filtered cache metadata are covered; signed package verification, OS/container sandboxing, distributed authorization, CI secret scanning, and multi-worker attack tests remain open.
-`T28` has a locally implemented and tested first slice. Scheduler timeout/retry/dead-letter/lease behavior, duplicate submission, DAG child failure, renderer failure, progress reconnect, restarted-bridge dependent admission, and partial video recovery are covered locally; kill-9/host-loss tests, shared multi-worker leases, distributed idempotency, and abandoned-artifact reconciliation remain open.
+`T28` has a locally implemented and tested first slice. Scheduler timeout/retry/dead-letter/lease behavior, duplicate submission, DAG child failure, renderer failure, progress reconnect, restarted-bridge dependent admission, and partial video recovery are covered locally; T39 now adds shared multi-worker leases, distributed idempotency, Redis Stream recovery, and fenced DAG/cache/budget state. Live kill-9/host-loss evidence and abandoned-artifact reconciliation remain deployment gates.
 
 `T31` is implemented as the first contract slice: strict manifest, evidence,
 location, extraction-event, quality-report, budget, fixture, and compatibility
@@ -3348,8 +3348,9 @@ supports lease recovery, retry/dead-letter, cooperative cancellation, and
 source-hash idempotency. `/ingest` remains the synchronous compatibility
 projection. Typed modality evidence, temporal video blocks, structure-aware
 indexing, Cognee projection, cache/budget controls, and multimodal evaluation
-remain in `T34–T38`; distributed queue/object storage is still a deployment
-follow-up.
+remain in `T34–T38`; T39–T42 now supply distributed queue, object storage,
+budget, and safe observability boundaries, while live infrastructure drills
+remain deployment follow-ups.
 
 `T34` now has a local typed-evidence slice across all compatibility modalities.
 Text and image sources produce retrievable blocks; PDF and PPTX delimiter
@@ -3375,9 +3376,10 @@ lookups enforce User/Case/Task scope and classification access. The application
 and MCP surfaces expose these lookups without allowing skills to call Cognee
 directly. A bounded, provenance-bearing summary is projected through
 `MemoryManager`, while exact source content remains in the evidence index.
-This is intentionally not a production claim: shared object storage,
-distributed/vector/visual retrieval, retention/deletion, semantic enrichment,
-and concurrent-worker benchmarks remain in T36–T38.
+This is intentionally not a production claim: distributed/vector/visual
+retrieval, retention/deletion, semantic enrichment, and concurrent-worker
+benchmarks remain in T36–T38. T40 adds shared source/object storage for the
+artifact/evidence boundary, but production backup drills are still required.
 
 `T37` now has a locally wired control slice. The asynchronous ingestion worker
 normalizes an `IngestionBudget`, charges parser/fan-out work before extraction,

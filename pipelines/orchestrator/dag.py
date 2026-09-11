@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Iterable, Literal, Mapping
 
+from api.control_plane import ControlPlane, ControlPlaneConflict, LeaseToken, StaleLeaseError, new_worker_id
 from pipelines.orchestrator.contracts import NodeSpec
 
 
@@ -70,7 +72,16 @@ def _now() -> str:
 class DependencyDAG:
     """Thread-safe SQLite-backed graph admission and node state store."""
 
-    def __init__(self, db_path: str | Path = "artifacts/.state/dag.db", *, event_sink: EventSink | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str | Path = "artifacts/.state/dag.db",
+        *,
+        event_sink: EventSink | None = None,
+        control_plane: ControlPlane | None = None,
+        lease_ms: int = 900_000,
+    ) -> None:
+        if lease_ms < 1:
+            raise DAGError("lease_ms must be positive")
         self.db_path = str(db_path)
         if self.db_path != ":memory:":
             Path(self.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +89,11 @@ class DependencyDAG:
         self._connection.row_factory = sqlite3.Row
         self._lock = RLock()
         self._event_sink = event_sink
+        self._control_plane = control_plane
+        self._lease_seconds = lease_ms / 1000
+        self._owner = new_worker_id("dag")
+        self._node_leases: dict[tuple[str, str], LeaseToken] = {}
+        self._remote_revisions: dict[str, int] = {}
         self._create_schema()
 
     def close(self) -> None:
@@ -89,6 +105,11 @@ class DependencyDAG:
             raise DAGError("run_id must be non-empty")
         specs = tuple(nodes)
         self._validate_specs(specs)
+        remote_snapshot = self._read_remote_snapshot(run_id)
+        if remote_snapshot is not None:
+            self._validate_remote_specs(remote_snapshot, specs)
+            self._apply_remote_snapshot(remote_snapshot)
+            return self.get_run(run_id)
         now = _now()
         with self._lock, self._connection:
             try:
@@ -116,12 +137,41 @@ class DependencyDAG:
                 )
             self._refresh_ready_locked(run_id)
             self._update_run_status_locked(run_id)
+        if self._control_plane is not None:
+            for spec in specs:
+                try:
+                    self._control_plane.admit(
+                        self._resource_key(run_id, spec.node_id),
+                        self._spec_hash(spec),
+                        {
+                            "run_id": run_id,
+                            "node_id": spec.node_id,
+                            "skill_id": spec.skill_id,
+                        },
+                        queue="dag-state",
+                    )
+                except ControlPlaneConflict as error:
+                    raise DAGError(f"shared DAG node '{spec.node_id}' was admitted differently") from error
+        if self._supports_remote_snapshots():
+            with self._lock:
+                snapshot = self._snapshot_payload_locked(run_id)
+            try:
+                revision = self._control_plane.dag_snapshot_put(run_id, snapshot)  # type: ignore[union-attr]
+            except ControlPlaneConflict:
+                remote_snapshot = self._read_remote_snapshot(run_id)
+                if remote_snapshot is None:
+                    raise DAGError(f"shared DAG snapshot for '{run_id}' disappeared")
+                self._validate_remote_specs(remote_snapshot, specs)
+                self._apply_remote_snapshot(remote_snapshot)
+                return self.get_run(run_id)
+            self._remote_revisions[run_id] = revision
         self._emit("dag.created", run_id, node_count=len(specs))
         return self.get_run(run_id)
 
     def admit_ready_nodes(self, run_id: str) -> list[DAGNodeState]:
         """Re-evaluate dependencies and return all currently ready nodes."""
 
+        self._sync_remote(run_id)
         with self._lock, self._connection:
             self._require_run_locked(run_id)
             changed = self._refresh_ready_locked(run_id)
@@ -130,6 +180,8 @@ class DependencyDAG:
                 "SELECT * FROM dag_nodes WHERE run_id = ? AND status = 'ready' ORDER BY node_id",
                 (run_id,),
             ).fetchall()
+            changed_ids = [node.node_id for node in changed]
+        self._publish_node_changes(run_id, changed_ids)
         if changed:
             for node in changed:
                 self._emit("node.ready", run_id, node_id=node.node_id, skill_id=node.skill_id)
@@ -142,13 +194,32 @@ class DependencyDAG:
             raise DAGError("claim limit must be positive")
         ready = self.admit_ready_nodes(run_id)
         selected = ready[:limit]
+        if self._control_plane is not None:
+            leased: list[DAGNodeState] = []
+            for node in selected:
+                lease = self._control_plane.claim(
+                    self._resource_key(run_id, node.node_id),
+                    owner=self._owner,
+                    lease_seconds=self._lease_seconds,
+                )
+                if lease is not None:
+                    leased.append(node)
+                    self._node_leases[(run_id, node.node_id)] = lease
+            selected = leased
         with self._lock, self._connection:
+            before = self._node_payloads_locked(run_id)
             for node in selected:
                 self._connection.execute(
                     "UPDATE dag_nodes SET status = 'running' WHERE run_id = ? AND node_id = ? AND status = 'ready'",
                     (run_id, node.node_id),
                 )
             self._update_run_status_locked(run_id)
+            changed_ids = [
+                node_id
+                for node_id, payload in self._node_payloads_locked(run_id).items()
+                if before.get(node_id) != payload
+            ]
+        self._publish_node_changes(run_id, changed_ids)
         for node in selected:
             self._emit("node.started", run_id, node_id=node.node_id, skill_id=node.skill_id)
         return [self.get_node(run_id, node.node_id) for node in selected]
@@ -169,6 +240,35 @@ class DependencyDAG:
         if status == "succeeded" and (failure_code or failure_reason):
             raise DAGError("successful nodes cannot contain failure details")
         emitted: list[tuple[str, dict[str, Any]]] = []
+        self._sync_remote(run_id)
+        lease = self._node_leases.get((run_id, node_id))
+        with self._lock:
+            current = str(self._get_node_row_locked(run_id, node_id)["status"])
+            before = self._node_payloads_locked(run_id)
+        if current not in {"ready", "running"}:
+            raise DAGError(f"node '{node_id}' cannot complete from status '{current}'")
+        if self._control_plane is not None:
+            if lease is None:
+                raise DAGError(f"node '{node_id}' has no active shared lease")
+            try:
+                if status == "failed" and repair:
+                    self._control_plane.schedule_retry(
+                        lease,
+                        retry_at=time.time(),
+                        error=failure_reason or failure_code or "DAG repair requested",
+                    )
+                else:
+                    self._control_plane.transition(
+                        lease,
+                        status=status,
+                        result={
+                            "output_ref": output_ref,
+                            "failure_code": failure_code,
+                            "failure_reason": failure_reason,
+                        },
+                    )
+            except StaleLeaseError as error:
+                raise DAGError(f"stale shared lease for node '{node_id}'") from error
         with self._lock, self._connection:
             row = self._get_node_row_locked(run_id, node_id)
             current = str(row["status"])
@@ -215,15 +315,24 @@ class DependencyDAG:
             }) for node in newly_ready)
             self._update_run_status_locked(run_id)
             result = self._node_from_row(self._get_node_row_locked(run_id, node_id))
+            changed_ids = [
+                changed_node_id
+                for changed_node_id, payload in self._node_payloads_locked(run_id).items()
+                if before.get(changed_node_id) != payload
+            ]
+        self._publish_node_changes(run_id, changed_ids)
+        self._node_leases.pop((run_id, node_id), None)
         for event_name, fields in emitted:
             self._emit(event_name, run_id, **fields)
         return result
 
     def get_node(self, run_id: str, node_id: str) -> DAGNodeState:
+        self._sync_remote(run_id)
         with self._lock:
             return self._node_from_row(self._get_node_row_locked(run_id, node_id))
 
     def list_nodes(self, run_id: str) -> list[DAGNodeState]:
+        self._sync_remote(run_id)
         with self._lock:
             self._require_run_locked(run_id)
             rows = self._connection.execute(
@@ -232,6 +341,7 @@ class DependencyDAG:
         return [self._node_from_row(row) for row in rows]
 
     def get_run(self, run_id: str) -> DAGRunState:
+        self._sync_remote(run_id)
         with self._lock:
             row = self._connection.execute(
                 """SELECT r.*, COUNT(n.node_id) AS node_count,
@@ -282,6 +392,162 @@ class DependencyDAG:
                 """
             )
 
+    def _supports_remote_snapshots(self) -> bool:
+        return self._control_plane is not None and all(
+            callable(getattr(self._control_plane, name, None))
+            for name in ("dag_snapshot", "dag_snapshot_put", "dag_snapshot_patch")
+        )
+
+    def _read_remote_snapshot(self, run_id: str) -> dict[str, Any] | None:
+        if not self._supports_remote_snapshots():
+            return None
+        snapshot = self._control_plane.dag_snapshot(run_id)  # type: ignore[union-attr]
+        return dict(snapshot) if snapshot is not None else None
+
+    def _sync_remote(self, run_id: str) -> None:
+        snapshot = self._read_remote_snapshot(run_id)
+        if snapshot is None:
+            return
+        revision = int(snapshot.get("revision", 0))
+        if revision <= self._remote_revisions.get(run_id, 0):
+            return
+        self._apply_remote_snapshot(snapshot)
+
+    def _apply_remote_snapshot(self, snapshot: Mapping[str, Any]) -> None:
+        run_id = str(snapshot.get("run_id", "")).strip()
+        nodes = snapshot.get("nodes")
+        if not run_id or not isinstance(nodes, Mapping):
+            raise DAGError("shared DAG snapshot is invalid")
+        with self._lock, self._connection:
+            run_row = self._connection.execute(
+                "SELECT run_id FROM dag_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            created_at = str(snapshot.get("created_at") or _now())
+            updated_at = str(snapshot.get("updated_at") or _now())
+            if run_row is None:
+                self._connection.execute(
+                    "INSERT INTO dag_runs(run_id, status, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                    (run_id, str(snapshot.get("status") or "queued"), created_at, updated_at),
+                )
+            else:
+                self._connection.execute(
+                    "UPDATE dag_runs SET status = ?, updated_at = ? WHERE run_id = ?",
+                    (str(snapshot.get("status") or "queued"), updated_at, run_id),
+                )
+            for node_id, raw_node in nodes.items():
+                if not isinstance(raw_node, Mapping):
+                    raise DAGError("shared DAG node snapshot is invalid")
+                node = dict(raw_node)
+                dependencies = list(node.get("dependencies") or [])
+                spec_json = str(node.get("spec_json") or json.dumps({
+                    "node_id": str(node_id),
+                    "skill_id": str(node.get("skill_id", "")),
+                    "dependencies": dependencies,
+                }, sort_keys=True))
+                values = (
+                    run_id,
+                    str(node_id),
+                    str(node.get("skill_id", "")),
+                    spec_json,
+                    json.dumps(dependencies),
+                    str(node.get("status", "pending")),
+                    int(node.get("repair_attempts", 0)),
+                    int(node.get("max_repairs", 0)),
+                    node.get("failure_code"),
+                    node.get("failure_reason"),
+                    node.get("output_ref"),
+                )
+                existing = self._connection.execute(
+                    "SELECT 1 FROM dag_nodes WHERE run_id = ? AND node_id = ?",
+                    (run_id, str(node_id)),
+                ).fetchone()
+                if existing is None:
+                    self._connection.execute(
+                        """INSERT INTO dag_nodes(
+                        run_id, node_id, skill_id, spec_json, dependencies_json,
+                        status, repair_attempts, max_repairs, failure_code,
+                        failure_reason, output_ref
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        values,
+                    )
+                else:
+                    self._connection.execute(
+                        """UPDATE dag_nodes SET skill_id = ?, spec_json = ?,
+                        dependencies_json = ?, status = ?, repair_attempts = ?,
+                        max_repairs = ?, failure_code = ?, failure_reason = ?,
+                        output_ref = ? WHERE run_id = ? AND node_id = ?""",
+                        (
+                            values[2], values[3], values[4], values[5], values[6],
+                            values[7], values[8], values[9], values[10], values[0], values[1],
+                        ),
+                    )
+            self._update_run_status_locked(run_id)
+        self._remote_revisions[run_id] = int(snapshot.get("revision", 0))
+
+    def _snapshot_payload_locked(self, run_id: str) -> dict[str, Any]:
+        run = self._connection.execute(
+            "SELECT * FROM dag_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if run is None:
+            raise DAGError(f"run '{run_id}' does not exist")
+        return {
+            "run_id": run_id,
+            "status": str(run["status"]),
+            "created_at": str(run["created_at"]),
+            "updated_at": str(run["updated_at"]),
+            "nodes": self._node_payloads_locked(run_id),
+        }
+
+    def _node_payloads_locked(self, run_id: str) -> dict[str, dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT * FROM dag_nodes WHERE run_id = ? ORDER BY node_id", (run_id,)
+        ).fetchall()
+        return {str(row["node_id"]): self._node_payload_from_row(row) for row in rows}
+
+    @staticmethod
+    def _node_payload_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "run_id": str(row["run_id"]),
+            "node_id": str(row["node_id"]),
+            "skill_id": str(row["skill_id"]),
+            "spec_json": str(row["spec_json"]),
+            "dependencies": list(json.loads(row["dependencies_json"])),
+            "status": str(row["status"]),
+            "repair_attempts": int(row["repair_attempts"]),
+            "max_repairs": int(row["max_repairs"]),
+            "failure_code": row["failure_code"],
+            "failure_reason": row["failure_reason"],
+            "output_ref": row["output_ref"],
+        }
+
+    def _publish_node_changes(self, run_id: str, node_ids: Iterable[str]) -> None:
+        if not self._supports_remote_snapshots():
+            return
+        selected = {str(node_id) for node_id in node_ids}
+        if not selected:
+            return
+        with self._lock:
+            payloads = self._node_payloads_locked(run_id)
+        changes = {node_id: payloads[node_id] for node_id in selected if node_id in payloads}
+        if not changes:
+            return
+        revision = self._control_plane.dag_snapshot_patch(run_id, changes)  # type: ignore[union-attr]
+        self._remote_revisions[run_id] = revision
+
+    @staticmethod
+    def _validate_remote_specs(snapshot: Mapping[str, Any], specs: tuple[NodeSpec, ...]) -> None:
+        nodes = snapshot.get("nodes")
+        if not isinstance(nodes, Mapping) or set(nodes) != {spec.node_id for spec in specs}:
+            raise DAGError("shared DAG run was admitted with a different node set")
+        for spec in specs:
+            remote = nodes.get(spec.node_id)
+            if not isinstance(remote, Mapping):
+                raise DAGError("shared DAG node snapshot is invalid")
+            if str(remote.get("skill_id")) != spec.skill_id:
+                raise DAGError(f"shared DAG node '{spec.node_id}' was admitted differently")
+            if tuple(remote.get("dependencies") or ()) != tuple(spec.dependencies):
+                raise DAGError(f"shared DAG node '{spec.node_id}' dependencies differ")
+
     @staticmethod
     def _validate_specs(specs: tuple[NodeSpec, ...]) -> None:
         identifiers = [spec.node_id for spec in specs]
@@ -320,6 +586,17 @@ class DependencyDAG:
         if value < 0 or value > 5:
             raise DAGError(f"node '{spec.node_id}' max_repairs must be between 0 and 5")
         return value
+
+    @staticmethod
+    def _resource_key(run_id: str, node_id: str) -> str:
+        return f"dag:{run_id}:{node_id}"
+
+    @staticmethod
+    def _spec_hash(spec: NodeSpec) -> str:
+        import hashlib
+
+        encoded = json.dumps(spec.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
     def _refresh_ready_locked(self, run_id: str) -> list[DAGNodeState]:
         changed: list[DAGNodeState] = []
@@ -425,4 +702,3 @@ class DependencyDAG:
         if self._event_sink is None:
             return
         self._event_sink(name, {"run_id": run_id, **fields})
-

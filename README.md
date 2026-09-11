@@ -207,6 +207,10 @@ are configured, pass them explicitly:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\stop-servers.ps1 -Ports 3001,8001,8081
 ```
 
+Startup records exact service PIDs in `artifacts/.state/sudarshan-processes.json`,
+so normal shutdown does not terminate unrelated processes. Use `-ByPort` only
+as an explicit fallback when that manifest is unavailable.
+
 Useful options and manual service commands are in
 [docs/operations.md](docs/operations.md).
 

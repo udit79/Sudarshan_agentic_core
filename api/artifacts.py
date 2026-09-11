@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+from api.storage import ObjectStore, build_object_store_from_env
 from pipelines.orchestrator.contracts import ArtifactManifest, QualityStatus
 
 
@@ -21,12 +23,13 @@ class ArtifactPreviewUnavailable(ArtifactNotFound):
 class ArtifactStore:
     """Register files under the controlled artifact root and verify integrity."""
 
-    def __init__(self, root: str | Path = "artifacts") -> None:
+    def __init__(self, root: str | Path = "artifacts", *, object_store: ObjectStore | None = None) -> None:
         self.root = Path(root).resolve()
         self.manifest_root = self.root / ".state" / "manifests"
         self.preview_root = self.root / ".state" / "previews"
         self.manifest_root.mkdir(parents=True, exist_ok=True)
         self.preview_root.mkdir(parents=True, exist_ok=True)
+        self.object_store = object_store or build_object_store_from_env(self.root)
 
     def _safe_source(self, path: str | Path) -> Path:
         resolved = Path(path).resolve()
@@ -101,6 +104,19 @@ class ArtifactStore:
         if sidecar_path.exists():
             return self._read_sidecar(sidecar_path)[0]
 
+        object_id: str | None = None
+        if self.object_store is not None:
+            stored = self.object_store.put_file(
+                source,
+                kind=f"artifact:{kind}",
+                media_type="application/octet-stream",
+                classification_level=classification_level,
+                run_id=run_id,
+                retention_class="artifact",
+            )
+            source = stored.path
+            object_id = stored.object_id
+
         manifest = ArtifactManifest(
             artifact_id=artifact_id,
             run_id=run_id,
@@ -119,7 +135,11 @@ class ArtifactStore:
         )
         sidecar_path.write_text(
             json.dumps(
-                {"manifest": manifest.model_dump(mode="json"), "source_path": str(source)},
+                {
+                    "manifest": manifest.model_dump(mode="json"),
+                    "source_path": str(source),
+                    "object_id": object_id,
+                },
                 ensure_ascii=False,
                 indent=2,
             ),
@@ -132,7 +152,15 @@ class ArtifactStore:
             raise ArtifactNotFound(str(path))
         payload: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         manifest = ArtifactManifest.model_validate(payload["manifest"])
-        source = self._safe_source(payload["source_path"])
+        try:
+            source = self._safe_source(payload["source_path"])
+        except (ArtifactNotFound, PermissionError):
+            object_id = payload.get("object_id")
+            if not object_id or self.object_store is None:
+                raise
+            source = self.object_store.get(
+                str(object_id), access_level="TOP SECRET", include_path=True
+            ).path
         if self._sha256(source) != manifest.sha256:
             raise ValueError("artifact checksum does not match its manifest")
         return manifest, source

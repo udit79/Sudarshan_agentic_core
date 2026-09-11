@@ -38,6 +38,8 @@ RunStatus = Literal[
 
 QualityStatus = Literal["pending", "passed", "failed", "repairable", "blocked"]
 SideEffectClass = Literal["none", "write_artifact", "external_write", "publish"]
+UsageChargeType = Literal["provider", "retry", "cache_hit", "cache_write", "orchestration"]
+UsageBillingStatus = Literal["unreconciled", "matched", "adjusted", "missing"]
 
 
 def _non_empty(value: str, field_name: str) -> str:
@@ -212,6 +214,14 @@ class UsageRecord(ContractModel):
     latency_ms: int = Field(default=0, ge=0)
     estimated_cost: float | None = Field(default=None, ge=0)
     is_estimate: bool = False
+    charge_type: UsageChargeType = "provider"
+    parent_usage_id: str | None = None
+    provider_request_id: str | None = None
+    media_units: float | None = Field(default=None, ge=0)
+    finish_reason: str | None = None
+    retry_after_seconds: float | None = Field(default=None, ge=0)
+    provider_fields: dict[str, Any] = Field(default_factory=dict)
+    billing_status: UsageBillingStatus = "unreconciled"
     recorded_at: str = Field(default_factory=_utc_now)
 
 
@@ -239,6 +249,10 @@ class SkillManifest(ContractModel):
     trust_tier: Literal["builtin", "verified", "untrusted"] = "builtin"
     side_effects: list[SideEffectClass] = Field(default_factory=list)
     coordination: dict[str, Any] = Field(default_factory=dict)
+    context_policy: dict[str, Any] = Field(default_factory=dict)
+    references: dict[str, Any] = Field(default_factory=dict)
+    renderers: list[str] = Field(default_factory=list)
+    checkers: list[str] = Field(default_factory=list)
 
 
 class SkillCall(ContractModel):
@@ -269,6 +283,49 @@ class SkillResult(ContractModel):
     usage_ids: list[str] = Field(default_factory=list)
     failure_code: str | None = None
     failure_message: str | None = None
+    child_plan: list[dict[str, Any]] = Field(default_factory=list)
+    child_outcomes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ChildTaskSpec(ContractModel):
+    """Typed child request emitted by a parent planner.
+
+    The spec is the portable hand-off between native skills, CrewAI adapters,
+    MCP workers, and A2A specialists. It intentionally contains references,
+    not a nested prompt transcript.
+    """
+
+    child_id: str = Field(min_length=1)
+    parent_run_id: str = Field(min_length=1)
+    parent_node_id: str = Field(min_length=1)
+    skill_id: str = Field(min_length=1)
+    input_evidence_ids: list[str] = Field(default_factory=list)
+    input_payload: dict[str, Any] = Field(default_factory=dict)
+    output_artifact_types: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+    required: bool = True
+    fallback: str | None = None
+    policy: RunPolicy = Field(default_factory=RunPolicy)
+
+    @model_validator(mode="after")
+    def validate_dependencies(self) -> "ChildTaskSpec":
+        if self.child_id in self.dependencies:
+            raise ValueError("child task cannot depend on itself")
+        if len(set(self.dependencies)) != len(self.dependencies):
+            raise ValueError("child task dependencies must be unique")
+        return self
+
+
+class ChildTaskOutcome(ContractModel):
+    """Safe parent projection after one child has completed or failed."""
+
+    child_id: str = Field(min_length=1)
+    status: Literal["succeeded", "failed", "waiting", "cancelled", "blocked"]
+    artifact_ids: list[str] = Field(default_factory=list)
+    quality_report_id: str | None = None
+    fallback_used: str | None = None
+    delivery_blocked: bool = False
+    failure_code: str | None = None
 
 
 class NodeSpec(ContractModel):
@@ -305,6 +362,7 @@ class ContextPack(ContractModel):
     retrieval_trace_id: str | None = None
     scope: dict[str, str] = Field(default_factory=dict)
     context_text: str = ""
+    context_level: Literal["L0", "L1", "L2"] = "L2"
 
 
 def project_progress_event(event: Mapping[str, Any], *, sequence: int) -> RunEvent:

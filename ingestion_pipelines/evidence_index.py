@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ingestion_pipelines.models import IngestedDocument
+from api.storage import ObjectStore
 from memory import AccessContext, KnowledgeUnit, MemoryManager, MemoryType, ScopeType, Source, SourceType
 from pipelines.common.ntro_policy import require_classification, require_classification_access
 
@@ -25,9 +26,15 @@ class EvidenceNotFoundError(KeyError):
 class EvidenceIndex:
     """SQLite-backed first slice for evidence retrieval and idempotent writes."""
 
-    def __init__(self, db_path: str | Path = "artifacts/.state/evidence_index.db") -> None:
+    def __init__(
+        self,
+        db_path: str | Path = "artifacts/.state/evidence_index.db",
+        *,
+        object_store: ObjectStore | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.object_store = object_store
         self._initialise()
 
     def _connect(self) -> sqlite3.Connection:
@@ -55,6 +62,7 @@ class EvidenceIndex:
                     case_id TEXT,
                     task_id TEXT,
                     classification_level TEXT NOT NULL,
+                    object_id TEXT,
                     updated_at REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_evidence_scope
@@ -82,6 +90,9 @@ class EvidenceIndex:
                 );
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(evidence_blocks)")}
+            if "object_id" not in columns:
+                connection.execute("ALTER TABLE evidence_blocks ADD COLUMN object_id TEXT")
 
     def index_document(
         self,
@@ -109,13 +120,28 @@ class EvidenceIndex:
             connection.execute("DELETE FROM evidence_relationships WHERE document_id = ?", (document.id,))
             now = time.time()
             for block in document.evidence_blocks:
+                object_id = None
+                if self.object_store is not None and block.content:
+                    stored = self.object_store.put_bytes(
+                        block.content.encode("utf-8"),
+                        name=f"{block.evidence_id}.txt",
+                        kind="evidence",
+                        media_type="text/plain",
+                        classification_level=classification,
+                        owner_id=document.user_id,
+                        case_id=document.case_id,
+                        task_id=document.task_id,
+                        retention_class="evidence",
+                        parent_object_ids=(),
+                    )
+                    object_id = stored.object_id
                 connection.execute(
                     """
                     INSERT INTO evidence_blocks
                     (evidence_id, document_id, source_hash, source_reference, modality,
                      content, location_json, metadata_json, confidence, extractor_version,
-                     model_version, user_id, case_id, task_id, classification_level, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     model_version, user_id, case_id, task_id, classification_level, object_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         block.evidence_id,
@@ -133,6 +159,7 @@ class EvidenceIndex:
                         document.case_id,
                         document.task_id,
                         classification,
+                        object_id,
                         now,
                     ),
                 )
@@ -227,6 +254,7 @@ class EvidenceIndex:
             "extractor_version": str(row["extractor_version"]),
             "model_version": row["model_version"],
             "source_hash": str(row["source_hash"]),
+            "object_id": row["object_id"],
         }
 
     def search(

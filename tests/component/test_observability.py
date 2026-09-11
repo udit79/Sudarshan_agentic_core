@@ -1,5 +1,14 @@
 from pipelines.orchestrator.contracts import TelemetryUsage, project_progress_event
-from pipelines.orchestrator.observability import SQLiteObservabilityStore, runtime_event
+import pipelines.orchestrator.observability as observability_module
+from pipelines.orchestrator.observability import (
+    CompositeObservabilityStore,
+    JsonHttpObservabilityExporter,
+    SQLiteObservabilityStore,
+    runtime_event,
+)
+from datetime import datetime, timedelta, timezone
+import sqlite3
+import pytest
 from pipelines.orchestrator.progress import ProgressEvent
 
 
@@ -87,3 +96,78 @@ def test_projected_run_event_preserves_safe_telemetry_fields() -> None:
     assert event.usage is not None
     assert event.usage.output_tokens == 6
     assert event.cache_status == "hit"
+
+
+def test_observability_hash_chain_retention_and_role_boundary(tmp_path) -> None:
+    db_path = tmp_path / "observability.db"
+    store = SQLiteObservabilityStore(str(db_path))
+    secret = runtime_event(
+        "skill.completed",
+        {
+            "parent_run_id": "run-secure",
+            "classification_level": "SECRET",
+            "owner_id": "operator-1",
+            "case_id": "case-1",
+            "usage": {"input_tokens": 2},
+        },
+    )
+    assert secret is not None
+    store.record(secret)
+    with pytest.raises(PermissionError):
+        store.events("run-secure", access_level="RESTRICTED")
+    dashboard = store.safe_dashboard(
+        "run-secure", access_level="SECRET", operator_id="operator-1"
+    )
+    assert dashboard["summary"]["input_tokens"] == 2
+    assert store.verify_integrity("run-secure") is True
+
+    old = secret.model_copy(update={
+        "event_id": "old-event",
+        "run_id": "run-retention",
+        "timestamp": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+    })
+    store.record(old)
+    assert store.purge_expired(retention_seconds=60 * 60, dry_run=True)
+    assert store.purge_expired(retention_seconds=60 * 60, dry_run=False)
+    assert store.verify_integrity("run-retention") is True
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE observability_events SET event_json = ? WHERE run_id = ?",
+            ('{"tampered":true}', "run-secure"),
+        )
+    assert store.verify_integrity("run-secure") is False
+
+
+def test_composite_observability_exports_only_safe_events(monkeypatch, tmp_path) -> None:
+    requests = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            return b"ok"
+
+    def fake_urlopen(request, timeout):
+        requests.append((request, timeout))
+        return Response()
+
+    monkeypatch.setattr(observability_module, "urlopen", fake_urlopen)
+    exporter = JsonHttpObservabilityExporter("https://collector.invalid/events", bearer_token="secret")
+    store = CompositeObservabilityStore(SQLiteObservabilityStore(str(tmp_path / "obs.db")), exporter=exporter)
+    event = runtime_event(
+        "skill.completed",
+        {"parent_run_id": "run-export", "input_payload": "must not be exported"},
+    )
+    assert event is not None
+    store.record(event)
+    assert len(requests) == 1
+    request, timeout = requests[0]
+    assert timeout == 2.0
+    assert request.get_header("Authorization") == "Bearer secret"
+    assert b"input_payload" not in request.data
+    assert exporter.failed_exports == 0

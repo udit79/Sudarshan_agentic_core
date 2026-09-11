@@ -53,6 +53,8 @@ class InfographicFlow(TextTransformationFlow):
 
     def enrich_output(self, output: Any) -> InfographicOutput:
         """Render valid syntax, retaining syntax-only output if Node is unavailable."""
+        from pipelines.orchestrator.cross_skill import build_child_plan
+
 
         if not isinstance(output, InfographicOutput):
             return output
@@ -75,6 +77,15 @@ class InfographicFlow(TextTransformationFlow):
                 "path": artifact_path,
                 "artifact_type": "svg",
                 "renderer_mode": self.renderer.last_render_mode,
+                "child_plan": [
+                    item.model_dump(mode="json")
+                    for item in build_child_plan(
+                        "infographic",
+                        rendered,
+                        parent_run_id=self.state.run_id,
+                        parent_node_id="infographic",
+                    )
+                ],
             }
             return rendered
         except Exception as exc:

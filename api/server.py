@@ -23,6 +23,7 @@ from ingestion_pipelines import SourceSafetyError, inspect_source
 from ingestion_pipelines.extract import SUPPORTED_EXTENSIONS
 from pipelines.common.ntro_policy import require_classification, require_classification_access
 from pipelines.common.contracts import AdvisoryRequest
+from integrations.deepseek_harness.a2a import agent_card, cancel_task as a2a_cancel_task, get_task as a2a_get_task, submit_task as a2a_submit_task
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 ARTIFACT_ROOT = (Path(__file__).resolve().parents[1] / "artifacts").resolve()
@@ -113,6 +114,43 @@ async def _save_upload(
 async def health_check():
     """System health (Cognee, providers, pipelines)."""
     return get_application().health()
+
+
+@app.get("/.well-known/agent-card.json")
+async def get_agent_card(request: Request):
+    return agent_card(str(request.base_url).rstrip("/"))
+
+
+@app.post("/a2a/tasks")
+async def submit_a2a_task(request: Request):
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("A2A task body must be an object")
+        operator_id = request.headers.get("x-operator-id", "").strip()
+        if not operator_id:
+            raise HTTPException(status_code=401, detail="X-Operator-Id is required")
+        return a2a_submit_task(get_application(), payload, operator_id=operator_id)
+    except HTTPException:
+        raise
+    except (TypeError, ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/a2a/tasks/{run_id}")
+async def get_a2a_task(run_id: str):
+    return a2a_get_task(get_application(), run_id)
+
+
+@app.post("/a2a/tasks/{run_id}/cancel")
+async def cancel_a2a_task(request: Request, run_id: str):
+    task_id = request.headers.get("x-task-id", "").strip()
+    if not task_id:
+        raise HTTPException(status_code=422, detail="X-Task-Id is required")
+    try:
+        return a2a_cancel_task(get_application(), run_id, task_id=task_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @app.get("/pipelines")

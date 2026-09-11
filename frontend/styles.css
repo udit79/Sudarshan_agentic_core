@@ -1779,6 +1779,91 @@ body {
   color: var(--text-secondary);
 }
 
+.execution-monitor {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(129, 140, 248, 0.2);
+  border-radius: var(--radius-md);
+  background: rgba(10, 15, 35, 0.48);
+}
+
+.execution-monitor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.execution-monitor-header h4 {
+  color: var(--text-pure);
+  font-size: 0.86rem;
+}
+
+.monitor-scope-note,
+.evidence-empty {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.execution-lanes {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.execution-lane {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(15, 23, 42, 0.48);
+  font-size: 0.72rem;
+}
+
+.execution-lane span {
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.child-lane {
+  margin-left: 18px;
+  border-left: 2px solid rgba(56, 189, 248, 0.55);
+}
+
+.evidence-drawer {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.evidence-drawer summary {
+  cursor: pointer;
+  color: var(--text-highlight);
+}
+
+.evidence-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.evidence-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.evidence-row span {
+  color: var(--text-muted);
+  text-align: right;
+}
+
 .task-progress {
   margin-top: 14px;
 }

@@ -9,6 +9,8 @@ production quality.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import json
+from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterable, Mapping
 
@@ -106,6 +108,30 @@ class BenchmarkReport:
         """Return a JSON-safe report for the dashboard and release record."""
 
         return asdict(self)
+
+
+def archive_benchmark_report(
+    report: BenchmarkReport,
+    path: str | Path,
+    *,
+    corpus_id: str,
+    artifact_type: str,
+) -> Path:
+    """Persist a promotion report for release review."""
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = report.to_dict()
+    payload.update({
+        "corpus_id": str(corpus_id),
+        "artifact_type": str(artifact_type),
+        "report_schema_version": "1",
+    })
+    destination.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",
+        encoding="utf-8",
+    )
+    return destination
 
 
 def run_multimodal_benchmark(

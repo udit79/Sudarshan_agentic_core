@@ -84,3 +84,27 @@ def test_artifact_store_creates_direct_image_preview(tmp_path) -> None:
 
     assert loaded.preview_uri == f"/artifacts/{manifest.artifact_id}/preview"
     assert preview == source.resolve()
+
+
+def test_artifact_store_can_copy_into_restart_safe_object_store(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "artifacts"
+    source = root / "brief.txt"
+    source.parent.mkdir(parents=True)
+    source.write_text("durable artifact", encoding="utf-8")
+    monkeypatch.setenv("SUDARSHAN_OBJECT_STORE_MODE", "durable")
+
+    manifest = ArtifactStore(root).register(
+        source,
+        run_id="run-durable",
+        kind="text",
+        classification_level="RESTRICTED",
+    )
+    loaded, resolved = ArtifactStore(root).get(manifest.artifact_id)
+
+    assert loaded == manifest
+    assert resolved != source.resolve()
+    assert resolved.read_text(encoding="utf-8") == "durable artifact"
+
+    source.unlink()
+    _, restored = ArtifactStore(root).get(manifest.artifact_id)
+    assert restored.read_text(encoding="utf-8") == "durable artifact"

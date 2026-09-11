@@ -139,3 +139,21 @@ def test_application_projects_typed_events_and_run_summary() -> None:
     assert summary.skill_id == "presentation.case-brief"
     assert summary.skill_version == "2.0.0"
     assert summary.progress == 20
+
+
+def test_health_exposes_shared_control_plane_boundary() -> None:
+    application = object.__new__(SudarshanApplication)
+    application.control_plane = object()
+    application.control_plane_mode = "redis"
+    application.list_pipelines = lambda: ["presentation"]
+    application.scheduler = type("Scheduler", (), {"metrics": lambda _self: {}})()
+    application.ingestion_scheduler = type("Scheduler", (), {"metrics": lambda _self: {}})()
+
+    health = application.health()
+
+    assert health["control_plane"] == {
+        "mode": "redis",
+        "shared": True,
+        "ingestion_stage_budget": "shared",
+        "ingestion_stage_budget_next": None,
+    }

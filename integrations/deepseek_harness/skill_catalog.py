@@ -70,7 +70,7 @@ SKILL_DEFINITIONS: dict[str, dict[str, Any]] = {
         "max_model_tokens": 6000,
     },
     "visual.flowchart": {
-        "pipeline": None,
+        "pipeline": "visual_flowchart",
         "purpose": "Create an editable, renderer-neutral flowchart IR for parent skills.",
         "output_artifact_types": ["diagram.ir", "svg"],
         "required_capabilities": ["render.diagram"],

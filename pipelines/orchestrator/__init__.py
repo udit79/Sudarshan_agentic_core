@@ -7,6 +7,8 @@ from pipelines.orchestrator.graph import (
 )
 from pipelines.orchestrator.contracts import (
     ArtifactManifest,
+    ChildTaskOutcome,
+    ChildTaskSpec,
     ContextPack,
     NodeSpec,
     QualityReport,
@@ -25,12 +27,17 @@ from pipelines.orchestrator.progress import (
     InMemoryProgressSink,
     ProgressEvent,
     ProgressSink,
+    RedisProgressSink,
     SQLiteProgressSink,
     event_dict,
 )
 from pipelines.orchestrator.observability import (
+    CompositeObservabilityStore,
+    JsonHttpObservabilityExporter,
     ObservableProgressSink,
     ObservabilityEvent,
+    ObservabilityExporter,
+    RedisObservabilityStore,
     SQLiteObservabilityStore,
 )
 from pipelines.orchestrator.skill_runtime import (
@@ -38,6 +45,7 @@ from pipelines.orchestrator.skill_runtime import (
     SkillRuntime,
     SkillRuntimeError,
 )
+from pipelines.orchestrator.child_tasks import reconcile_child_result, validate_child_plan
 from pipelines.orchestrator.dag import (
     DAGError,
     DAGNodeState,
@@ -75,6 +83,8 @@ from pipelines.orchestrator.understanding import (
 
 __all__ = [
     "ArtifactManifest",
+    "ChildTaskOutcome",
+    "ChildTaskSpec",
     "ContextPack",
     "InMemoryProgressSink",
     "OrchestrationResult",
@@ -95,6 +105,8 @@ __all__ = [
     "RunContext",
     "SkillRuntime",
     "SkillRuntimeError",
+    "reconcile_child_result",
+    "validate_child_plan",
     "DAGError",
     "DAGNodeState",
     "DAGRunState",
@@ -114,10 +126,15 @@ __all__ = [
     "PromptPlan",
     "ProgressEvent",
     "ProgressSink",
+    "RedisProgressSink",
     "SQLiteProgressSink",
     "event_dict",
     "ObservableProgressSink",
     "ObservabilityEvent",
+    "ObservabilityExporter",
+    "CompositeObservabilityStore",
+    "JsonHttpObservabilityExporter",
+    "RedisObservabilityStore",
     "SQLiteObservabilityStore",
     "project_progress_event",
     "RequestUnderstanding",

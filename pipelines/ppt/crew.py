@@ -18,6 +18,7 @@ from typing import Any
 from pipelines.common.text_generation import TextTransformationFlow
 from pipelines.ppt.agents import build_agents
 from pipelines.ppt.renderer import PresentationArtifact, render_presentation
+from pipelines.ppt.presentation_quality import inspect_presentation
 from pipelines.ppt.schemas import PresentationOutput, PresentationQualityReview
 from pipelines.ppt.tasks import build_tasks
 
@@ -58,7 +59,22 @@ class PresentationFlow(TextTransformationFlow):
 
     def enrich_output(self, output: PresentationOutput) -> PresentationOutput:
         """Render the validated output to a PPTX artifact before memory write-back."""
+        from pipelines.orchestrator.cross_skill import build_child_plan
+
         artifact: PresentationArtifact = render_presentation(output)
+        quality = inspect_presentation(output, rendered_artifacts=[artifact.path])
         # Attach the artifact path into the flow state for the PipelineResponse
-        self.state.artifact = {"path": artifact.path, "slide_count": artifact.slide_count}
+        child_plan = build_child_plan(
+            "presentation.case-brief",
+            output,
+            parent_run_id=self.state.run_id,
+            parent_node_id="presentation",
+            requested_visuals=self._request().metadata.get("ppt_visuals"),
+        )
+        self.state.artifact = {
+            "path": artifact.path,
+            "slide_count": artifact.slide_count,
+            "quality": quality.model_dump(mode="json"),
+            "child_plan": [item.model_dump(mode="json") for item in child_plan],
+        }
         return output

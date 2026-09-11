@@ -9,7 +9,8 @@ from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 from memory.cognee_adapter import CogneeConfig, CogneeHttpAdapter, MemoryBackend
-from memory.context_builder import BuiltContext, ContextBuilder, RetrievedMemory
+from memory.context_builder import BuiltContext, ContextBuilder, ContextLevel, RetrievedMemory
+from memory.lifecycle import MemoryEventLog
 from memory.memory_store import MemoryStore
 from memory.model import KnowledgeUnit, Memory, MemoryLifecycle, MemoryType, ScopeType, Source, SourceType, utc_now
 from memory.scope_policy import AccessContext, accessible_node_sets, node_sets_for_scope
@@ -120,6 +121,7 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
         return [RetrievedMemory(str(raw))]
 
     metadata: Mapping[str, Any] = raw.get("metadata") or raw.get("memify_metadata") or {}
+    context_layers = _context_layers(metadata)
     provenance = dict(metadata.get("provenance")) if isinstance(metadata.get("provenance"), Mapping) else {}
     # Preserve stable identity and lifecycle hints beside the bounded text.
     # These fields are safe retrieval metadata, not hidden prompts or model
@@ -139,6 +141,8 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
             provenance or item.provenance,
             metadata.get("memory_id") or item.memory_id,
             str(metadata.get("lifecycle", item.lifecycle)),
+            context_layers or item.context_layers,
+            _context_level(metadata.get("context_level", item.context_level)),
         ) for item in nested]
     if result is None:
         result = raw.get("content", "")
@@ -151,7 +155,34 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
         str(result), _scope_type(metadata.get("scope_type")), metadata.get("scope_id"),
         metadata.get("source_reference") or metadata.get("source"), score, provenance,
         metadata.get("memory_id"), str(metadata.get("lifecycle", "active")),
+        context_layers, _context_level(metadata.get("context_level", "L2")),
     )]
+
+
+def _context_layers(metadata: Mapping[str, Any]) -> dict[str, str]:
+    raw = metadata.get("context_layers")
+    if not isinstance(raw, Mapping):
+        raw = {key: metadata.get(key) for key in ("L0", "L1", "L2", "l0", "l1", "l2")}
+    return {
+        str(key).upper(): str(value)
+        for key, value in raw.items()
+        if str(key).upper() in {"L0", "L1", "L2"} and isinstance(value, str) and value.strip()
+    }
+
+
+def _context_level(value: Any) -> str:
+    normalized = str(value or "L2").upper()
+    return normalized if normalized in {"L0", "L1", "L2"} else "L2"
+
+
+def _bounded_metric(value: Any, name: str) -> float:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be between 0 and 1") from exc
+    if not 0.0 <= normalized <= 1.0:
+        raise ValueError(f"{name} must be between 0 and 1")
+    return normalized
 
 
 def _allowed(result: RetrievedMemory, context: AccessContext) -> bool:
@@ -190,13 +221,15 @@ class MemoryManager:
     """Own Sudarshan semantics and delegate graph/vector work to Cognee."""
 
     def __init__(self, backend: MemoryBackend, *, dataset_name: str = "sudarshan_memory",
-                 store: MemoryStore | None = None, context_builder: ContextBuilder | None = None) -> None:
+                 store: MemoryStore | None = None, context_builder: ContextBuilder | None = None,
+                 event_log: MemoryEventLog | None = None) -> None:
         if not dataset_name.strip():
             raise ValueError("dataset_name must be non-empty")
         self.backend = backend
         self.dataset_name = dataset_name
         self.store = store or MemoryStore()
         self.context_builder = context_builder or ContextBuilder()
+        self.event_log = event_log or MemoryEventLog()
 
     @classmethod
     def from_env(cls) -> "MemoryManager":
@@ -208,11 +241,16 @@ class MemoryManager:
                  memory_type: MemoryType = MemoryType.FACT,
                  run_in_background: bool = True,
                  lifecycle: MemoryLifecycle = MemoryLifecycle.ACTIVE,
-                 supersedes: Sequence[str] = ()) -> RememberReceipt:
+                 supersedes: Sequence[str] = (),
+                 importance: float | None = None,
+                 confidence: float | None = None,
+                 expires_at: datetime | None = None) -> RememberReceipt:
         unit = coerce_knowledge_unit(unit)
         scope_type = ScopeType(scope_type)
         memory_type = MemoryType(memory_type)
         lifecycle = MemoryLifecycle(lifecycle)
+        importance = _bounded_metric(unit.metadata.get("importance", 0.5) if importance is None else importance, "importance")
+        confidence = _bounded_metric(unit.metadata.get("confidence", 0.5) if confidence is None else confidence, "confidence")
         memory_scope = context.scope(scope_type)
         memory_id = _stable_memory_id(unit, scope_type, memory_scope.scope_id, memory_type)
         superseded_ids = list(dict.fromkeys(str(item).strip() for item in supersedes if str(item).strip()))
@@ -238,26 +276,52 @@ class MemoryManager:
             "source_type": unit.source.source_type.value,
             "source_reference": unit.source.source_reference,
             "provenance": dict(unit.provenance),
+            "importance": importance,
+            "confidence": confidence,
+            "expires_at": expires_at.isoformat() if expires_at else None,
         })
         memory = Memory(memory_id, unit.content, memory_scope, memory_type,
                         unit.created_at, utc_now(), unit.source, metadata, unit.provenance,
-                        lifecycle=lifecycle)
+                        lifecycle=lifecycle, importance=importance,
+                        confidence=confidence, expires_at=expires_at)
         response = self.backend.remember(
             memory_id=memory.id, content=memory.content,
             node_sets=node_sets_for_scope(memory.scope), metadata=metadata,
             dataset_name=self.dataset_name, run_in_background=run_in_background,
         )
         self.store.upsert_memory(memory)
+        self.event_log.append(
+            "created",
+            memory_id=memory.id,
+            scope_type=memory.scope.scope_type.value,
+            scope_id=memory.scope.scope_id,
+            actor_id=context.user_id,
+            safe_metadata={"memory_type": memory.memory_type.value, "lifecycle": lifecycle.value},
+            created_at=memory.updated_at,
+        )
         for superseded_id in superseded_ids:
             self.store.transition(
                 superseded_id,
                 MemoryLifecycle.SUPERSEDED,
                 superseded_by=memory.id,
             )
+            old = self.store.get_memory(superseded_id)
+            if old is not None:
+                self.event_log.append(
+                    "superseded",
+                    memory_id=old.id,
+                    scope_type=old.scope.scope_type.value,
+                    scope_id=old.scope.scope_id,
+                    actor_id=context.user_id,
+                    safe_metadata={"superseded_by": memory.id},
+                    created_at=old.updated_at,
+                )
         return RememberReceipt(memory, response)
 
     def recall(self, query: str, context: AccessContext, *, top_k: int = 10,
-               token_budget: int = 2000, session_id: str | None = None) -> RecallResponse:
+               token_budget: int = 2000, session_id: str | None = None,
+               stage_id: str = "default",
+               context_level: ContextLevel | None = None) -> RecallResponse:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query must be a non-empty string")
         if top_k < 1:
@@ -275,7 +339,13 @@ class MemoryManager:
             and result.lifecycle == MemoryLifecycle.ACTIVE.value
         )
         return RecallResponse(
-            self.context_builder.build(results, token_budget, query=query),
+            self.context_builder.build(
+                results,
+                token_budget,
+                query=query,
+                stage_id=stage_id,
+                context_level=context_level,
+            ),
             results,
         )
 
@@ -287,7 +357,28 @@ class MemoryManager:
             raise KeyError(memory_id)
         if not _scope_accessible(memory, context):
             raise PermissionError(f"memory {memory_id!r} is outside the access context")
-        return self.store.transition(memory_id, MemoryLifecycle.RETRACTED)
+        updated = self.store.transition(memory_id, MemoryLifecycle.RETRACTED)
+        self.event_log.append(
+            "retracted",
+            memory_id=updated.id,
+            scope_type=updated.scope.scope_type.value,
+            scope_id=updated.scope.scope_id,
+            actor_id=context.user_id,
+            created_at=updated.updated_at,
+        )
+        return updated
+
+    def expire_due(self, *, now: datetime | None = None) -> list[Memory]:
+        expired = self.store.expire_due(now=now)
+        for memory in expired:
+            self.event_log.append(
+                "expired",
+                memory_id=memory.id,
+                scope_type=memory.scope.scope_type.value,
+                scope_id=memory.scope.scope_id,
+                created_at=memory.updated_at,
+            )
+        return expired
 
     def forget(self, memory_id: str, context: AccessContext, *, purge_backend: bool = False) -> Mapping[str, Any]:
         """Retract locally and optionally invoke an explicitly supported backend purge.
@@ -302,6 +393,15 @@ class MemoryManager:
             if not callable(backend_forget):
                 raise NotImplementedError("backend purge is not supported by this memory adapter")
         retracted = self.retract(memory_id, context)
+        self.event_log.append(
+            "forgotten",
+            memory_id=retracted.id,
+            scope_type=retracted.scope.scope_type.value,
+            scope_id=retracted.scope.scope_id,
+            actor_id=context.user_id,
+            safe_metadata={"purge_backend": purge_backend},
+            created_at=retracted.updated_at,
+        )
         response: Mapping[str, Any] = {"status": "retracted", "memory_id": retracted.id}
         if purge_backend:
             backend_response = backend_forget(
@@ -350,6 +450,7 @@ class MemoryManager:
             top_k=resolved_top_k,
             token_budget=resolved_budget,
             session_id=session_id,
+            stage_id=stage_id,
         )
         trace_id = response.context.trace.trace_id if response.context.trace else None
         records = []
@@ -359,6 +460,7 @@ class MemoryManager:
                 "rank": rank,
                 "memory_id": provenance.get("memory_id"),
                 "content": item.content,
+                "context_level": item.context_level,
                 "scope_type": item.scope_type.value if item.scope_type else None,
                 "scope_id": item.scope_id,
                 "source_reference": item.source_reference,
@@ -391,4 +493,5 @@ class MemoryManager:
             retrieval_trace_id=trace_id,
             scope=scope,
             context_text=response.context.text,
+            context_level=response.context.context_level,
         )

@@ -30,17 +30,25 @@ from ingestion_pipelines import (
 from ingestion_pipelines.evidence_index import EvidenceIndex
 from pipelines.common.contracts import AdvisoryRequest
 from pipelines.common.audit_logger import get_audit_logger
+from api.control_plane import RedisControlPlane
+from api.storage import build_object_store_from_env
+from api.lifecycle import LifecycleCleaner
 from api.scheduler import LocalRunScheduler
 from pipelines.orchestrator import (
     BudgetController,
     CacheStore,
+    CompositeObservabilityStore,
+    JsonHttpObservabilityExporter,
     PipelineAdapter,
     RunContext,
     RunEvent,
     RunSummary,
     RunPolicy,
     PipelineOrchestrator,
+    RedisProgressSink,
+    RedisObservabilityStore,
     SkillCall,
+    ChildTaskSpec,
     SkillRuntime,
     SQLiteProgressSink,
     ObservableProgressSink,
@@ -51,6 +59,7 @@ from pipelines.orchestrator import (
     project_progress_event,
     orchestration_result_to_dict,
 )
+from pipelines.orchestrator.cross_skill import execute_child_plan
 from pipelines.orchestrator.progress import ProgressEvent
 from integrations.deepseek_harness.skill_catalog import (
     build_skill_manifests,
@@ -64,27 +73,73 @@ class SudarshanApplication:
     """Own the real application services behind Harness-facing tools."""
 
     def __init__(self) -> None:
-        self.observability = SQLiteObservabilityStore()
-        self.progress_sink = ObservableProgressSink(SQLiteProgressSink(), self.observability)
+        control_plane = self._build_control_plane()
+        self.control_plane = control_plane
+        self.control_plane_mode = "redis" if control_plane is not None else "sqlite"
+        configured_object_store = build_object_store_from_env(
+            os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts")
+        )
+        self.object_store = configured_object_store
+        if self.object_store is None:
+            # The application keeps a catalog object even in legacy local mode
+            # so ingestion IDs and the dashboard can use one stable boundary.
+            from api.storage import LocalObjectStore
+
+            self.object_store = LocalObjectStore(
+                os.getenv("SUDARSHAN_OBJECT_STORE_ROOT", "artifacts/.state/object-store")
+            )
+        local_observability = SQLiteObservabilityStore()
+        exporter = None
+        exporter_endpoint = os.getenv("SUDARSHAN_OBSERVABILITY_EXPORT_URL", "").strip()
+        if exporter_endpoint:
+            exporter = JsonHttpObservabilityExporter(
+                exporter_endpoint,
+                timeout_seconds=float(os.getenv("SUDARSHAN_OBSERVABILITY_EXPORT_TIMEOUT_SECONDS", "2")),
+                bearer_token=os.getenv("SUDARSHAN_OBSERVABILITY_EXPORT_TOKEN"),
+            )
+        self.observability = CompositeObservabilityStore(
+            local_observability,
+            RedisObservabilityStore(control_plane) if control_plane is not None else None,
+            exporter,
+        )
+        try:
+            retention_seconds = int(os.getenv("SUDARSHAN_OBSERVABILITY_RETENTION_SECONDS", "2592000"))
+        except ValueError:
+            retention_seconds = 2592000
+        self.observability.purge_expired(retention_seconds=max(1, retention_seconds), dry_run=False)
+        progress_store = RedisProgressSink(control_plane) if control_plane is not None else SQLiteProgressSink()
+        self.progress_sink = ObservableProgressSink(progress_store, self.observability)
         self.orchestrator = PipelineOrchestrator(
             MemoryManager.from_env(),
             progress_sink=self.progress_sink,
             checkpointer=create_sqlite_checkpointer(),
         )
         self.skill_manifests = build_skill_manifests()
-        self.budget_controller = BudgetController()
+        self.budget_controller = BudgetController(control_plane=control_plane)
         self.cache_store = CacheStore(
-            os.getenv("SUDARSHAN_CACHE_DB_PATH", "artifacts/.state/skill_cache.db")
+            os.getenv("SUDARSHAN_CACHE_DB_PATH", "artifacts/.state/skill_cache.db"),
+            control_plane=control_plane,
         )
         self.cache_store.cleanup_expired()
+        self.lifecycle = LifecycleCleaner(
+            os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts"),
+            object_store=self.object_store,
+            cache_store=self.cache_store,
+        )
         self.evidence_index = EvidenceIndex(
             os.getenv(
                 "SUDARSHAN_EVIDENCE_INDEX_DB_PATH",
                 "artifacts/.state/evidence_index.db",
-            )
+            ),
+            object_store=(
+                self.object_store
+                if os.getenv("SUDARSHAN_OBJECT_STORE_MODE", "local").strip().lower()
+                in {"durable", "filesystem", "s3"}
+                else None
+            ),
         )
-        self.ingestion_budget_controller = IngestionBudgetController()
-        self.ingestion_usage = IngestionUsageRecorder()
+        self.ingestion_budget_controller = IngestionBudgetController(control_plane=control_plane)
+        self.ingestion_usage = IngestionUsageRecorder(control_plane=control_plane)
         self.ingestion_stage_cache = IngestionStageCache(
             os.getenv(
                 "SUDARSHAN_INGESTION_STAGE_CACHE_DB_PATH",
@@ -118,6 +173,9 @@ class SudarshanApplication:
             max_attempts=int(os.getenv("SUDARSHAN_MAX_ATTEMPTS", "1")),
             retry_backoff_ms=int(os.getenv("SUDARSHAN_RETRY_BACKOFF_MS", "250")),
             execution_timeout_ms=int(os.getenv("SUDARSHAN_EXECUTION_TIMEOUT_MS", "0")),
+            control_plane=control_plane,
+            queue_name="runs",
+            queue_reclaim_idle_ms=int(os.getenv("SUDARSHAN_RUN_QUEUE_RECLAIM_IDLE_MS", "1800000")),
         )
         self.ingestion_scheduler = LocalRunScheduler(
             self._run_ingestion_job,
@@ -130,6 +188,28 @@ class SudarshanApplication:
             max_attempts=int(os.getenv("SUDARSHAN_INGESTION_MAX_ATTEMPTS", "2")),
             retry_backoff_ms=int(os.getenv("SUDARSHAN_INGESTION_RETRY_BACKOFF_MS", "500")),
             execution_timeout_ms=int(os.getenv("SUDARSHAN_INGESTION_TIMEOUT_MS", "0")),
+            control_plane=control_plane,
+            queue_name="ingestion",
+            queue_reclaim_idle_ms=int(
+                os.getenv("SUDARSHAN_INGESTION_QUEUE_RECLAIM_IDLE_MS", "1800000")
+            ),
+        )
+
+    @staticmethod
+    def _build_control_plane() -> RedisControlPlane | None:
+        """Build the optional shared control plane without changing local defaults."""
+
+        mode = os.getenv("SUDARSHAN_CONTROL_PLANE", "sqlite").strip().lower()
+        if mode in {"", "sqlite", "local"}:
+            return None
+        if mode != "redis":
+            raise ValueError(f"unsupported SUDARSHAN_CONTROL_PLANE mode: {mode}")
+        url = os.getenv("SUDARSHAN_REDIS_URL", "").strip()
+        if not url:
+            raise ValueError("SUDARSHAN_REDIS_URL is required when SUDARSHAN_CONTROL_PLANE=redis")
+        return RedisControlPlane.from_url(
+            url,
+            prefix=os.getenv("SUDARSHAN_CONTROL_PLANE_PREFIX", "sudarshan:control"),
         )
 
     def _prepare_request(
@@ -235,7 +315,9 @@ class SudarshanApplication:
             pipeline=result.pipeline or "",
             status=result.status,
         )
-        return orchestration_result_to_dict(result)
+        payload = orchestration_result_to_dict(result)
+        self._execute_orchestration_child_plans(payload, request)
+        return payload
 
     def list_skills(self) -> list[dict[str, Any]]:
         """Return safe skill summaries for Harness discovery."""
@@ -300,7 +382,7 @@ class SudarshanApplication:
         if cancel_event is not None and cancel_event.is_set():
             return {"status": "cancelled", "error": "ingestion cancelled before extraction"}
         result = self.ingest_path(
-            str(payload["file_path"]),
+            str(payload.get("file_path", "")),
             source_reference=str(payload["source_reference"]),
             operator_id=operator_id,
             user_id=str(payload["user_id"]),
@@ -309,6 +391,7 @@ class SudarshanApplication:
             classification_level=str(payload.get("classification_level", "RESTRICTED")),
             ingestion_id=str(payload.get("ingestion_id", payload.get("run_id", ""))) or None,
             source_hash=str(payload.get("source_hash", "")) or None,
+            source_object_id=str(payload.get("source_object_id", "")) or None,
             budget=payload.get("budget"),
         )
         if cancel_event is not None and cancel_event.is_set():
@@ -346,6 +429,21 @@ class SudarshanApplication:
         data["task_id"] = task_id
         budget = self._ingestion_budget(data.get("budget"), modality=str(data.get("modality", "")))
         data["budget"] = budget.model_dump(mode="json")
+        if self._object_store_enabled() and Path(file_path).is_file():
+            source_object = self.object_store.put_file(
+                file_path,
+                kind="source",
+                media_type=str(data.get("media_type") or "application/octet-stream"),
+                classification_level=data["classification_level"],
+                owner_id=user_id,
+                case_id=case_id,
+                task_id=task_id,
+                retention_class="source",
+            )
+            data["source_object_id"] = source_object.object_id
+            # This path is only a same-process optimization. Workers resolve
+            # the opaque object ID before extraction after a restart.
+            data["file_path"] = str(source_object.path)
         idempotency_key = str(data.get("idempotency_key", "")).strip()
         if not idempotency_key:
             identity = f"{user_id}|{case_id}|{task_id}|{source_hash}"
@@ -364,6 +462,7 @@ class SudarshanApplication:
             "task_id": task_id,
             "source_reference": source_reference,
             "source_hash": source_hash,
+            "source_object_id": data.get("source_object_id"),
             "media_type": data.get("media_type"),
             "modality": data.get("modality"),
             "classification_level": data["classification_level"],
@@ -498,6 +597,21 @@ class SudarshanApplication:
             cancel_event=cancel_event or Event(),
         )
         result = self.skill_runtime.invoke(call, parent_context=context)
+        if result.status == "succeeded" and result.child_plan:
+            try:
+                specs = tuple(ChildTaskSpec.model_validate(item) for item in result.child_plan)
+                outcomes = execute_child_plan(self.skill_runtime, specs, parent_context=context)
+                result = result.model_copy(update={
+                    "child_outcomes": [item.model_dump(mode="json") for item in outcomes],
+                    "status": "failed" if any(item.delivery_blocked for item in outcomes) else "succeeded",
+                    "failure_code": "REQUIRED_CHILD_FAILED" if any(item.delivery_blocked for item in outcomes) else None,
+                })
+            except Exception as exc:
+                result = result.model_copy(update={
+                    "status": "failed",
+                    "failure_code": "CHILD_PLAN_FAILED",
+                    "failure_message": str(exc),
+                })
         top_level_status = {
             "succeeded": "succeeded",
             "waiting": "pending",
@@ -513,6 +627,74 @@ class SudarshanApplication:
             "skill_version": manifest.version,
             "skill_result": result.model_dump(mode="json"),
         }
+
+    def _execute_orchestration_child_plans(
+        self,
+        payload: dict[str, Any],
+        request: AdvisoryRequest,
+    ) -> None:
+        """Execute typed child plans emitted by real parent pipelines."""
+
+        responses = []
+        if isinstance(payload.get("response"), dict):
+            responses.append(payload["response"])
+        if isinstance(payload.get("responses"), dict):
+            responses.extend(value for value in payload["responses"].values() if isinstance(value, dict))
+        for response in responses:
+            artifact = response.get("artifact")
+            if not isinstance(artifact, dict) or not artifact.get("child_plan"):
+                continue
+            specs = tuple(ChildTaskSpec.model_validate(item) for item in artifact["child_plan"])
+            if not specs:
+                continue
+            parent_run_id = specs[0].parent_run_id
+            pipeline_value = response.get("pipeline") or (
+                request.requested_pipelines[0] if request.requested_pipelines else ""
+            )
+            pipeline = str(pipeline_value)
+            skill_id = canonical_skill_id(pipeline)
+            manifest = self.skill_manifests.get(skill_id)
+            if manifest is None:
+                continue
+            declared_children = manifest.coordination.get("children", [])
+            child_capabilities = set(manifest.required_capabilities)
+            child_tools = set(manifest.allowed_tools)
+            for child_id in declared_children:
+                child_manifest = self.skill_manifests.get(canonical_skill_id(str(child_id)))
+                if child_manifest is not None:
+                    child_capabilities.update(child_manifest.required_capabilities)
+                    child_tools.update(child_manifest.allowed_tools)
+            context = RunContext(
+                run_id=parent_run_id,
+                task_id=request.task_id,
+                user_id=request.user_id,
+                case_id=request.case_id,
+                classification_level=request.classification_level,
+                distribution=request.distribution,
+                policy=manifest.budget_policy,
+                allowed_capabilities=frozenset(child_capabilities),
+                allowed_tools=frozenset(child_tools),
+                allowed_trust_tiers=frozenset({"builtin", "verified"}),
+            )
+            try:
+                outcomes = execute_child_plan(self.skill_runtime, specs, parent_context=context)
+                artifact["child_outcomes"] = [item.model_dump(mode="json") for item in outcomes]
+                artifact["child_plan_status"] = (
+                    "blocked" if any(item.delivery_blocked for item in outcomes) else "completed"
+                )
+                if any(item.delivery_blocked for item in outcomes):
+                    response["status"] = "failed"
+                    response["failure"] = "A required child skill failed its quality gate"
+            except Exception as exc:
+                artifact["child_plan_status"] = "failed"
+                artifact["child_plan_error"] = str(exc)
+                response["status"] = "failed"
+                response["failure"] = "Child skill plan execution failed"
+        statuses = [str(item.get("status")) for item in responses if isinstance(item, dict)]
+        if statuses and all(status == "succeeded" for status in statuses):
+            payload["status"] = "succeeded"
+        elif any(status == "failed" for status in statuses):
+            payload["status"] = "failed" if all(status == "failed" for status in statuses) else "partial"
 
     def _publish_skill_event(self, name: str, payload: Mapping[str, Any]) -> None:
         """Project child-runtime lifecycle into the existing safe event stream."""
@@ -673,7 +855,10 @@ class SudarshanApplication:
         observability = getattr(self, "observability", None)
         if observability is None:
             return {"run_id": str(run_id), "event_count": 0}
-        return observability.summary(str(run_id)).model_dump(mode="json")
+        return observability.summary(
+            str(run_id),
+            access_level=os.getenv("SUDARSHAN_TELEMETRY_ACCESS_LEVEL", "RESTRICTED"),
+        ).model_dump(mode="json")
 
     @staticmethod
     def _skill_id(pipeline: Any) -> str:
@@ -867,6 +1052,18 @@ class SudarshanApplication:
             "registered_pipelines": len(pipelines),
             "pipelines": pipelines,
             "routing_engine": "langgraph",
+            "control_plane": {
+                "mode": self.control_plane_mode,
+                "shared": self.control_plane is not None,
+                "ingestion_stage_budget": "shared" if self.control_plane is not None else "process-local",
+                "ingestion_stage_budget_next": None if self.control_plane is not None else "configure Redis for multi-worker sharing",
+            },
+            "storage": {
+                "object_store_mode": os.getenv("SUDARSHAN_OBJECT_STORE_MODE", "local"),
+                "observability_retention_seconds": os.getenv(
+                    "SUDARSHAN_OBSERVABILITY_RETENTION_SECONDS", "2592000"
+                ),
+            },
             "scheduler": self.scheduler.metrics(),
             "ingestion_scheduler": self.ingestion_scheduler.metrics(),
             "configuration": {
@@ -875,6 +1072,14 @@ class SudarshanApplication:
                 "cognee_base_url": bool(os.getenv("COGNEE_BASE_URL", "").strip()),
             },
         }
+
+    def cleanup_lifecycle(self, *, dry_run: bool = True, older_than_seconds: float = 86_400) -> dict[str, Any]:
+        """Run the lineage-aware cleanup boundary for an operator or job."""
+
+        return self.lifecycle.cleanup(
+            dry_run=dry_run,
+            older_than_seconds=older_than_seconds,
+        ).to_dict()
 
     def list_pipelines(self) -> list[str]:
         """Return registered pipeline names for frontend discovery."""
@@ -1057,6 +1262,12 @@ class SudarshanApplication:
         )
 
     @staticmethod
+    def _object_store_enabled() -> bool:
+        return os.getenv("SUDARSHAN_OBJECT_STORE_MODE", "local").strip().lower() in {
+            "durable", "filesystem", "s3"
+        }
+
+    @staticmethod
     def _file_hash(file_path: str) -> str:
         digest = hashlib.sha256()
         with open(file_path, "rb") as source:
@@ -1129,6 +1340,7 @@ class SudarshanApplication:
         classification_level: str = "RESTRICTED",
         ingestion_id: str | None = None,
         source_hash: str | None = None,
+        source_object_id: str | None = None,
         budget: IngestionBudget | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Perform real source extraction and persist it through MemoryManager."""
@@ -1139,10 +1351,34 @@ class SudarshanApplication:
 
         classification = require_classification(classification_level)
         resolved_ingestion_id = ingestion_id or f"direct-{uuid4().hex}"
-        resolved_source_hash = source_hash or self._file_hash(file_path)
+        extraction_path = file_path
+        if source_object_id:
+            source_object = self.object_store.get(
+                source_object_id,
+                access_level="TOP SECRET",
+                owner_id=user_id,
+                case_id=case_id,
+                task_id=task_id,
+            )
+            extraction_path = str(source_object.path)
+        elif self._object_store_enabled():
+            source_object = self.object_store.put_file(
+                file_path,
+                kind="source",
+                media_type="application/octet-stream",
+                classification_level=classification,
+                owner_id=user_id,
+                case_id=case_id,
+                task_id=task_id,
+                run_id=resolved_ingestion_id,
+                retention_class="source",
+            )
+            source_object_id = source_object.object_id
+            extraction_path = str(source_object.path)
+        resolved_source_hash = source_hash or self._file_hash(extraction_path)
         resolved_budget = self._ingestion_budget(
             budget,
-            modality=Path(file_path).suffix.lower().lstrip("."),
+            modality=Path(extraction_path).suffix.lower().lstrip("."),
         )
         self.ingestion_budget_controller.register(resolved_ingestion_id, resolved_budget)
         scope = {"user_id": user_id, "case_id": case_id, "task_id": task_id}
@@ -1212,7 +1448,7 @@ class SudarshanApplication:
                     )
 
                 document = ingest_file(
-                    file_path,
+                    extraction_path,
                     user_id=user_id,
                     case_id=case_id,
                     task_id=task_id,
@@ -1290,6 +1526,7 @@ class SudarshanApplication:
             "status": "partial" if fallback_count else "succeeded",
             "document_id": document.id,
             "source_reference": source_reference,
+            "source_object_id": source_object_id,
             "doc_type": document.doc_type,
             "user_id": user_id,
             "case_id": case_id,

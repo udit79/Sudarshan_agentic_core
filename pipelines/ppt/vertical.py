@@ -16,11 +16,13 @@ from threading import Event, Lock
 from typing import Any, Mapping
 
 from api.artifacts import ArtifactStore
+from api.control_plane import ControlPlane
 from api.dag_scheduler import DAGSchedulerBridge
 from pipelines.orchestrator.contracts import NodeSpec
 from pipelines.orchestrator.dag import DAGNodeState, DependencyDAG
 from pipelines.ppt.flowchart import FlowchartLayout, layout_flowchart, render_flowchart_pptx, render_flowchart_svg
-from pipelines.ppt.quality import VisualQualityReport, inspect_flowchart
+from pipelines.ppt.quality import VisualDiagnostic, VisualQualityReport, inspect_flowchart
+from pipelines.common.visual_qa import inspect_visual_artifact
 from pipelines.ppt.schemas import FlowchartSpec, VisualIR
 from pipelines.orchestrator.cache import stable_hash
 
@@ -38,12 +40,14 @@ class PresentationVerticalSlice:
         dag_db_path: str | Path | None = None,
         queue_db_path: str | Path | None = None,
         max_workers: int | None = None,
+        control_plane: ControlPlane | None = None,
     ) -> None:
         self.artifact_store = ArtifactStore(artifact_root or os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts"))
         dag_path = dag_db_path or os.getenv("SUDARSHAN_PPT_DAG_DB_PATH", "artifacts/.state/presentation_dag.db")
         queue_path = queue_db_path or os.getenv("SUDARSHAN_PPT_DAG_QUEUE_DB_PATH", "artifacts/.state/presentation_dag_queue.db")
         worker_count = max_workers or int(os.getenv("SUDARSHAN_PPT_DAG_MAX_WORKERS", "2"))
-        self.dag = DependencyDAG(dag_path)
+        lease_ms = int(os.getenv("SUDARSHAN_PPT_DAG_LEASE_MS", "900000"))
+        self.dag = DependencyDAG(dag_path, control_plane=control_plane, lease_ms=lease_ms)
         self._runs: dict[str, dict[str, Any]] = {}
         self._lock = Lock()
         self._quality_root = self.artifact_store.root / ".state" / "quality_reports"
@@ -53,7 +57,8 @@ class PresentationVerticalSlice:
             self._execute_node,
             queue_db_path=queue_path,
             max_workers=worker_count,
-            lease_ms=int(os.getenv("SUDARSHAN_PPT_DAG_LEASE_MS", "900000")),
+            lease_ms=lease_ms,
+            control_plane=control_plane,
         )
 
     def start_flowchart(
@@ -164,6 +169,24 @@ class PresentationVerticalSlice:
 
     def _quality_node(self, run_id: str, state: dict[str, Any]) -> Mapping[str, Any]:
         report: VisualQualityReport = inspect_flowchart(state["layout"])
+        renderer_version = os.getenv("SUDARSHAN_PPT_RENDERER_VERSION", "sudarshan-flowchart@1")
+        for artifact_path, label in ((state["svg_path"], "svg"), (state["pptx_path"], "pptx")):
+            rendered = inspect_visual_artifact(
+                artifact_path,
+                kind=label,
+                renderer_version=renderer_version,
+            )
+            for issue in rendered.issues:
+                report.diagnostics.append(
+                    VisualDiagnostic(
+                        issue_id=f"renderer.{label}",
+                        target_id=str(artifact_path),
+                        severity="error",
+                        message=issue,
+                        repairable=False,
+                    )
+                )
+        report.approved = report.approved and not any(item.severity == "error" for item in report.diagnostics)
         report_path = self._quality_root / f"{_RUN_ID_RE.sub('_', run_id)}.json"
         report_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
         with self._lock:
@@ -178,7 +201,7 @@ class PresentationVerticalSlice:
                     kind=kind,
                     classification_level=state["classification_level"],
                     quality_status="passed" if report.approved else "failed",
-                    renderer_version=os.getenv("SUDARSHAN_PPT_RENDERER_VERSION", "sudarshan-flowchart@1"),
+                    renderer_version=renderer_version,
                     schema_version="flowchart-ir@1",
                     evidence_ids=[
                         evidence_id

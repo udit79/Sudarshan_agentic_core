@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from integrations.providers.router import ProviderRouter
+
 
 GOVERNMENT_STYLE_PREFIX = (
     "Create a restrained, professional, government-quality visual for a public information post. "
@@ -35,8 +37,10 @@ class OpenAIImageGenerator:
         quality: str = "high",
         output_format: str = "png",
         client: Any = None,
+        provider_router: ProviderRouter | None = None,
     ) -> None:
-        self.model = model or os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
+        self.provider_router = provider_router or ProviderRouter()
+        self.model = self.provider_router.select_model("image", model).model
         self.output_dir = Path(output_dir)
         self.size = size
         self.quality = quality
@@ -54,13 +58,19 @@ class OpenAIImageGenerator:
     def __call__(self, prompt: str) -> str:
         if not prompt.strip():
             raise ValueError("image generation requires a non-empty prompt")
-        response = self.client.images.generate(
-            model=self.model,
-            prompt=f"{GOVERNMENT_STYLE_PREFIX}\n\nSpecific case-grounded visual brief:\n{prompt}",
-            size=self.size,
-            quality=self.quality,
-            output_format=self.output_format,
-        )
+        self.provider_router.before_call("openai", "image")
+        try:
+            response = self.client.images.generate(
+                model=self.model,
+                prompt=f"{GOVERNMENT_STYLE_PREFIX}\n\nSpecific case-grounded visual brief:\n{prompt}",
+                size=self.size,
+                quality=self.quality,
+                output_format=self.output_format,
+            )
+        except Exception as exc:
+            self.provider_router.record_failure("openai", "image", exc)
+            raise
+        self.provider_router.record_success("openai", "image")
         image = response.data[0]
         encoded = getattr(image, "b64_json", None)
         if encoded:

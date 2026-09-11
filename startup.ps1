@@ -16,7 +16,9 @@ $harnessRoot = Join-Path $repoRoot "deepseek-harness"
 $frontendRoot = Join-Path $repoRoot "frontend"
 $stateRoot = Join-Path $repoRoot "artifacts\.state"
 $logRoot = Join-Path $stateRoot "startup-logs"
+$processManifestPath = Join-Path $stateRoot "sudarshan-processes.json"
 $startedProcesses = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
+$startedServices = [System.Collections.Generic.List[object]]::new()
 
 function Invoke-Checked {
     param(
@@ -226,7 +228,8 @@ function Start-LocalService {
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$FilePath,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [Parameter(Mandatory = $true)][string]$WorkingDirectory
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $false)][int]$Port = 0
     )
     $stdout = Join-Path $logRoot "$Name.out.log"
     $stderr = Join-Path $logRoot "$Name.err.log"
@@ -237,6 +240,13 @@ function Start-LocalService {
     $process = Start-Process -FilePath $FilePath -ArgumentList $argumentLine -WorkingDirectory $WorkingDirectory `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
     $startedProcesses.Add($process)
+    $startedServices.Add([ordered]@{
+        name = $Name
+        pid = $process.Id
+        port = $Port
+        stdout = $stdout
+        stderr = $stderr
+    })
     Write-Host "$Name started (PID $($process.Id)). Logs: $stdout"
     return $process
 }
@@ -250,6 +260,19 @@ function Stop-StartedServices {
         }
         catch { }
     }
+    if (Test-Path -LiteralPath $processManifestPath -PathType Leaf) {
+        Remove-Item -LiteralPath $processManifestPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Write-ProcessManifest {
+    $payload = [ordered]@{
+        schema_version = 1
+        repo_root = $repoRoot
+        started_at = (Get-Date).ToUniversalTime().ToString("o")
+        services = @($startedServices.ToArray())
+    }
+    $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $processManifestPath -Encoding UTF8
 }
 
 function Wait-Http {
@@ -283,6 +306,14 @@ try {
     }
     New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
+    foreach ($artifactDirectory in @(
+        (Join-Path $repoRoot "artifacts\presentations"),
+        (Join-Path $repoRoot "artifacts\videos"),
+        (Join-Path $repoRoot "artifacts\.state\quality_reports"),
+        (Join-Path $repoRoot "artifacts\.state\memory-events")
+    )) {
+        New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
+    }
 
     $envFile = Join-Path $repoRoot ".env"
     $exampleFile = Join-Path $repoRoot ".env.example"
@@ -371,17 +402,17 @@ try {
     $env:SUDARSHAN_API_PORT = [string]$pythonPort
     $env:PORT = [string]$nodePort
     $env:SUDARSHAN_FRONTEND_PORT = [string]$frontendPort
-    $pythonProcess = Start-LocalService "python-api" $uvExecutable @("run", "python", "-m", "api.server") $repoRoot
+    $pythonProcess = Start-LocalService "python-api" $uvExecutable @("run", "python", "-m", "api.server") $repoRoot -Port $pythonPort
     Wait-Http "http://127.0.0.1:$pythonPort/health" "python-api"
 
     if (-not $SkipNodeGateway) {
-        $nodeProcess = Start-LocalService "node-gateway" $nodeCommand.Source @("src/server.js") $nodeGatewayRoot
+        $nodeProcess = Start-LocalService "node-gateway" $nodeCommand.Source @("src/server.js") $nodeGatewayRoot -Port $nodePort
         Wait-Http "http://127.0.0.1:$nodePort/readyz" "node-gateway"
     }
 
     $frontendHost = Get-EnvValue "SUDARSHAN_FRONTEND_HOST"
     if ([string]::IsNullOrWhiteSpace($frontendHost)) { $frontendHost = "127.0.0.1" }
-    $frontendProcess = Start-LocalService "frontend" $pythonCommand.Source @("-m", "http.server", [string]$frontendPort, "--bind", $frontendHost, "--directory", $frontendRoot) $repoRoot
+    $frontendProcess = Start-LocalService "frontend" $pythonCommand.Source @("-m", "http.server", [string]$frontendPort, "--bind", $frontendHost, "--directory", $frontendRoot) $repoRoot -Port $frontendPort
     Wait-Http "http://127.0.0.1:$frontendPort/login.html" "frontend"
 
     $frontendUrl = "http://localhost:$frontendPort/login.html"
@@ -391,6 +422,8 @@ try {
     Write-Host "  Node API:   http://localhost:$nodePort"
     Write-Host "  Python API: http://localhost:$pythonPort"
     Write-Host "  Logs:       $logRoot"
+    Write-ProcessManifest
+    Write-Host "  Process manifest: $processManifestPath"
     if ($OpenBrowser -or (Get-EnvValue "SUDARSHAN_OPEN_BROWSER") -eq "true") {
         Start-Process $frontendUrl
     }

@@ -15,6 +15,14 @@ from pipelines.video.native_generator import (
 )
 
 
+class _QuotaImageGenerator:
+    configured = True
+
+    def generate(self, prompt, output_path, *, cancel_event=None):
+        del prompt, output_path, cancel_event
+        raise RuntimeError("insufficient_quota: exceeded your current quota")
+
+
 def test_scenes_from_script():
     script = "This is paragraph one.\n\nThis is paragraph two."
     scenes = scenes_from_script(script, subject="Test Subject")
@@ -69,6 +77,28 @@ def test_native_video_generator_fallback(mock_run, mock_ffmpeg):
         result = generator.generate(subject="test", scenes=scenes)
         assert result.status == "succeeded"
         assert result.scene_count == 1
+
+
+@patch("pipelines.video.native_generator._ffmpeg_binary")
+@patch("pipelines.video.native_generator.subprocess.run")
+def test_video_image_quota_uses_title_card_and_reports_degradation(mock_run, mock_ffmpeg, tmp_path):
+    mock_ffmpeg.return_value = "ffmpeg"
+    mock_run.return_value = MagicMock(returncode=0, stdout='{"format": {"duration": "10"}}')
+
+    with patch("pathlib.Path.exists", return_value=True):
+        generator = NativeVideoGenerator(
+            output_dir=tmp_path / "videos",
+            image_generator=_QuotaImageGenerator(),
+        )
+        result = generator.generate(
+            subject="Quota fallback",
+            scenes=[VideoScene(scene_id="quota-scene", visual_description="A map")],
+        )
+
+    assert result.status == "succeeded"
+    assert result.metadata["degraded"] is True
+    assert result.metadata["degradation_reasons"][0]["image_failure_class"] == "quota_exhausted"
+    assert result.metadata["degradation_reasons"][0]["image_fallback"] == "title_card"
 
 
 def test_video_scene_fingerprint_is_stable_and_changes_with_scene_inputs() -> None:

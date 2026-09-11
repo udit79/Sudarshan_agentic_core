@@ -33,10 +33,16 @@ process:
   `SkillRuntime`; `start_sudarshan_skill` submits the same skill contract to
   the durable background scheduler.
 
-The catalog may include planned skills such as `visual.flowchart` with
-`available=false`. Discovery does not imply that an executable adapter has
-been installed; the application rejects unavailable skill execution instead
+The built-in `visual.flowchart` child is executable and can be requested by
+the presentation, LinkedIn, infographic, and video parent skills. Discovery
+still reports availability per deployment: an optional package may be listed
+without an adapter, and the application rejects unavailable execution instead
 of silently routing it to an unrelated pipeline.
+
+Parent outputs carry a typed `child_plan`. Sudarshan validates dependencies,
+runs independent children under the parent concurrency/budget policy, and
+returns child artifact IDs, quality-report IDs, and typed fallback/blocking
+states in the same parent artifact projection.
 
 The server uses the configured SQLite LangGraph checkpointer, so these tools
 share a durable run identity within the service process instead of creating a

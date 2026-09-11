@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from api.control_plane import ControlPlane
 from pipelines.orchestrator.contracts import QualityStatus, TelemetryUsage
 
 
@@ -143,6 +144,33 @@ class SQLiteProgressSink:
     def clear(self, run_id: str) -> None:
         with self._lock, self._connect() as conn:
             conn.execute("DELETE FROM progress_events WHERE run_id = ?", (run_id,))
+
+
+class RedisProgressSink:
+    """Shared progress projection backed by the control-plane Redis adapter."""
+
+    def __init__(self, control_plane: ControlPlane) -> None:
+        self.control_plane = control_plane
+
+    def publish(self, event: ProgressEvent) -> None:
+        self.control_plane.publish_progress(
+            event.run_id,
+            event.model_dump(mode="json"),
+        )
+
+    def events(self, run_id: str, *, after_sequence: int = 0) -> tuple[ProgressEvent, ...]:
+        return tuple(
+            ProgressEvent.model_validate(payload)
+            for payload in self.control_plane.progress_events(
+                run_id,
+                after_sequence=after_sequence,
+            )
+        )
+
+    def clear(self, run_id: str) -> None:
+        # Progress is an append-only operational record; retention is managed
+        # by the Redis stream cap rather than destructive per-run deletes.
+        del run_id
 
 
 class ProgressReporter:

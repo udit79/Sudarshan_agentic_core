@@ -80,3 +80,50 @@ def test_source_instructions_are_marked_as_untrusted_data():
     )
     assert "UNTRUSTED SOURCE CONTENT" in built.text
     assert "security_flags" in built.items[0].provenance
+
+
+def test_context_pack_applies_stage_context_policy() -> None:
+    backend = ContextBackend([{
+        "context": "Full evidence",
+        "metadata": {
+            "scope_type": "case",
+            "scope_id": "case-1",
+            "context_layers": {
+                "L0": "Short visual label",
+                "L1": "Structured visual overview",
+                "L2": "Full evidence",
+            },
+        },
+        "score": 0.8,
+    }])
+    manager = MemoryManager(backend)
+    pack = manager.recall_context_pack(
+        "visual overview",
+        AccessContext(user_id="user-1", case_id="case-1"),
+        run_id="run-visual",
+        stage_id="visual",
+    )
+
+    assert pack.context_level == "L1"
+    assert pack.records[0]["context_level"] == "L1"
+    assert "Structured visual overview" in pack.context_text
+
+
+def test_context_builder_selects_requested_layer_and_reports_fallback() -> None:
+    builder = ContextBuilder()
+    layered = RetrievedMemory(
+        "Full L2 evidence details",
+        context_layers={"L0": "One-line abstract", "L1": "Structured overview", "L2": "Full L2 evidence details"},
+    )
+
+    overview = builder.build([layered], token_budget=100, context_level="L1")
+    assert overview.text == "[unknown] Structured overview"
+    assert overview.context_level == "L1"
+    assert overview.items[0].context_level == "L1"
+    assert overview.trace is not None
+    assert overview.trace.layer_fallback_count == 0
+
+    fallback = builder.build([RetrievedMemory("Only L2")], token_budget=100, context_level="L1")
+    assert "Only L2" in fallback.text
+    assert fallback.trace is not None
+    assert fallback.trace.layer_fallback_count == 1

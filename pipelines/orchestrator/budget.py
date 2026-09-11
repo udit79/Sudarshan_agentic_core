@@ -7,6 +7,7 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 
+from api.control_plane import ControlPlane
 from pipelines.orchestrator.contracts import RunPolicy, UsageRecord
 
 
@@ -78,12 +79,18 @@ class _BudgetState:
 class BudgetController:
     """Thread-safe in-process budget ledger for one control-plane instance."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, control_plane: ControlPlane | None = None) -> None:
         self._states: dict[str, _BudgetState] = {}
         self._reservations: dict[str, BudgetReservation] = {}
+        self._usage_records: dict[str, list[UsageRecord]] = {}
         self._lock = Lock()
+        self._control_plane = control_plane
 
     def register_run(self, run_id: str, policy: RunPolicy) -> BudgetSnapshot:
+        if self._control_plane is not None:
+            result = self._control_plane.budget_register(run_id, policy.model_dump(mode="json"))
+            self._raise_remote_error(result)
+            return self._snapshot_from_remote(run_id, result)
         with self._lock:
             existing = self._states.get(run_id)
             if existing is not None:
@@ -105,6 +112,31 @@ class BudgetController:
         concurrency: int = 1,
     ) -> BudgetReservation:
         self._validate_non_negative(model_tokens, tool_calls, wall_time_ms, cost, concurrency)
+        if self._control_plane is not None:
+            reservation = BudgetReservation(
+                reservation_id=f"budget-{uuid4().hex}",
+                run_id=run_id,
+                node_id=node_id,
+                model_tokens=model_tokens,
+                tool_calls=tool_calls,
+                wall_time_ms=wall_time_ms,
+                cost=cost,
+                concurrency=concurrency,
+            )
+            result = self._control_plane.budget_reserve(
+                run_id,
+                {
+                    "reservation_id": reservation.reservation_id,
+                    "node_id": node_id,
+                    "model_tokens": model_tokens,
+                    "tool_calls": tool_calls,
+                    "wall_time_ms": wall_time_ms,
+                    "cost": cost,
+                    "concurrency": concurrency,
+                },
+            )
+            self._raise_remote_error(result)
+            return reservation
         with self._lock:
             state = self._require_locked(run_id)
             self._ensure_limit(
@@ -149,6 +181,14 @@ class BudgetController:
             return reservation
 
     def commit(self, reservation_id: str, usage: UsageRecord) -> BudgetSnapshot:
+        if self._control_plane is not None:
+            result = self._control_plane.budget_commit(
+                reservation_id,
+                usage.model_dump(mode="json"),
+            )
+            self._raise_remote_error(result)
+            self._control_plane.usage_record(usage.model_dump(mode="json"))
+            return self._snapshot_from_remote(usage.run_id, result)
         with self._lock:
             reservation = self._reservations.get(reservation_id)
             if reservation is None:
@@ -172,9 +212,15 @@ class BudgetController:
             state.used_tool_calls += usage.tool_calls
             state.used_wall_time_ms += usage.latency_ms
             state.used_cost += cost
+            self._usage_records.setdefault(usage.run_id, []).append(usage)
             return self._snapshot_locked(reservation.run_id, state)
 
     def release(self, reservation_id: str) -> BudgetSnapshot:
+        if self._control_plane is not None:
+            result = self._control_plane.budget_release(reservation_id)
+            self._raise_remote_error(result)
+            run_id = str(result.get("run_id", ""))
+            return self._snapshot_from_remote(run_id, result)
         with self._lock:
             reservation = self._reservations.pop(reservation_id, None)
             if reservation is None:
@@ -184,6 +230,11 @@ class BudgetController:
             return self._snapshot_locked(reservation.run_id, state)
 
     def snapshot(self, run_id: str) -> BudgetSnapshot:
+        if self._control_plane is not None:
+            result = self._control_plane.budget_snapshot(run_id)
+            if result is None:
+                raise BudgetExceededError("RUN_NOT_REGISTERED", f"Run '{run_id}' has no budget policy")
+            return self._snapshot_from_remote(run_id, result)
         with self._lock:
             state = self._require_locked(run_id)
             return self._snapshot_locked(run_id, state)
@@ -217,7 +268,50 @@ class BudgetController:
             },
             "active_concurrency": snapshot.active_concurrency,
             "max_parallel_children": snapshot.max_parallel_children,
+            "reconciliation": self.reconciliation(run_id),
         }
+
+    def reconciliation(self, run_id: str) -> dict[str, Any]:
+        """Return an estimate-aware usage report without claiming billing truth."""
+
+        if self._control_plane is not None:
+            records = [UsageRecord.model_validate(item) for item in self._control_plane.usage_records(run_id)]
+        else:
+            with self._lock:
+                records = list(self._usage_records.get(str(run_id), ()))
+        estimated = [record for record in records if record.is_estimate]
+        observed = [record for record in records if not record.is_estimate]
+        orchestration = [record for record in records if not record.node_id]
+        by_charge_type: dict[str, dict[str, int | float]] = {}
+        for record in records:
+            bucket = by_charge_type.setdefault(
+                record.charge_type,
+                {"record_count": 0, "tokens": 0, "estimated_tokens": 0, "observed_tokens": 0},
+            )
+            tokens = self._tokens(record)
+            bucket["record_count"] = int(bucket["record_count"]) + 1
+            bucket["tokens"] = int(bucket["tokens"]) + tokens
+            key = "estimated_tokens" if record.is_estimate else "observed_tokens"
+            bucket[key] = int(bucket[key]) + tokens
+        return {
+            "run_id": str(run_id),
+            "record_count": len(records),
+            "estimated_record_count": len(estimated),
+            "observed_record_count": len(observed),
+            "estimated_tokens": sum(self._tokens(record) for record in estimated),
+            "observed_tokens": sum(self._tokens(record) for record in observed),
+            "orchestration_tokens": sum(self._tokens(record) for record in orchestration),
+            "missing_or_estimated_usage": [record.usage_id for record in estimated],
+            "by_charge_type": by_charge_type,
+            "unreconciled_usage": [
+                record.usage_id for record in records if record.billing_status in {"unreconciled", "missing"}
+            ],
+            "billing_truth": False,
+        }
+
+    @staticmethod
+    def _tokens(record: UsageRecord) -> int:
+        return record.input_tokens + record.output_tokens + (record.reasoning_tokens or 0)
 
     @staticmethod
     def _validate_non_negative(*values: int | float) -> None:
@@ -234,6 +328,32 @@ class BudgetController:
         if state is None:
             raise BudgetExceededError("RUN_NOT_REGISTERED", f"Run '{run_id}' has no budget policy")
         return state
+
+    @staticmethod
+    def _raise_remote_error(result: dict[str, Any]) -> None:
+        code = result.get("error")
+        if code:
+            raise BudgetExceededError(str(code), f"Distributed budget rejected operation: {code}")
+
+    @staticmethod
+    def _snapshot_from_remote(run_id: str, values: dict[str, Any]) -> BudgetSnapshot:
+        return BudgetSnapshot(
+            run_id=run_id,
+            max_model_tokens=int(values.get("max_model_tokens", 0)),
+            used_model_tokens=int(values.get("used_model_tokens", 0)),
+            reserved_model_tokens=int(values.get("reserved_model_tokens", 0)),
+            max_tool_calls=int(values.get("max_tool_calls", 0)),
+            used_tool_calls=int(values.get("used_tool_calls", 0)),
+            reserved_tool_calls=int(values.get("reserved_tool_calls", 0)),
+            max_wall_time_ms=int(values.get("max_wall_time_ms", 0)),
+            used_wall_time_ms=int(values.get("used_wall_time_ms", 0)),
+            reserved_wall_time_ms=int(values.get("reserved_wall_time_ms", 0)),
+            max_cost=(float(values["max_cost"]) if values.get("max_cost") is not None else None),
+            used_cost=float(values.get("used_cost", 0)),
+            reserved_cost=float(values.get("reserved_cost", 0)),
+            max_parallel_children=int(values.get("max_parallel_children", 0)),
+            active_concurrency=int(values.get("active_concurrency", 0)),
+        )
 
     @staticmethod
     def _release_reserved(state: _BudgetState, reservation: BudgetReservation) -> None:

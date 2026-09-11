@@ -10,5 +10,9 @@
   "risk_class": "RESTRICTED",
   "model_policy": {"delegation": "bounded", "temperature": 0.2},
   "budget_policy": {"max_model_tokens": 5000, "max_wall_time_ms": 300000, "max_parallel_children": 2},
-  "coordination": {"pipeline": "infographic", "children": ["visual.flowchart"]}
+  "coordination": {"pipeline": "infographic", "children": ["visual.flowchart"]},
+  "context_policy": {"default_level": "L1", "max_level": "L2"},
+  "references": {"load_order": ["SKILL.md"], "max_chars": 8000},
+  "renderers": ["infographic.antv", "infographic.native-svg"],
+  "checkers": ["schema", "evidence", "visual", "accessibility"]
 }

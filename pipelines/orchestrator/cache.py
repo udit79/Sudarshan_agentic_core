@@ -18,6 +18,7 @@ from time import time
 from typing import Any, Mapping
 from uuid import uuid4
 
+from api.control_plane import ControlPlane
 
 def _canonical(value: Any) -> Any:
     """Convert supported values to deterministic JSON-safe structures."""
@@ -91,8 +92,14 @@ class CacheEntry:
 class CacheStore:
     """Small SQLite cache with verified entries and stampede leases."""
 
-    def __init__(self, db_path: str = "artifacts/.state/skill_cache.db") -> None:
+    def __init__(
+        self,
+        db_path: str = "artifacts/.state/skill_cache.db",
+        *,
+        control_plane: ControlPlane | None = None,
+    ) -> None:
         self.db_path = db_path
+        self._control_plane = control_plane
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(db_path, check_same_thread=False)
@@ -184,10 +191,40 @@ class CacheStore:
                 ),
             )
             self._connection.commit()
+        if self._control_plane is not None:
+            self._control_plane.cache_put(
+                fingerprint,
+                {
+                    "fingerprint": entry.fingerprint,
+                    "skill_id": entry.skill_id,
+                    "skill_version": entry.skill_version,
+                    "artifact_ids": entry.artifact_ids,
+                    "quality_report_id": entry.quality_report_id,
+                    "quality_status": entry.quality_status,
+                    "created_at": entry.created_at,
+                    "expires_at": entry.expires_at,
+                    "metadata": entry.metadata,
+                },
+            )
         return entry
 
     def get(self, fingerprint: str, *, now: float | None = None) -> CacheEntry | None:
         current = time() if now is None else now
+        if self._control_plane is not None:
+            shared = self._control_plane.cache_get(fingerprint)
+            if shared is None:
+                return None
+            return CacheEntry(
+                fingerprint=str(shared.get("fingerprint", fingerprint)),
+                skill_id=str(shared.get("skill_id", "")),
+                skill_version=str(shared.get("skill_version", "")),
+                artifact_ids=tuple(str(item) for item in shared.get("artifact_ids", ())),
+                quality_report_id=str(shared.get("quality_report_id") or "") or None,
+                quality_status=str(shared.get("quality_status", "passed")),
+                created_at=float(shared.get("created_at", current)),
+                expires_at=(float(shared["expires_at"]) if shared.get("expires_at") else None),
+                metadata=dict(shared.get("metadata") or {}),
+            )
         with self._lock:
             row = self._connection.execute(
                 "SELECT * FROM cache_entries WHERE fingerprint = ?",
@@ -217,11 +254,19 @@ class CacheStore:
         with self._lock:
             self._connection.execute("DELETE FROM cache_entries WHERE fingerprint = ?", (fingerprint,))
             self._connection.commit()
+        if self._control_plane is not None:
+            self._control_plane.cache_invalidate(fingerprint)
 
     def try_claim(self, fingerprint: str, *, owner: str | None = None, lease_seconds: float = 300) -> str | None:
         """Claim a missing key to avoid duplicate expensive generation."""
 
         claim_owner = owner or f"claim-{uuid4().hex}"
+        if self._control_plane is not None:
+            return self._control_plane.cache_claim(
+                fingerprint,
+                owner=claim_owner,
+                lease_seconds=lease_seconds,
+            )
         now = time()
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
@@ -246,6 +291,8 @@ class CacheStore:
                 return None
 
     def release_claim(self, fingerprint: str, owner: str) -> bool:
+        if self._control_plane is not None:
+            return self._control_plane.cache_release(fingerprint, owner)
         with self._lock:
             cursor = self._connection.execute(
                 "DELETE FROM cache_claims WHERE fingerprint = ? AND owner = ?",

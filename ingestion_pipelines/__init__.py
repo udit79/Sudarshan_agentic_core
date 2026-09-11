@@ -51,6 +51,7 @@ from ingestion_pipelines.evaluation import (
     PromotionDecision,
     PromotionThresholds,
     evaluate_promotion,
+    archive_benchmark_report,
     run_multimodal_benchmark,
 )
 
@@ -102,5 +103,6 @@ __all__ = [
     "PromotionDecision",
     "PromotionThresholds",
     "evaluate_promotion",
+    "archive_benchmark_report",
     "run_multimodal_benchmark",
 ]
