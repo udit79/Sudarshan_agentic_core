@@ -163,7 +163,10 @@ export function apply(ctx: Context): void {
   ctx.slots.inject('details', () => ctx.slots.register({
     name: 'details',
     locale: NS,
-    children: { 'conversation.details.tool': { kind: 'single', scope: 'session' } },
+    children: {
+      'conversation.details.tool': { kind: 'single', scope: 'session' },
+      'conversation.details.operations': { kind: 'list', scope: 'session' },
+    },
     store: chatStore,
     inject: (): DetailsInjected => ({ closeDetails: () => { ctx.layout.closeDetails() } }),
   }, DetailsPanel))

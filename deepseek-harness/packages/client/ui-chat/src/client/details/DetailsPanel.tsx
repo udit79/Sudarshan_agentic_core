@@ -56,6 +56,9 @@ export function DetailsPanel({ useChat, useSessions, sessionId, useStore, render
   const material = useChat(
     s => (callId === undefined ? null : materialFor(s, callId)),
     (a, b) => shallowEqual(a, b))
+  const operations = selection === null || callId === undefined
+    ? renderSlot('conversation.details.operations', {})
+    : null
   return (
     <div className={css.root}>
       <div className={css.header}>
@@ -73,7 +76,7 @@ export function DetailsPanel({ useChat, useSessions, sessionId, useStore, render
       </div>
       <div className={css.body}>
         {selection === null || callId === undefined
-          ? <div className={css.empty}>{t('details.empty')}</div>
+          ? operations ?? <div className={css.empty}>{t('details.empty')}</div>
           : material === null
             ? <div className={css.empty}>{t('details.notInWindow')}</div>
             : (

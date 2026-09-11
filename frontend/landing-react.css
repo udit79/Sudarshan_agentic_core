@@ -1,0 +1,15 @@
+.robot-frame{perspective:900px}
+.robot-frame::after{z-index:4}
+.robot-react-root{position:absolute;inset:0;z-index:1;transform-style:preserve-3d;transition:transform .22s cubic-bezier(.2,.8,.2,1);will-change:transform}
+.robot-react-model{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .22s cubic-bezier(.2,.8,.2,1);will-change:transform}
+.robot-image{transform:translate3d(var(--robot-drift-x,0px),var(--robot-drift-y,0px),var(--robot-depth,0px)) rotateX(var(--robot-tilt-y,0deg)) rotateY(var(--robot-tilt-x,0deg));transform-origin:50% 58%;transition:transform .22s cubic-bezier(.2,.8,.2,1);will-change:transform}
+.robot-react-bloom{position:absolute;inset:16% 16% 12%;border-radius:50%;background:radial-gradient(circle,rgba(95,151,255,.24),transparent 68%);filter:blur(22px);transform:translate3d(var(--robot-drift-x,0px),var(--robot-drift-y,0px),-25px);pointer-events:none}
+.robot-react-spark{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--landing-cyan);box-shadow:0 0 18px 5px rgba(125,232,255,.55);right:24%;top:26%;transform:translate3d(var(--robot-drift-x,0px),var(--robot-drift-y,0px),35px);pointer-events:none}
+.robot-caption{z-index:5}
+.hero-3d-scene{position:absolute;inset:-6% -12%;z-index:0;pointer-events:none;opacity:.88;filter:saturate(1.12)}
+.hero-3d-scene canvas{display:block;width:100%;height:100%;pointer-events:none}
+.hero-3d-fallback{opacity:0}
+.robot-frame{z-index:2}
+.chakra-ring{z-index:1}
+.visual-card{z-index:4}
+@media(prefers-reduced-motion:reduce){.robot-react-root,.robot-react-model,.robot-image{transition:none}.robot-react-spark{display:none}}

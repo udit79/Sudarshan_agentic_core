@@ -379,6 +379,21 @@ try {
         }
     }
 
+    if (-not $SkipHarness) {
+        Write-Host "Building the Sudarshan Harness UI plugin bundles..."
+        Invoke-Checked $nodeCommand.Source @(
+            "node_modules/typescript/bin/tsc",
+            "-b",
+            "packages/experimental/client-ui-sudarshan/tsconfig.json",
+            "packages/experimental/client-ui-sudarshan-theme/tsconfig.json"
+        ) $harnessRoot
+        Invoke-Checked $pnpmCommand.Source @(
+            "--filter", "@deepseek-ai/dsh-experimental-client-ui-sudarshan",
+            "--filter", "@deepseek-ai/dsh-experimental-client-ui-sudarshan-theme",
+            "run", "bundle"
+        ) $harnessRoot
+    }
+
     $pythonPort = Get-Port "SUDARSHAN_API_PORT" 8000
     $nodePort = Get-Port "PORT" 8080
     $frontendPort = Get-Port "SUDARSHAN_FRONTEND_PORT" 3000

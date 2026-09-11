@@ -24,7 +24,9 @@ Set-Location .\frontend
 python -m http.server 3000
 ```
 
-Open `http://localhost:3000/login.html`. Do not open the HTML files with
+Open `http://localhost:3000/` for the public landing page. After sign-in,
+`index.html?dashboard=1` hands off to the redesigned DeepSeek Harness chat at
+`http://127.0.0.1:3080/`. Do not open the HTML files with
 `file://`; browser cookies and CORS require an HTTP origin.
 
 The gateway defaults to `http://localhost:8080`. To use another gateway,
@@ -40,7 +42,10 @@ define `window.SUDARSHAN_API_ORIGIN` before `api.js` in both HTML files:
 - `api.js` — shared gateway/FastAPI client, canonical run projection, cookie
   credentials, one-refresh retry, multipart source upload, event-cursor
   persistence, artifact manifests, errors, and idempotency keys.
-- `login.html` / `login.js` — Google OAuth entry point.
+- `landing.html` / `landing.css` / `landing.js` — public product landing page and entry point.
+- `landing-react.js` / `landing-react.css` — React robot island with cursor parallax and reduced-motion fallback.
+- `landing-three.js` — lightweight Three.js hero scene with an orbital intelligence core and adaptive particles.
+- `login.html` / `login.js` — Google OAuth entry point; successful sign-in continues to `index.html`.
 - `index.html` / `script.js` — authenticated case selector, file attachments,
   output selection, transformation submission, task polling, live agentic
   progress, wait/quality/telemetry display, cooperative stop/cancellation,

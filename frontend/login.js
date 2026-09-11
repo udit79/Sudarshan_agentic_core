@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   try {
     await window.SudarshanAPI.getCurrentUser();
-    window.location.replace("index.html");
+        window.location.replace("index.html?dashboard=1");
     return;
   } catch (error) {
     if (error.status && error.status !== 401) setStatus(error.message, true);

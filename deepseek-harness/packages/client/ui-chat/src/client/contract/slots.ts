@@ -172,7 +172,7 @@ export interface DetailsInjected {
 /** Full details-panel props. */
 export type DetailsSlotProps =
   PropsRuntime<'details'>
-  & PropsRenderSlots<'conversation.details.tool'>
+  & PropsRenderSlots<'conversation.details.tool' | 'conversation.details.operations'>
   & PropsStore<ChatStore>
   & InjectFace<DetailsInjected>
   & PropsLocale<'chat'>
@@ -232,5 +232,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * replaces the shipped Tool details renderer; absence uses the raw fallback.
      */
     'conversation.details.tool': { kind: 'single'; scope: 'session'; owner: DetailsToolOwnerProps }
+    /** Additive safe-operations surface rendered when no tool is selected. */
+    'conversation.details.operations': { kind: 'list'; scope: 'session' }
   }
 }
