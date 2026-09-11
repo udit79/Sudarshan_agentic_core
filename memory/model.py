@@ -26,6 +26,8 @@ class MemoryType(str, Enum):
     PROCEDURE = "procedure"
     SUMMARY = "summary"
     RELATIONSHIP = "relationship"
+    PROFILE = "profile"
+    LESSON = "lesson"
 
 
 class MemoryLifecycle(str, Enum):

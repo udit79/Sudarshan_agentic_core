@@ -143,6 +143,7 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
             str(metadata.get("lifecycle", item.lifecycle)),
             context_layers or item.context_layers,
             _context_level(metadata.get("context_level", item.context_level)),
+            metadata.get("context_uri") or item.context_uri,
         ) for item in nested]
     if result is None:
         result = raw.get("content", "")
@@ -156,6 +157,7 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
         metadata.get("source_reference") or metadata.get("source"), score, provenance,
         metadata.get("memory_id"), str(metadata.get("lifecycle", "active")),
         context_layers, _context_level(metadata.get("context_level", "L2")),
+        metadata.get("context_uri"),
     )]
 
 
@@ -280,6 +282,15 @@ class MemoryManager:
             "confidence": confidence,
             "expires_at": expires_at.isoformat() if expires_at else None,
         })
+        if "context_uri" not in metadata:
+            from memory.context_refs import build_context_uri
+
+            metadata["context_uri"] = build_context_uri(
+                scope_type=scope_type.value,
+                scope_id=memory_scope.scope_id,
+                source_id=unit.source.source_id,
+                level="L2",
+            )
         memory = Memory(memory_id, unit.content, memory_scope, memory_type,
                         unit.created_at, utc_now(), unit.source, metadata, unit.provenance,
                         lifecycle=lifecycle, importance=importance,
@@ -317,6 +328,80 @@ class MemoryManager:
                     created_at=old.updated_at,
                 )
         return RememberReceipt(memory, response)
+
+    def remember_lesson(
+        self,
+        content: str,
+        context: AccessContext,
+        *,
+        source_reference: str = "sudarshan://lesson",
+        metadata: Mapping[str, Any] | None = None,
+    ) -> RememberReceipt:
+        """Persist a bounded post-run lesson in the user scope."""
+
+        unit = KnowledgeUnit(
+            unit_id="lesson_" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:24],
+            content=content,
+            source=Source("lesson", SourceType.USER, source_reference),
+            metadata={**dict(metadata or {}), "lesson": True},
+            provenance={"kind": "agent_lesson"},
+        )
+        receipt = self.remember(
+            unit,
+            context,
+            scope_type=ScopeType.USER,
+            memory_type=MemoryType.LESSON,
+            run_in_background=True,
+        )
+        self.event_log.append(
+            "lesson_recorded",
+            memory_id=receipt.memory.id,
+            scope_type=receipt.memory.scope.scope_type.value,
+            scope_id=receipt.memory.scope.scope_id,
+            actor_id=context.user_id,
+            safe_metadata={"memory_type": MemoryType.LESSON.value},
+            created_at=receipt.memory.updated_at,
+        )
+        return receipt
+
+    def remember_profile(
+        self,
+        profile: Mapping[str, Any],
+        context: AccessContext,
+        *,
+        source_reference: str = "sudarshan://voice-profile",
+    ) -> RememberReceipt:
+        """Persist an explicit user-scoped voice/profile preference."""
+
+        if not context.user_id:
+            raise PermissionError("a user context is required for profiles")
+        payload = dict(profile)
+        profile_id = str(payload.get("profile_id") or f"voice:{context.user_id}")
+        content = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        unit = KnowledgeUnit(
+            unit_id="profile_" + hashlib.sha256(profile_id.encode("utf-8")).hexdigest()[:24],
+            content=content,
+            source=Source(profile_id, SourceType.USER, source_reference),
+            metadata={"profile_id": profile_id, "profile_version": str(payload.get("version", "1.0"))},
+            provenance={"kind": "explicit_user_profile"},
+        )
+        receipt = self.remember(
+            unit,
+            context,
+            scope_type=ScopeType.USER,
+            memory_type=MemoryType.PROFILE,
+            run_in_background=True,
+        )
+        self.event_log.append(
+            "profile_updated",
+            memory_id=receipt.memory.id,
+            scope_type=receipt.memory.scope.scope_type.value,
+            scope_id=receipt.memory.scope.scope_id,
+            actor_id=context.user_id,
+            safe_metadata={"profile_id": profile_id},
+            created_at=receipt.memory.updated_at,
+        )
+        return receipt
 
     def recall(self, query: str, context: AccessContext, *, top_k: int = 10,
                token_budget: int = 2000, session_id: str | None = None,
@@ -464,6 +549,7 @@ class MemoryManager:
                 "scope_type": item.scope_type.value if item.scope_type else None,
                 "scope_id": item.scope_id,
                 "source_reference": item.source_reference,
+                "context_uri": item.context_uri,
                 "score": item.score,
                 "provenance": provenance,
             })

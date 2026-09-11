@@ -11,6 +11,7 @@ from pipelines.linkedin.agents import build_agents
 from pipelines.linkedin.humanizer import audit_linkedin_text
 from pipelines.linkedin.schemas import LinkedInImageSpec, LinkedInPostOutput
 from pipelines.linkedin.tasks import build_tasks
+from pipelines.linkedin.voice_profile import profile_from_metadata, voice_context
 
 
 class LinkedInPostFlow(TextTransformationFlow):
@@ -49,11 +50,16 @@ class LinkedInPostFlow(TextTransformationFlow):
             progress_callback=progress_callback,
         )
         self.image_generator = image_generator
+        self._voice_profile = None
 
     def pipeline_options(self, request: Any) -> dict[str, Any]:
         """Resolve image intent from explicit user language before agent judgment."""
 
         configured = request.metadata.get("linkedin_image")
+        self._voice_profile = profile_from_metadata(
+            request.metadata,
+            user_id=str(getattr(request, "user_id", None) or "anonymous"),
+        )
         if isinstance(configured, bool):
             configured = {"requested": configured}
         if not isinstance(configured, dict):
@@ -81,12 +87,13 @@ class LinkedInPostFlow(TextTransformationFlow):
                 "policy": policy,
                 "image_type": str(configured.get("image_type", "auto")),
                 "generator_available": self.image_generator is not None,
-            }
+            },
+            "voice_profile": voice_context(self._voice_profile),
         }
 
     def enrich_output(self, output: Any) -> LinkedInPostOutput:
         """Attach deterministic humanizer state and optionally materialize an image."""
-        from pipelines.orchestrator.cross_skill import build_child_plan
+        from pipelines.orchestrator.cross_skill import build_child_plan, select_visual_child_skill
 
 
         if not isinstance(output, LinkedInPostOutput):
@@ -105,12 +112,18 @@ class LinkedInPostFlow(TextTransformationFlow):
             return value
 
         updates: dict[str, Any] = {
-            "humanizer_report": audit_linkedin_text(output.post_text),
+            "humanizer_report": audit_linkedin_text(
+                output.post_text,
+                voice_profile=self._voice_profile.model_dump(mode="json") if self._voice_profile else None,
+            ),
             "approval_required": "publish",
             "publish_status": "draft_only",
         }
         if output.image.requested and output.image.image_type in {"diagram", "infographic"}:
-            updates["visual_child"] = output.visual_child.model_copy(update={"status": "eligible"})
+            updates["visual_child"] = output.visual_child.model_copy(update={
+                "skill_id": select_visual_child_skill(output.image.model_dump(mode="json")),
+                "status": "eligible",
+            })
 
         if not output.image.requested:
             return finalize(output.model_copy(update=updates))
@@ -142,7 +155,12 @@ class LinkedInPostFlow(TextTransformationFlow):
 
         if not isinstance(output, LinkedInPostOutput):
             return output
-        return output.model_copy(update={"humanizer_report": audit_linkedin_text(output.post_text)})
+        return output.model_copy(update={
+            "humanizer_report": audit_linkedin_text(
+                output.post_text,
+                voice_profile=self._voice_profile.model_dump(mode="json") if self._voice_profile else None,
+            )
+        })
 
     def quality_output_issues(self, output: Any) -> list[str]:
         """Enforce parent-skill release gates independently of model obedience."""

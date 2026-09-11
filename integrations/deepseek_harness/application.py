@@ -682,6 +682,7 @@ class SudarshanApplication:
                 artifact["child_plan_status"] = (
                     "blocked" if any(item.delivery_blocked for item in outcomes) else "completed"
                 )
+                self._project_visual_child(response, outcomes, specs)
                 if any(item.delivery_blocked for item in outcomes):
                     response["status"] = "failed"
                     response["failure"] = "A required child skill failed its quality gate"
@@ -695,6 +696,31 @@ class SudarshanApplication:
             payload["status"] = "succeeded"
         elif any(status == "failed" for status in statuses):
             payload["status"] = "failed" if all(status == "failed" for status in statuses) else "partial"
+
+    @staticmethod
+    def _project_visual_child(
+        response: dict[str, Any],
+        outcomes: Any,
+        specs: Any,
+    ) -> None:
+        """Reconcile child runtime state into the parent LinkedIn contract."""
+
+        output = response.get("output")
+        if not isinstance(output, dict):
+            return
+        visual = output.get("visual_child")
+        if not isinstance(visual, dict) or not outcomes:
+            return
+        outcome = outcomes[0]
+        spec = specs[0]
+        status = "succeeded" if outcome.status == "succeeded" else "failed"
+        visual.update({
+            "skill_id": spec.skill_id,
+            "status": status,
+            "artifact_ids": list(outcome.artifact_ids),
+            "quality_report_id": outcome.quality_report_id,
+            "failure_code": outcome.failure_code,
+        })
 
     def _publish_skill_event(self, name: str, payload: Mapping[str, Any]) -> None:
         """Project child-runtime lifecycle into the existing safe event stream."""

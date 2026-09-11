@@ -10,7 +10,7 @@
   "risk_class": "RESTRICTED",
   "model_policy": {"delegation": "bounded", "temperature": 0.5},
   "budget_policy": {"max_model_tokens": 4000, "max_wall_time_ms": 180000, "max_parallel_children": 1},
-  "coordination": {"pipeline": "linkedin_post", "children": ["visual.flowchart"]},
+  "coordination": {"pipeline": "linkedin_post", "children": ["visual.flowchart", "infographic"]},
   "context_policy": {"default_level": "L1", "max_level": "L2"},
   "references": {"load_order": ["SKILL.md"], "max_chars": 6000},
   "renderers": [],

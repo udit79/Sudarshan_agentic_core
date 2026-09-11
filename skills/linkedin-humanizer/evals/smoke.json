@@ -1,0 +1,1 @@
+{"case_id":"humanizer-audit","input":{"post":"A grounded case detail with a clear next step."},"assertions":["deterministic","versioned_report","no_rewrite"]}

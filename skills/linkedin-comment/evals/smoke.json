@@ -1,0 +1,1 @@
+{"case_id":"grounded-comment","input":{"comment":"A concise evidence-grounded response."},"assertions":["draft_only","no_link","policy_valid"]}

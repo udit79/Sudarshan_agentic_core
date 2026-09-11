@@ -47,7 +47,9 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "alt text, and provide a concrete case-grounded generation prompt. The visual must be restrained and "
             "professional, with no flashy colors, sensational imagery, invented logos/seals, or decorative image "
             "added merely to fill space. Follow the central prompt plan where compatible "
-            "with these rules:\n{prompt_plan}"
+            "with these rules. Apply the explicit voice preferences in pipeline_options as style guidance only; "
+            "never turn them into facts or a publishing permission. Pipeline options:\n{pipeline_options}\n"
+            "with the central prompt plan where compatible:\n{prompt_plan}"
         ),
         expected_output="A validated LinkedInPostOutput JSON object.",
         agent=agents["post_writer"],

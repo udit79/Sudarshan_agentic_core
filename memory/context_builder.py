@@ -42,6 +42,7 @@ class RetrievedMemory:
     lifecycle: str = "active"
     context_layers: Mapping[str, str] | None = None
     context_level: ContextLevel = "L2"
+    context_uri: str | None = None
 
     def __post_init__(self) -> None:
         if self.scope_type is not None:
@@ -200,7 +201,8 @@ class ContextBuilder:
                                          score=result.score, provenance=result.provenance,
                                          memory_id=result.memory_id, lifecycle=result.lifecycle,
                                          context_layers=result.context_layers,
-                                         context_level=used_level)
+                                         context_level=used_level,
+                                         context_uri=result.context_uri)
                 line = (compact_prefix + content)[:limit]
             selected.append(result)
             formatted.append(line)

@@ -1,0 +1,1 @@
+{"input":{"type":"LinkedInReplyRequest"},"output":{"type":"LinkedInReplyDraft","required":["reply","parent_comment_urn","approval_required"]}}

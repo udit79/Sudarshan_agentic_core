@@ -1,0 +1,1 @@
+{"cases":[{"id":"meta-language","action":"block","repair":"rewrite without model self-reference"},{"id":"voice-conflict","action":"repair","repair":"apply only the explicit user voice preferences"}]}

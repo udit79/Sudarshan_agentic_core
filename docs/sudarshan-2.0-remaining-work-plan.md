@@ -423,6 +423,386 @@ Remaining release work:
 - Reconcile provider receipts and expose safe health/fallback events in the
   operator dashboard.
 
+## T61–T83 — Audit-derived capability improvements
+
+These tickets extend the existing contract-first architecture. They do not
+replace LangGraph, the durable scheduler, `SkillRuntime`, CrewAI specialist
+crews, MCP, or the current artifact/quality boundaries. A social connector is
+an adapter behind the capability firewall; it is not a second scheduler. The
+default LinkedIn behavior remains draft-only.
+
+### T61 — LinkedIn skill contracts
+
+Owner: agentic/backend. Depends on: T15, T25, T51.
+
+Split the current LinkedIn surface into versioned contracts for
+`linkedin.post`, `linkedin.comment`, `linkedin.reply`, `linkedin.reshare`, and
+`linkedin.humanizer`. Keep the existing `linkedin.post` input/output
+compatibility projection while adding separate manifests, schemas, policies,
+failure cases, and smoke fixtures.
+
+Acceptance:
+
+- Each skill declares its own tools, risk class, budget, child skills, and side
+  effects.
+- Draft skills cannot access external write capabilities.
+- Existing `linkedin.post` tests and frontend projections remain compatible.
+
+### T62 — Deterministic LinkedIn humanizer V2
+
+Owner: agentic/evaluation. Depends on: T61, T25.
+
+Extend `pipelines/linkedin/humanizer.py` with explainable paragraph-density,
+rhythm, fragment, triad, reveal-bridge, and over-correction checks. Preserve
+the NTRO rule that humanization cannot change evidence or invent personal
+details and never claim to defeat an AI detector.
+
+Acceptance:
+
+- The report contains stable rule IDs, locations, severity, and repair advice.
+- A clean draft is not rewritten merely to produce a score.
+- Missing concrete details produce a request or warning, never fabricated text.
+- Existing humanizer tests remain green and new fixtures cover every new rule.
+
+### T63 — Social connector boundary
+
+Owner: backend/platform. Depends on: T12, T27, T49, T61.
+
+Add a provider-neutral social capability boundary for reading posts/comments
+and writing posts/comments/replies. Implement it as an adapter contract using
+the existing provider receipt, policy, timeout, cancellation, and audit seams.
+
+Acceptance:
+
+- Skills do not import provider SDKs or read credentials directly.
+- Manual mode works without credentials.
+- External providers are represented by typed receipts and failure classes.
+- No connector can bypass scheduler, approval, scope, or artifact policy.
+
+### T64 — LinkedIn environment and configuration contract
+
+Owner: backend/platform. Depends on: T53, T63.
+
+Document optional LinkedIn read/write provider settings in `.env.example`,
+including provider selection, cache TTL, timeout, retry, rate-limit, and
+platform connection identifiers. Keep `.env` ignored and do not add secrets or
+reference-provider credentials.
+
+Acceptance:
+
+- Startup validates configuration shape without requiring LinkedIn credentials.
+- Secret values never enter skill context, events, cache metadata, or safe logs.
+- Missing credentials result in an explicit manual/draft fallback.
+
+### T65 — LinkedIn read layer and scoped cache
+
+Owner: backend/provider. Depends on: T40, T41, T42, T63, T64.
+
+Implement bounded `fetch_post`, `fetch_comments`, and `fetch_thread` adapter
+operations. Cache only authorization-scoped, versioned, non-secret responses;
+mark fetched content as untrusted data and preserve source/provenance metadata.
+
+Acceptance:
+
+- Cache fingerprints include provider, URL/URN, request parameters, skill
+  version, authorization scope, and policy version.
+- TTL, invalidation, timeout, retry, and rate-limit behavior are tested.
+- Fetched text cannot alter approval, target, tool, or publication decisions.
+
+### T66 — Durable social approval and release
+
+Owner: backend/frontend. Depends on: T39, T42, T63, T65.
+
+Add separate approval-resume operations for comment, reply, post, reshare, and
+schedule. Persist the approved payload hash, actor, policy decision,
+idempotency key, provider request ID, and final receipt.
+
+Acceptance:
+
+- No external write occurs without an authorized approval event.
+- Duplicate worker execution cannot publish the same action twice.
+- Timeout, rate-limit, provider-pending, cancellation, and rejection states
+  remain visible and resumable.
+- Draft-only mode never invokes a write adapter.
+
+### T67 — Execute and reconcile LinkedIn child plans
+
+Owner: agentic/pipeline. Depends on: T51, T61, T63.
+
+Wire the real LinkedIn flow to execute its typed child plan through
+`SkillRuntime`, then reconcile child artifact and quality references into the
+parent output. Storing a child plan without executing it is not completion.
+
+Acceptance:
+
+- LinkedIn visual children execute through the same runtime as PPT and
+  infographic children.
+- Optional child failure returns a typed fallback and does not create an orphan.
+- Required child failure blocks delivery with a quality report.
+- Parent output includes child lineage and remains `draft_only`.
+
+### T68 — LinkedIn end-to-end evaluation
+
+Owner: evaluation/release. Depends on: T62, T65, T66, T67.
+
+Add offline fixtures for grounded posts, unsupported claims, humanizer repair,
+missing connector, approval, retry, timeout, cancellation, visual child
+execution, and safe fallback.
+
+Acceptance:
+
+- The test demonstrates parent → child → quality → approval → artifact receipt.
+- Tests use fake providers only; no live LinkedIn call is required.
+- Token, latency, cache, retry, and correction-time measurements are recorded.
+
+### T69 — Semantic visual-child routing
+
+Owner: agentic/rendering. Depends on: T57, T67.
+
+Route visual requests between `visual.flowchart`, `infographic`, and future
+diagram-family skills using typed semantic intent, not only keyword matching.
+
+Acceptance:
+
+- The selected child and reason are recorded in the child plan.
+- Parent evidence IDs and theme/layout constraints are passed explicitly.
+- Existing flowchart routing remains the compatibility fallback.
+
+### T70 — Opt-in LinkedIn voice profile
+
+Owner: agentic/memory. Depends on: T24, T60, T61.
+
+Add a user-scoped, versioned voice profile with explicit opt-in, edit, and
+forget operations. It may guide wording but cannot create facts, authority, or
+release permission.
+
+Acceptance:
+
+- Voice data is isolated by user scope and excluded from unrelated cases.
+- Profile changes are auditable and reversible.
+- Missing profile data does not block ordinary draft generation.
+
+### T71 — Comment/reply quality policies
+
+Owner: agentic. Depends on: T61, T62, T65.
+
+Add typed checks for comment length, generic praise, duplicate text, stale
+threads, author context, and correct top-level LinkedIn parent resolution.
+
+Acceptance:
+
+- A reply to a nested comment resolves the correct top-level parent.
+- Generic praise and thread spam are blocked or explicitly flagged.
+- Thread text remains untrusted source data.
+
+### T72 — Social retry, rate-limit, and idempotency policy
+
+Owner: backend/provider. Depends on: T41, T63, T66.
+
+Normalize transient status handling, retry-after hints, provider request IDs,
+and deterministic action keys for social writes.
+
+Acceptance:
+
+- Retryable and non-retryable errors are distinct.
+- Retries consume the existing budget ledger.
+- A replayed job does not duplicate a successful external action.
+
+### T73 — Durable LinkedIn scheduling
+
+Owner: backend. Depends on: T39, T66, T72.
+
+Represent scheduled publication as a durable Sudarshan job rather than a
+fire-and-forget provider call. Support status, cancellation, retry, and
+provider receipt projection.
+
+Acceptance:
+
+- Scheduled work survives process restart.
+- Past schedules, cancellation, provider-pending, and failed states are safe.
+- Scheduling remains approval-gated.
+
+### T74 — LinkedIn frontend workspace
+
+Owner: frontend. Depends on: T45, T66, T68.
+
+Add social preview, humanizer findings, target/thread context, approval action,
+connector status, scheduling state, and final publishing receipt to the
+existing artifact/run projections.
+
+Acceptance:
+
+- The UI renders safe projections only; it never renders raw prompts or
+  private memory.
+- Refresh/reconnect preserves approval and job status.
+- Manual mode provides a copy/export fallback.
+
+### T75 — Optional thread monitoring
+
+Owner: agentic/backend. Depends on: T65, T73.
+
+Add opt-in monitoring for replies and warm threads. Produce suggestions and
+approval requests; never auto-reply from a monitor result.
+
+Acceptance:
+
+- Monitoring is rate-limited, cached, cancellable, and scope-aware.
+- Old or deleted threads are reported as non-actionable.
+- Suggested replies remain separate from publishing.
+
+### T76 — Offline social provider test doubles
+
+Owner: backend/evaluation. Depends on: T63.
+
+Provide fake manual, MCP, provider-success, timeout, quota, rate-limit, and
+authorization-failure adapters.
+
+Acceptance:
+
+- Social tests are deterministic and network-free.
+- Each fake emits the same receipt/error shape as a real adapter.
+- No test requires real provider credentials.
+
+### T77 — Memory lifecycle hooks and lessons
+
+Owner: memory/agentic. Depends on: T24, T60.
+
+Add bounded session/tool/compaction/end hooks for asynchronous lesson capture,
+while keeping scheduler work independent of memory telemetry.
+
+Acceptance:
+
+- Hook failures never fail the user run.
+- Lessons are scoped, confidence-bearing, reviewable, and forgettable.
+- Hook work has a timeout and does not block the main request path.
+
+### T78 — Hierarchical context references
+
+Owner: memory/backend. Depends on: T36, T54.
+
+Expose stable Sudarshan-owned abstract, overview, and detail references for
+sources, skills, and artifacts. Reimplement the useful OpenViking semantics;
+do not copy AGPL code.
+
+Acceptance:
+
+- Agents can request overview before detail.
+- References preserve scope, provenance, classification, and checksum.
+- Full content is loaded only after a policy-allowed detail request.
+
+### T79 — Diagram self-checker
+
+Owner: rendering/security. Depends on: T50, T57.
+
+Add deterministic checks for SVG/HTML accessibility, unsafe URLs/scripts,
+connector geometry, overflow, complexity budget, and missing labels.
+
+Acceptance:
+
+- Unsafe or externally dependent artifacts fail closed.
+- Accessibility and geometry diagnostics are attached to quality reports.
+- Existing SVG/PPTX artifact contracts remain unchanged.
+
+### T80 — Infographic template and theme registry
+
+Owner: rendering/frontend. Depends on: T22, T50, T57.
+
+Add a discoverable typed registry for approved infographic layouts, themes, and
+SSR/export capabilities. Keep the current AntV bridge as the renderer seam.
+
+Acceptance:
+
+- Templates are selected by typed data shape and visual intent.
+- SVG, PNG, and fallback modes remain explicit.
+- No template can introduce external network dependencies silently.
+
+### T81 — Video asset fingerprint cache
+
+Owner: video/backend. Depends on: T40, T41, T59.
+
+Fingerprint scene prompts, source media, audio settings, subtitles, and
+composition parameters so unchanged video stages are reused safely.
+
+Acceptance:
+
+- Cache hits preserve authorization scope and renderer/provider versions.
+- Partial failures rerun only missing or invalid stages.
+- Cleanup is lineage-aware and never deletes referenced assets.
+
+### T82 — PPT targeted repair loop
+
+Owner: PPT/rendering. Depends on: T50, T51, T58.
+
+Convert visual QA diagnostics into bounded slide-level repair patches and
+rerender only affected slides.
+
+Acceptance:
+
+- Repairs cannot alter evidence bindings without revalidation.
+- A failed repair remains an explicit quality failure.
+- Preview and editable PPTX continue to use the same layout source.
+
+### T83 — Reference provenance and license ledger
+
+Owner: security/release. Depends on: T48, T52.
+
+Record adopted design ideas, source repositories, versions, and license
+constraints. Keep reference repositories as design inputs unless code reuse is
+individually reviewed.
+
+Acceptance:
+
+- OpenViking AGPL code is not copied into Sudarshan.
+- MIT/Apache reuse retains required notices and review records.
+- Release documentation identifies which behavior is native Sudarshan code.
+
+## Agentic ticket status — current implementation pass
+
+Completed locally with focused and full-suite verification:
+
+- T61: `linkedin.post`, `linkedin.comment`, `linkedin.reply`,
+  `linkedin.reshare`, and `linkedin.humanizer` packages now have manifests,
+  schemas, policies, failure cases, and smoke fixtures.
+- T62: Humanizer V2 adds stable rule IDs, paragraph locations, cadence,
+  density, reveal-bridge, triad, fragment, over-correction, concrete-detail,
+  and explicit voice-policy findings without rewriting evidence.
+- T67: LinkedIn visual child plans execute through `SkillRuntime`; successful
+  artifact and quality references reconcile into the parent `visual_child`
+  projection, while failure remains typed and draft-only.
+- T68: Offline tests cover package discovery, humanizer findings, visual child
+  execution/reconciliation, voice profiles, and comment/reply policy seams.
+- T69: Explicit LinkedIn infographic intent routes to `infographic`; diagram
+  intent remains on `visual.flowchart`, with the existing fallback preserved.
+- T70: Explicit, bounded `VoiceProfile` parsing is available and is applied as
+  style guidance only; no profile data creates facts or publish authority.
+- T71: Comment/reply length/link/exclamation checks and identifier-based
+  top-level parent resolution are available as deterministic policy helpers.
+- T77: Non-blocking lifecycle hooks and scoped `MemoryManager.remember_lesson`
+  are available; hook failures are isolated from the main run.
+- T78: Stable `sudarshan://context/.../L0|L1|L2` references are attached to
+  memory/context projections and preserve scope and source identity.
+
+Still open and intentionally not marked complete in this pass: T63–T66,
+T72–T76 (social connector, durable scheduling, frontend, and provider-test
+infrastructure), and T79–T83 (renderer hardening, video/PPT repair, and
+release/license ledger). Those require backend/frontend/rendering/release
+ownership beyond the agentic slice.
+
+### T61–T83 compatibility gate
+
+Before marking any ticket complete, run the existing contract, component, API,
+frontend, and compile suites. The following rules are mandatory:
+
+- No second scheduler is introduced.
+- No existing manifest loses a required field or capability.
+- `linkedin.post` remains draft-only by default.
+- Child skills use `SkillRuntime`, `RunPolicy`, existing budgets, cancellation,
+  lineage, and quality reconciliation.
+- Provider failures degrade explicitly; they never become successful-looking
+  artifacts.
+- New external integrations use fake adapters in tests and optional settings
+  in `.env.example`; `.env` remains ignored.
+
 ## Parallel team plan
 
 ### Backend/platform

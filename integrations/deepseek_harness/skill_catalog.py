@@ -127,6 +127,10 @@ def canonical_skill_id(value: str) -> str:
         "ppt": "presentation.case-brief",
         "video": "video.storyboard",
         "linkedin_post": "linkedin.post",
+        "linkedin_comment": "linkedin.comment",
+        "linkedin_reply": "linkedin.reply",
+        "linkedin_reshare": "linkedin.reshare",
+        "linkedin_humanizer": "linkedin.humanizer",
         "executive_summary": "executive.summary",
         "advisory": "advisory.brief",
     }

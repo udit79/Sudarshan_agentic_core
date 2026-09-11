@@ -1,0 +1,1 @@
+{"case_id":"attributed-reshare","input":{"source_reference":"urn:li:share:1"},"assertions":["draft_only","attribution_preserved"]}

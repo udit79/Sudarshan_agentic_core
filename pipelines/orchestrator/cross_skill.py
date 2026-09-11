@@ -47,14 +47,15 @@ def build_child_plan(
 
     elif parent in {"linkedin", "linkedin.post", "linkedin_post"}:
         image = dict(payload.get("image") or {})
-        visual = dict(payload.get("visual_child") or {})
         if image.get("requested") and image.get("image_type") in {"diagram", "infographic"}:
-            specs.append(_flowchart_spec(
+            child_skill = select_visual_child_skill(image)
+            specs.append(_visual_spec(
                 f"{parent_run_id}:linkedin:visual",
                 parent_run_id,
                 parent_node_id,
                 "Create the optional LinkedIn visual from the approved draft claims.",
                 _sequence_graph("linkedin", payload.get("title", "LinkedIn visual")),
+                skill_id=child_skill,
                 required=False,
             ))
 
@@ -82,6 +83,13 @@ def build_child_plan(
             ))
 
     return validate_child_plan(specs)
+
+
+def select_visual_child_skill(image: Mapping[str, Any]) -> str:
+    """Choose a specialist by explicit visual intent, never by model guesswork."""
+
+    image_type = str(image.get("image_type", "auto")).strip().lower()
+    return "infographic" if image_type == "infographic" else "visual.flowchart"
 
 
 def execute_child_plan(
@@ -112,13 +120,27 @@ def execute_child_plan(
 
 
 def _flowchart_spec(child_id: str, run_id: str, node_id: str, query: str, graph: dict[str, Any], *, required: bool) -> ChildTaskSpec:
+    return _visual_spec(child_id, run_id, node_id, query, graph, skill_id="visual.flowchart", required=required)
+
+
+def _visual_spec(
+    child_id: str,
+    run_id: str,
+    node_id: str,
+    query: str,
+    graph: dict[str, Any],
+    *,
+    skill_id: str,
+    required: bool,
+) -> ChildTaskSpec:
+    output_types = ["svg", "png"] if skill_id == "infographic" else ["diagram.ir", "svg", "pptx"]
     return ChildTaskSpec(
         child_id=child_id,
         parent_run_id=run_id,
         parent_node_id=node_id,
-        skill_id="visual.flowchart",
+        skill_id=skill_id,
         input_payload={"query": query, "flowchart": graph},
-        output_artifact_types=["diagram.ir", "svg", "pptx"],
+        output_artifact_types=output_types,
         required=required,
         fallback="text-only-or-timeline-fallback",
         policy=RunPolicy(max_model_tokens=1500, max_wall_time_ms=120_000, max_tool_calls=8, max_parallel_children=1),
@@ -150,4 +172,4 @@ def _scene_graph(scenes: list[Any]) -> dict[str, Any]:
     return {"visual_id": "storyboard-timeline", "alt_text": "Video storyboard timeline", "direction": "left-to-right", "nodes": nodes, "edges": edges}
 
 
-__all__ = ["build_child_plan", "execute_child_plan"]
+__all__ = ["build_child_plan", "execute_child_plan", "select_visual_child_skill"]

@@ -1,0 +1,17 @@
+{
+  "skill_id": "linkedin.reshare",
+  "version": "1.0.0",
+  "purpose": "Prepare a grounded LinkedIn reshare draft with attribution and explicit approval.",
+  "input_schema": "LinkedInReshareRequest",
+  "output_artifact_types": ["linkedin-reshare-draft"],
+  "required_capabilities": ["write.social"],
+  "allowed_tools": ["memory.recall", "artifact.write"],
+  "quality_gates": ["schema", "attribution", "approval-boundary"],
+  "risk_class": "RESTRICTED",
+  "budget_policy": {"max_model_tokens": 2500, "max_wall_time_ms": 120000, "max_parallel_children": 1},
+  "coordination": {"pipeline": "linkedin_reshare", "children": []},
+  "context_policy": {"default_level": "L1", "max_level": "L2"},
+  "references": {"load_order": ["SKILL.md"], "max_chars": 4000},
+  "renderers": [],
+  "checkers": ["schema", "attribution", "approval"]
+}

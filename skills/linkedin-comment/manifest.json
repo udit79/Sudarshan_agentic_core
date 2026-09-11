@@ -1,0 +1,17 @@
+{
+  "skill_id": "linkedin.comment",
+  "version": "1.0.0",
+  "purpose": "Draft a grounded LinkedIn comment with concise, non-promotional quality checks.",
+  "input_schema": "LinkedInCommentRequest",
+  "output_artifact_types": ["linkedin-comment-draft"],
+  "required_capabilities": ["write.social"],
+  "allowed_tools": ["memory.recall", "artifact.write"],
+  "quality_gates": ["schema", "evidence", "comment-policy", "approval-boundary"],
+  "risk_class": "RESTRICTED",
+  "budget_policy": {"max_model_tokens": 2500, "max_wall_time_ms": 120000, "max_parallel_children": 1},
+  "coordination": {"pipeline": "linkedin_comment", "children": []},
+  "context_policy": {"default_level": "L1", "max_level": "L2"},
+  "references": {"load_order": ["SKILL.md"], "max_chars": 4000},
+  "renderers": [],
+  "checkers": ["schema", "evidence", "comment-policy"]
+}

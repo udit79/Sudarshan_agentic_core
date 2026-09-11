@@ -6,6 +6,8 @@ from memory.injector import MemoryInjector
 from memory.memory_manager import MemoryManager, RecallResponse, RememberReceipt, coerce_knowledge_unit
 from memory.memory_store import MemoryStore
 from memory.lifecycle import MemoryEvent, MemoryEventLog, MemoryEventType
+from memory.hooks import MemoryLifecycleHooks
+from memory.context_refs import ContextReference, build_context_uri, reference_for_memory
 from memory.evaluation import MemoryEvaluationReport, MemoryObservation, evaluate_memory
 from memory.model import KnowledgeUnit, Memory, MemoryLifecycle, MemoryType, Scope, ScopeType, Source, SourceType
 from memory.scope_policy import AccessContext
@@ -15,6 +17,7 @@ __all__ = [
     "ContextBuildTrace", "ContextBuilder", "ContextLevel", "KnowledgeUnit", "Memory", "MemoryInjector", "MemoryLifecycle", "MemoryManager",
     "detect_prompt_injection",
     "MemoryStore", "MemoryType", "MemoryEvent", "MemoryEventLog", "MemoryEventType",
+    "MemoryLifecycleHooks", "ContextReference", "build_context_uri", "reference_for_memory",
     "MemoryEvaluationReport", "MemoryObservation", "evaluate_memory", "RecallResponse", "RememberReceipt", "RetrievedMemory",
     "Scope", "ScopeType", "Source", "SourceType", "coerce_knowledge_unit",
 ]

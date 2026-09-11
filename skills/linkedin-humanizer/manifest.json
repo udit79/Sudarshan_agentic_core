@@ -1,0 +1,17 @@
+{
+  "skill_id": "linkedin.humanizer",
+  "version": "2.0.0",
+  "purpose": "Run deterministic, explainable humanizer and voice-policy checks over a LinkedIn draft.",
+  "input_schema": "LinkedInDraft",
+  "output_artifact_types": ["humanizer-report"],
+  "required_capabilities": ["write.social"],
+  "allowed_tools": ["artifact.write"],
+  "quality_gates": ["deterministic-rules", "voice-policy"],
+  "risk_class": "RESTRICTED",
+  "budget_policy": {"max_model_tokens": 1000, "max_wall_time_ms": 30000, "max_parallel_children": 1},
+  "coordination": {"pipeline": "linkedin_humanizer", "children": []},
+  "context_policy": {"default_level": "L0", "max_level": "L1"},
+  "references": {"load_order": ["SKILL.md"], "max_chars": 4000},
+  "renderers": [],
+  "checkers": ["deterministic-rules", "voice-policy"]
+}

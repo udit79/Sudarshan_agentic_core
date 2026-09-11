@@ -4,6 +4,7 @@ __pycache__/
 
 # Pytest
 .pytest_cache/
+.pytest_cache_local/
 .pytest-tmp*/
 
 # Coverage

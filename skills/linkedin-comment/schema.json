@@ -1,0 +1,1 @@
+{"input":{"type":"LinkedInCommentRequest"},"output":{"type":"LinkedInCommentDraft","required":["comment","source_references","approval_required"]}}

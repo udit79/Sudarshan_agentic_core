@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MemoryEventType = Literal[
     "created", "superseded", "retracted", "forgotten", "expired",
-    "pending_review", "promoted",
+    "pending_review", "promoted", "lesson_recorded", "profile_updated",
 ]
 
 

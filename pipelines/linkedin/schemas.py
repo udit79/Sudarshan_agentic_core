@@ -64,10 +64,21 @@ class HumanizerIssue(BaseModel):
         "overclaim",
         "emoji_density",
         "fragment_stack",
+        "rhythm",
+        "density",
+        "reveal_bridge",
+        "triad",
+        "overcorrection",
+        "concrete_detail",
+        "voice",
+        "thread_context",
         "other",
     ]
     message: str = Field(min_length=1)
     severity: Literal["info", "warn", "block"] = "warn"
+    rule_id: str | None = None
+    location: str | None = None
+    evidence: str | None = None
 
 
 class HumanizerReport(BaseModel):
@@ -80,6 +91,8 @@ class HumanizerReport(BaseModel):
     checks: list[str] = Field(default_factory=list)
     issues: list[HumanizerIssue] = Field(default_factory=list)
     revision_suggestions: list[str] = Field(default_factory=list)
+    version: str = "2.0"
+    diff_summary: list[str] = Field(default_factory=list)
 
 
 class LinkedInVisualChildRef(BaseModel):

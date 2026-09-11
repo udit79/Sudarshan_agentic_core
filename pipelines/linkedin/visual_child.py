@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pipelines.linkedin.schemas import LinkedInPostOutput
+from pipelines.orchestrator.cross_skill import select_visual_child_skill
 from pipelines.orchestrator.contracts import RunPolicy, SkillCall
 
 
@@ -17,11 +18,12 @@ def build_visual_child_call(
 
     if not output.image.requested or output.image.image_type not in {"diagram", "infographic"}:
         return None
+    skill_id = select_visual_child_skill(output.image.model_dump(mode="json"))
     return SkillCall(
-        skill_call_id=f"{parent_run_id}:visual-flowchart",
+        skill_call_id=f"{parent_run_id}:visual-{skill_id.replace('.', '-')}",
         parent_run_id=parent_run_id,
         parent_node_id=parent_node_id,
-        skill_id="visual.flowchart",
+        skill_id=skill_id,
         skill_version=skill_version,
         input_payload={
             "purpose": "Create an editable, case-grounded visual for a LinkedIn draft.",
