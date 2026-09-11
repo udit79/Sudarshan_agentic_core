@@ -912,6 +912,59 @@ available, and all diagrams still need evidence lineage and quality approval
 before delivery. PNG/browser regression, edit/approval projection, and motion
 remain explicitly open.
 
+### Native Harness integration track — H-01–H-08
+
+This track starts after the current backend and frontend contracts are stable.
+It keeps Sudarshan as the application authority and treats DeepSeek Harness as
+an optional native runtime. The same MCP boundary remains available to external
+Harness clients.
+
+| Ticket | Scope | Status |
+| --- | --- | --- |
+| H-01 | Allow-listed native Harness/MCP correlation IDs in safe run projections | Complete locally |
+| H-02 | Define the replaceable Harness adapter boundary without changing execution ownership | Complete locally |
+| H-03 | Add the single `Sudarshan Artifact Agent` Cordis production profile | Complete locally |
+| H-04 | Add lazy MCP skill/tool discovery to control schema and token overhead | Complete locally |
+| H-05 | Connect Harness trajectory/events to the live OperationsBridge | Complete locally |
+| H-06 | Add controlled sandbox adapter for rendering and validation | Complete locally; staging runtime validation open |
+| H-07 | Add native-versus-external MCP lifecycle parity tests | Complete locally |
+| H-08 | Benchmark cost, latency, quality, recovery, and safe-log behavior | Complete locally |
+
+H-01 adds only the safe `session_id`, `message_id`, and `tool_call_id` fields;
+it does not expose prompts, memory, credentials, or hidden reasoning. H-02 now
+routes every MCP operation through an allow-listed adapter while preserving the
+existing application service as the authority. H-03 adds a checked-in
+`sudarshan-artifact-agent` preset root, disables shipped/user coding presets,
+keeps compaction and user clarification support, and hides generic Harness
+configuration/delegation controls in the production web overlay. H-04 adds a
+native `artifact` MCP tool profile: lifecycle, skill discovery/dispatch, and
+artifact retrieval remain visible while evidence, memory-maintenance, and
+operational tools stay behind the backend boundary. External MCP clients keep
+the backwards-compatible `full` profile. H-05 now installs a typed live bridge
+in the native operations plugin: it binds a Harness session to a durable run,
+reads the safe status/artifact projection, refreshes from run-events SSE, and
+opens only stable artifact routes. H-06 adds a shared sandbox contract plus a
+deployment-selected adapter for renderer/validator subprocesses. Local
+execution is an explicit development opt-in; the production path builds a
+shell-free, network-disabled, read-only-root container command with
+capability, process, memory, CPU, timeout, output, and workspace limits. H-07 compares
+lifecycle results through the native MCP facade and the replaceable adapter.
+H-08 provides a dependency-free benchmark with schema cost, local latency,
+renderer/sandbox quality, recovery, and safe-log checks. Production should
+mount one governed Sudarshan profile and keep the backend contracts Harness
+neutral.
+
+#### H-series readiness decision
+
+The H-series implementation scope is complete locally; there is no remaining
+H-series coding ticket. This means the native Harness profile, replaceable MCP
+adapter, live operations projection, sandbox contract, parity checks, and
+offline benchmark are implemented and tested in the repository. It does not
+mean production approval: H-06 still needs a live container-runtime drill,
+H-05 needs authenticated staging SSE/preview evidence, and H-08 needs the
+staging latency, recovery, and real-artifact benchmark corpus. These are
+deployment and release gates, not missing agentic architecture.
+
 ### T61–T83 compatibility gate
 
 Before marking any ticket complete, run the existing contract, component, API,

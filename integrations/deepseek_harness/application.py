@@ -50,6 +50,7 @@ from pipelines.orchestrator import (
     RedisObservabilityStore,
     SkillCall,
     ChildTaskSpec,
+    HarnessCorrelation,
     SkillRuntime,
     SQLiteProgressSink,
     ObservableProgressSink,
@@ -955,6 +956,9 @@ class SudarshanApplication:
             artifact_count=artifact_count,
             child_count=len(responses),
             error_code=values.get("error_code"),
+            harness_correlation=HarnessCorrelation.from_metadata(
+                request.get("metadata", {})
+            ),
             telemetry=TelemetrySummary.model_validate({
                 key: value
                 for key, value in self.telemetry(
@@ -1008,6 +1012,7 @@ class SudarshanApplication:
                     "error": queue_state.get("error"),
                     "dead_letter": bool(queue_state.get("dead_letter", False)),
                     "skill_result": queue_state.get("skill_result"),
+                    "harness_correlation": queue_state.get("harness_correlation"),
                     "events": [],
                     "summary": summary.model_dump(mode="json"),
                     "telemetry": self.telemetry(run_id),
@@ -1029,6 +1034,11 @@ class SudarshanApplication:
             "clarification_required": values.get("clarification_required", False),
             "clarification_questions": values.get("clarification_questions", []),
             "error": values.get("error"),
+            "harness_correlation": (
+                summary.harness_correlation.model_dump(mode="json")
+                if summary.harness_correlation is not None
+                else None
+            ),
             "events": events,
             "summary": summary.model_dump(mode="json"),
             "telemetry": self.telemetry(run_id),
@@ -1080,9 +1090,17 @@ class SudarshanApplication:
     def health(self) -> dict[str, Any]:
         """Return system health for operational monitoring."""
         pipelines = self.list_pipelines()
+        cognee_backend = os.getenv("COGNEE_BACKEND", "cloud").strip().lower() or "cloud"
         return {
             "status": "ok",
             "memory_system": "connected",
+            "memory_backend": "cognee_cloud" if cognee_backend == "cloud" else "cognee_local_dev",
+            "memory_cloud_configured": bool(
+                cognee_backend == "cloud"
+                and os.getenv("COGNEE_BASE_URL", "").strip()
+                and os.getenv("COGNEE_API_KEY", "").strip()
+                and os.getenv("COGNEE_TENANT_ID", "").strip()
+            ),
             "registered_pipelines": len(pipelines),
             "pipelines": pipelines,
             "routing_engine": "langgraph",

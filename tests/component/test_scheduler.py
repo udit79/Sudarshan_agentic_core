@@ -73,6 +73,33 @@ def test_scheduler_persists_admission_and_rejects_run_id_reuse(tmp_path) -> None
         scheduler.close()
 
 
+def test_scheduler_projects_harness_correlation_ids(tmp_path) -> None:
+    def execute(payload, *, operator_id):
+        return {"status": "succeeded"}
+
+    scheduler = LocalRunScheduler(execute, db_path=tmp_path / "queue.db", max_workers=1)
+    try:
+        request = _payload("task-harness")
+        request["metadata"] = {
+            "run_id": "run-harness",
+            "harness_correlation": {
+                "session_id": "session-1",
+                "message_id": "message-1",
+                "tool_call_id": "tool-1",
+            },
+        }
+        scheduler.submit("run-harness", request, operator_id="operator-1")
+        state = _wait_for(scheduler, "run-harness", {"succeeded"})
+
+        assert state["harness_correlation"] == {
+            "session_id": "session-1",
+            "message_id": "message-1",
+            "tool_call_id": "tool-1",
+        }
+    finally:
+        scheduler.close()
+
+
 def test_scheduler_ingestion_identity_ignores_private_staging_path(tmp_path) -> None:
     calls: list[str] = []
 

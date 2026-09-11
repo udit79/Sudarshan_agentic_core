@@ -13,6 +13,7 @@ from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from pipelines.common.correlation import HarnessCorrelation
 
 RunStatus = Literal[
     "accepted",
@@ -118,6 +119,7 @@ class RunSummary(ContractModel):
     child_count: int = Field(default=0, ge=0)
     error_code: str | None = None
     telemetry: TelemetrySummary = Field(default_factory=TelemetrySummary)
+    harness_correlation: HarnessCorrelation | None = None
     created_at: str = Field(default_factory=_utc_now)
     updated_at: str = Field(default_factory=_utc_now)
 

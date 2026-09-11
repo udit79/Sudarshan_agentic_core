@@ -222,8 +222,8 @@
       name: '@deepseek-ai/dsh-experimental-client-ui-sudarshan'
 
     # Safe agentic-system projections in the native Harness details drawer.
-    # The panel is session-scoped and fixture-backed until the typed backend
-    # projection/SSE adapter is connected.
+    # The plugin installs the typed backend projection/SSE bridge and keeps a
+    # labelled fixture only as an explicit offline fallback.
     - id: ui-sudarshan-operations
       name: '@deepseek-ai/dsh-experimental-client-ui-sudarshan-operations'
 

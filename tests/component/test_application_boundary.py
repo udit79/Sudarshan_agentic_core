@@ -61,6 +61,24 @@ def test_harness_tool_schemas_are_external_client_compatible() -> None:
     }
 
 
+def test_harness_adapter_allows_only_public_application_operations() -> None:
+    from integrations.deepseek_harness.adapter import SudarshanHarnessAdapter
+
+    class FakeApplication:
+        def list_pipelines(self):
+            return ["presentation"]
+
+    adapter = SudarshanHarnessAdapter(lambda: FakeApplication())
+
+    assert adapter.call("list_pipelines") == ["presentation"]
+    try:
+        adapter.call("_private_operation")  # type: ignore[arg-type]
+    except ValueError as exc:
+        assert "unsupported Harness operation" in str(exc)
+    else:
+        raise AssertionError("private application operations must not cross the adapter")
+
+
 def test_video_package_compiles_storyboard_into_provider_options() -> None:
     package = VideoPackage.model_validate(
         {
@@ -160,6 +178,56 @@ def test_application_projects_typed_events_and_run_summary() -> None:
     assert summary.skill_id == "presentation.case-brief"
     assert summary.skill_version == "2.0.0"
     assert summary.progress == 20
+
+
+def test_application_projects_safe_harness_correlation_ids() -> None:
+    application = object.__new__(SudarshanApplication)
+    application.progress_sink = InMemoryProgressSink()
+    application._run_contexts = {}
+    summary = application._run_summary(
+        {
+            "run_id": "run-harness",
+            "task_id": "task-harness",
+            "case_id": "case-harness",
+            "pipeline": "presentation",
+            "status": "queued",
+            "request": {
+                "case_id": "case-harness",
+                "task_id": "task-harness",
+                "metadata": {
+                    "harness_correlation": {
+                        "session_id": "session-1",
+                        "message_id": "message-1",
+                        "tool_call_id": "tool-1",
+                    },
+                },
+            },
+            "responses": {},
+        },
+        [],
+    )
+
+    assert summary.harness_correlation is not None
+    assert summary.harness_correlation.session_id == "session-1"
+    assert summary.harness_correlation.message_id == "message-1"
+    assert summary.harness_correlation.tool_call_id == "tool-1"
+
+
+def test_harness_correlation_does_not_expose_arbitrary_metadata() -> None:
+    from pipelines.orchestrator.contracts import HarnessCorrelation
+
+    correlation = HarnessCorrelation.from_metadata({
+        "harness_session_id": "session-flat",
+        "api_key": "must-not-project",
+        "prompt": "must-not-project",
+    })
+
+    assert correlation is not None
+    assert correlation.model_dump(mode="json") == {
+        "session_id": "session-flat",
+        "message_id": None,
+        "tool_call_id": None,
+    }
 
 
 def test_health_exposes_shared_control_plane_boundary() -> None:

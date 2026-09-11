@@ -79,7 +79,7 @@ python -m http.server 3000 --directory frontend
 
 | Group | Variables | Purpose |
 | --- | --- | --- |
-| Cognee | COGNEE_BASE_URL, COGNEE_API_KEY, COGNEE_TENANT_ID, COGNEE_DATASET_NAME | memory backend |
+| Cognee Cloud | COGNEE_BACKEND=cloud, COGNEE_BASE_URL, COGNEE_API_KEY, COGNEE_TENANT_ID, COGNEE_DATASET_NAME | tenant-scoped memory backend; local mode is explicit development-only |
 | Models | CREWAI_MODEL, CREWAI_FAST_MODEL, role-specific model variables | strong/fast CrewAI routing |
 | OpenAI media | OPENAI_API_KEY, OPENAI_IMAGE_MODEL, OPENAI_TTS_MODEL, OPENAI_TTS_VOICE | image, speech, video assets |
 | Python API | SUDARSHAN_API_HOST, SUDARSHAN_API_PORT, SUDARSHAN_CORS_ORIGINS | orchestrator service |
@@ -87,6 +87,7 @@ python -m http.server 3000 --directory frontend
 | Shared control plane | SUDARSHAN_CONTROL_PLANE, SUDARSHAN_REDIS_URL, SUDARSHAN_CONTROL_PLANE_PREFIX | Redis Stream discovery, leases, fencing, idempotency, progress replay, DAG state, and ingestion budgets |
 | Object storage | SUDARSHAN_OBJECT_STORE_MODE, SUDARSHAN_OBJECT_STORE_ROOT | restart-safe source/artifact copies and metadata catalog |
 | Observability | SUDARSHAN_OBSERVABILITY_DB_PATH, SUDARSHAN_OBSERVABILITY_RETENTION_SECONDS, SUDARSHAN_TELEMETRY_ACCESS_LEVEL | safe telemetry collector, retention, and dashboard clearance |
+| Sandbox | SUDARSHAN_SANDBOX_MODE, SUDARSHAN_SANDBOX_RUNTIME, SUDARSHAN_SANDBOX_CONTAINER_IMAGE, SUDARSHAN_ALLOW_LOCAL_SANDBOX | container-backed renderer/validator boundary; local execution is explicit development-only opt-in |
 | Gateway | MONGODB_URI, MONGODB_DB_NAME, PYTHON_API_BASE_URL, PYTHON_API_TIMEOUT_MS, PYTHON_INGEST_TIMEOUT_MS | browser-facing backend and Python request/upload timeouts |
 | Google OAuth | GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALLBACK_URL | sign-in |
 | Browser security | JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, COOKIE_SECURE, CORS_ORIGINS | sessions and origin policy |

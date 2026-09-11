@@ -2,6 +2,48 @@
 
 This guide is the execution companion to [Sudarshan 2.0 Full Execution Plan](sudarshan-2.0-full-execution-plan.md). It defines how the frontend, backend, agentic, rendering, memory, and evaluation teams can work in parallel on the `Sudarshan2.0` branch.
 
+## 0. Post-H-series handoff
+
+The H-series implementation is complete locally. H-01 through H-08 now cover
+the native Harness profile, replaceable MCP adapter, skill discovery profile,
+live OperationsBridge projection, sandbox contract, lifecycle parity tests,
+and the offline cost/latency/quality benchmark. There is no remaining
+H-series architecture rewrite for the agentic team.
+
+This is a local implementation completion, not production approval. The open
+work is deployment evidence and product integration:
+
+| Lane | Continue with | Do not redo |
+|---|---|---|
+| Agentic/Harness | T51 real planner wiring and one complete cross-skill DAG; T49 independent MCP/A2A staging proof; skill manifests, typed child plans, and evaluations | Do not replace LangGraph, CrewAI, Sudarshan lifecycle, or the native Harness adapter; do not edit vendored Harness core |
+| Backend/platform | T39–T46 and T48–T52 staging gates: shared control plane, object storage, receipts, sandbox runtime, external interop, visual QA, release/rollback | Do not create a second scheduler or make Harness session history the source of truth |
+| Frontend/native Harness | T45 execution monitor, artifact/evidence workspace, approvals, reconnect, audit-safe logs, and release views | Do not call Cognee, model providers, CrewAI, skill internals, or Harness internals directly from browser code |
+| Rendering/evaluation | T50 visual regression and human approval; PPT/video/infographic/diagram corpus and promotion thresholds | Do not change renderer contracts without fixtures and a compatibility review |
+
+Before starting work after the integration commit:
+
+1. Pull the committed baseline and create a short-lived branch from it.
+2. Read this guide, the [remaining-work plan](sudarshan-2.0-remaining-work-plan.md),
+   and the [frontend/backend matrix](frontend-backend-feature-matrix.md).
+3. Run the affected contract/component tests using a writable pytest root on
+   locked-down Windows:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m pytest -q --basetemp .pytest-tmp-team
+   ```
+
+4. Select one ticket, record its assumption in
+   `docs/sudarshan-2.0-assumptions.md`, and add or update its shared fixture
+   before changing a public field.
+5. Mark the ticket only as `Complete locally` until the required staging,
+   benchmark, security, or human-approval evidence exists.
+
+The source-of-truth rule is unchanged: Sudarshan owns identity, routing,
+budgets, scheduling, memory access, quality gates, cancellation, and artifact
+promotion. Harness, MCP, A2A, CrewAI, providers, and renderers are adapters.
+The frontend receives safe projections and artifact manifests; it never parses
+assistant text to infer execution state.
+
 ## 1. First vertical slice
 
 The first cycle should prove one complete path:

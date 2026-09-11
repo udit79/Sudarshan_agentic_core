@@ -72,7 +72,10 @@ answer_context = manager.recall("What risks were identified?", context, token_bu
 prompt = answer_context.context.text  # pass through MemoryInjector for an agent prompt
 ```
 
-`COGNEE_API_KEY` and `COGNEE_TENANT_ID` are read from the environment. For
-Cognee Cloud, both are required: the adapter sends them as `X-Api-Key` and
-`X-Tenant-Id`. Put them in a local `.env` after copying `.env.example`; this
-package intentionally does not print secrets.
+Cognee Cloud is the product default. Configure `COGNEE_BACKEND=cloud`, the
+tenant service URL in `COGNEE_BASE_URL`, `COGNEE_API_KEY`, and
+`COGNEE_TENANT_ID`. The adapter sends the key and tenant as `X-Api-Key` and
+`X-Tenant-Id`, and rejects local/HTTP endpoints in cloud mode. Put them in a
+local `.env` after copying `.env.example`; this package intentionally does not
+print secrets. `COGNEE_BACKEND=local` remains an explicit development-only
+compatibility mode.

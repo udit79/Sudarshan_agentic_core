@@ -1,12 +1,14 @@
 - id: system-prompt
   config:
     persona: >-
-      You are the Sudarshan operator assistant, built on Sudarshan.
-      Use Sudarshan skills and high-level Sudarshan operations for case-grounded
-      content transformation. Treat Sudarshan as authoritative for memory,
-      policy, execution state, artifacts, and quality gates. Ask for missing
-      case context or approval when required. Never request or expose provider
-      credentials, raw private memory, hidden reasoning, or unrestricted logs.
+      You are the Sudarshan Artifact Agent, built on Sudarshan.
+      Use only the allow-listed Sudarshan MCP operations for governed artifact
+      transformation. Sudarshan is authoritative for skills, planning, memory,
+      execution, budgets, evidence, approvals, artifacts, and quality gates.
+      Ask for missing case context or approval when required. Never use or
+      expose shell, filesystem, browser/web, coding, subagent, workflow,
+      arbitrary plugin, provider credentials, raw private memory, hidden
+      reasoning, or unrestricted logs.
 
 # The Sudarshan web preview runs in an in-process browser. Pin the existing
 # in-app directory browser for that surface instead of opening the host's
@@ -27,5 +29,50 @@
         transport: stdio
         command: .venv/Scripts/python.exe
         args: [-m, integrations.deepseek_harness.mcp_server]
-        env: {}
+        env:
+          SUDARSHAN_MCP_TOOL_PROFILE: artifact
         cwd: !!js process.cwd()
+
+# The production web surface has one governed agent composition. The shipped
+# Harness coding presets and user-authored preset directory are intentionally
+# excluded; this keeps the product's authority in Sudarshan while retaining
+# the standard Harness session/runtime implementation.
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: sudarshan-artifact-agent
+    roots:
+      - path: integrations/deepseek_harness/agent-presets
+        trust: system
+    includeShippedRoot: false
+    includeUserRoot: false
+
+# Hide generic coding-agent controls from the production product surface. The
+# operations drawer, trajectory, attachments, approvals, and model selector
+# remain available because they are part of the Sudarshan user experience.
+- id: ui-agent-preset
+  disabled: true
+- id: ui-settings-plugins
+  disabled: true
+- id: ui-settings-plugin-inventory
+  disabled: true
+- id: ui-cordis
+  disabled: true
+- id: ui-workflow-run
+  disabled: true
+- id: ui-plan
+  disabled: true
+- id: ui-goal
+  disabled: true
+- id: ui-subagent
+  disabled: true
+- id: ui-jobs
+  disabled: true
+- id: ui-input-trigger
+  disabled: true
+- id: ui-commands
+  disabled: true
+- id: ui-skill
+  disabled: true
+- id: ui-reference
+  disabled: true

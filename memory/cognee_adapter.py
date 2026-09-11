@@ -55,7 +55,14 @@ def load_env_file(path: str = ".env") -> None:
 
 @dataclass(frozen=True, slots=True)
 class CogneeConfig:
-    base_url: str = "http://localhost:8011"
+    """Explicit Cognee Cloud connection settings.
+
+    Local Cognee is retained only as an explicit development mode. Production
+    Sudarshan uses the tenant URL plus the API key and tenant ID headers.
+    """
+
+    backend: str = "cloud"
+    base_url: str = "https://your-tenant.aws.cognee.ai"
     api_key: str | None = None
     tenant_id: str | None = None
     dataset_name: str = "sudarshan_memory"
@@ -73,20 +80,36 @@ class CogneeConfig:
             except ValueError as exc:
                 raise ValueError(f"{name} must be numeric") from exc
 
+        backend = os.getenv("COGNEE_BACKEND", "cloud").strip().lower()
+        if backend not in {"cloud", "local"}:
+            raise ValueError("COGNEE_BACKEND must be cloud or local")
         # A slotted dataclass exposes fields on the class as descriptors, not
-        # their default values. Keep the environment fallbacks explicit here
-        # so ``from_env()`` also works before an instance is constructed.
-        base_url = os.getenv("COGNEE_BASE_URL", "http://localhost:8011").strip().rstrip("/")
+        # their default values. Keep environment fallbacks explicit here.
+        default_url = (
+            "https://your-tenant.aws.cognee.ai"
+            if backend == "cloud"
+            else "http://localhost:8011"
+        )
+        base_url = os.getenv("COGNEE_BASE_URL", default_url).strip().rstrip("/")
         dataset_name = os.getenv("COGNEE_DATASET_NAME", "sudarshan_memory").strip()
+        api_key = os.getenv("COGNEE_API_KEY") or None
         tenant_id = os.getenv("COGNEE_TENANT_ID") or None
         if not base_url or not dataset_name:
             raise ValueError("COGNEE_BASE_URL and COGNEE_DATASET_NAME must be non-empty")
         host = urlparse(base_url).hostname or ""
-        if host.endswith("cognee.ai") and not tenant_id:
-            raise ValueError("COGNEE_TENANT_ID is required for Cognee Cloud")
+        if backend == "cloud":
+            if urlparse(base_url).scheme != "https":
+                raise ValueError("Cognee Cloud requires an https COGNEE_BASE_URL")
+            if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
+                raise ValueError("Cognee Cloud cannot use a local COGNEE_BASE_URL")
+            if not api_key:
+                raise ValueError("COGNEE_API_KEY is required for Cognee Cloud")
+            if not tenant_id:
+                raise ValueError("COGNEE_TENANT_ID is required for Cognee Cloud")
         return cls(
+            backend=backend,
             base_url=base_url,
-            api_key=os.getenv("COGNEE_API_KEY") or None,
+            api_key=api_key,
             tenant_id=tenant_id,
             dataset_name=dataset_name,
             timeout_seconds=number("COGNEE_TIMEOUT_SECONDS", "30", float),

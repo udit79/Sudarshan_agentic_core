@@ -8,11 +8,12 @@ process and are never exposed as model tools.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from integrations.deepseek_harness.application import get_application
+from integrations.deepseek_harness.adapter import get_harness_adapter
 
 
 mcp = FastMCP(
@@ -33,6 +34,51 @@ mcp = FastMCP(
         "memory-provider credentials."
     ),
 )
+
+
+# The external MCP contract stays backwards-compatible with the complete
+# surface. Native Harness sessions use the smaller artifact profile so the
+# model does not pay for evidence, memory-maintenance, and operational schemas
+# that the Sudarshan backend performs behind the run boundary.
+MCP_TOOL_PROFILES: dict[str, frozenset[str] | None] = {
+    "full": None,
+    "artifact": frozenset(
+        {
+            "run_sudarshan",
+            "resume_sudarshan",
+            "cancel_sudarshan",
+            "get_sudarshan_status",
+            "get_sudarshan_artifact",
+            "start_sudarshan_run",
+            "wait_sudarshan",
+            "list_sudarshan_skills",
+            "get_sudarshan_skill",
+            "invoke_sudarshan_skill",
+            "start_sudarshan_skill",
+        }
+    ),
+}
+
+
+def _call(operation: str, *args: Any, **kwargs: Any) -> Any:
+    """Route MCP requests through the replaceable application boundary."""
+
+    return get_harness_adapter().call(operation, *args, **kwargs)  # type: ignore[arg-type]
+
+
+def configure_mcp_tool_profile(profile: str | None = None) -> str:
+    """Apply an allow-listed MCP tool profile before the server starts."""
+
+    selected = (profile or os.getenv("SUDARSHAN_MCP_TOOL_PROFILE", "full")).strip().lower()
+    allowed = MCP_TOOL_PROFILES.get(selected)
+    if selected not in MCP_TOOL_PROFILES:
+        choices = ", ".join(sorted(MCP_TOOL_PROFILES))
+        raise ValueError(f"Unknown SUDARSHAN_MCP_TOOL_PROFILE {selected!r}; choose {choices}")
+    if allowed is not None:
+        for tool in tuple(mcp._tool_manager.list_tools()):
+            if tool.name not in allowed:
+                mcp.remove_tool(tool.name)
+    return selected
 
 
 @mcp.tool(
@@ -74,7 +120,7 @@ def run_sudarshan(
         "revision_scope": revision_scope or [],
         "metadata": metadata or {},
     }
-    return get_application().run(payload)
+    return _call("run", payload)
 
 
 @mcp.tool(
@@ -91,7 +137,7 @@ def resume_sudarshan(
 ) -> dict[str, Any]:
     """Resume a durable LangGraph checkpoint without exposing raw memory."""
 
-    return get_application().resume(run_id, task_id, decision)
+    return _call("resume", run_id, task_id, decision)
 
 
 @mcp.tool(
@@ -101,7 +147,7 @@ def resume_sudarshan(
 def cancel_sudarshan(run_id: str, task_id: str) -> dict[str, str]:
     """Cancel an active or paused run and preserve its Task audit event."""
 
-    return get_application().cancel(run_id, task_id)
+    return _call("cancel", run_id, task_id)
 
 
 @mcp.tool(
@@ -114,7 +160,7 @@ def cancel_sudarshan(run_id: str, task_id: str) -> dict[str, str]:
 def get_sudarshan_status(run_id: str) -> dict[str, Any]:
     """Return the application status projection for one run."""
 
-    return get_application().status(run_id)
+    return _call("status", run_id)
 
 
 @mcp.tool(
@@ -124,13 +170,16 @@ def get_sudarshan_status(run_id: str) -> dict[str, Any]:
         "a generated artifact. Filesystem paths and raw artifact bytes are not returned."
     ),
 )
+
+
 def get_sudarshan_artifact(
     artifact_id: str,
     classification_level: str = "RESTRICTED",
 ) -> dict[str, Any]:
     """Read one integrity-checked artifact manifest through the application boundary."""
 
-    return get_application().get_artifact(
+    return _call(
+        "get_artifact",
         artifact_id,
         classification_level=classification_level,
     )
@@ -160,7 +209,8 @@ def start_sudarshan_run(
 ) -> dict[str, Any]:
     """Validate and enqueue an operation without blocking the Harness call."""
 
-    return get_application().submit(
+    return _call(
+        "submit",
         {
             "query": query,
             "user_id": user_id,
@@ -191,7 +241,8 @@ def wait_sudarshan(
 ) -> dict[str, Any]:
     """Return a safe status projection and only events after the cursor."""
 
-    return get_application().wait(
+    return _call(
+        "wait",
         run_id,
         timeout_ms=timeout_ms,
         after_sequence=after_sequence,
@@ -204,7 +255,7 @@ def wait_sudarshan(
 )
 def get_sudarshan_health() -> dict[str, Any]:
     """Operational health check."""
-    return get_application().health()
+    return _call("health")
 
 
 @mcp.tool(
@@ -212,7 +263,8 @@ def get_sudarshan_health() -> dict[str, Any]:
     description="Preview or execute safe retention cleanup for expired derived data.",
 )
 def cleanup_sudarshan_lifecycle(dry_run: bool = True, older_than_seconds: int = 86400) -> dict[str, Any]:
-    return get_application().cleanup_lifecycle(
+    return _call(
+        "cleanup_lifecycle",
         dry_run=dry_run,
         older_than_seconds=older_than_seconds,
     )
@@ -223,7 +275,7 @@ def cleanup_sudarshan_lifecycle(dry_run: bool = True, older_than_seconds: int = 
     description="Read safe token, tool, wall-time, cost, and concurrency budget counters for a skill run.",
 )
 def get_sudarshan_usage(run_id: str) -> dict[str, Any]:
-    return get_application().usage(run_id)
+    return _call("usage", run_id)
 
 
 @mcp.tool(
@@ -234,7 +286,7 @@ def get_sudarshan_usage(run_id: str) -> dict[str, Any]:
     ),
 )
 def list_sudarshan_skills() -> list[dict[str, Any]]:
-    return get_application().list_skills()
+    return _call("list_skills")
 
 
 @mcp.tool(
@@ -242,7 +294,7 @@ def list_sudarshan_skills() -> list[dict[str, Any]]:
     description="Get the versioned manifest and output contract for one Sudarshan skill.",
 )
 def get_sudarshan_skill(skill_id: str) -> dict[str, Any]:
-    return get_application().get_skill(skill_id)
+    return _call("get_skill", skill_id)
 
 
 @mcp.tool(
@@ -264,7 +316,8 @@ def invoke_sudarshan_skill(
     distribution: str = "Authorized NTRO personnel",
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return get_application().invoke_skill(
+    return _call(
+        "invoke_skill",
         {
             "skill_id": skill_id,
             "parent_run_id": parent_run_id,
@@ -298,7 +351,8 @@ def start_sudarshan_skill(
     distribution: str = "Authorized NTRO personnel",
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return get_application().submit_skill(
+    return _call(
+        "submit_skill",
         {
             "skill_id": skill_id,
             "query": query,
@@ -319,7 +373,7 @@ def start_sudarshan_skill(
 )
 def list_sudarshan_pipelines() -> list[str]:
     """Discover available pipelines."""
-    return get_application().list_pipelines()
+    return _call("list_pipelines")
 
 
 @mcp.tool(
@@ -328,7 +382,7 @@ def list_sudarshan_pipelines() -> list[str]:
 )
 def remember_sudarshan_context(user_id: str, case_id: str, context: str) -> str:
     """Store session memory."""
-    get_application().remember_context(user_id, case_id, context)
+    _call("remember_context", user_id, case_id, context)
     return "Session context saved successfully."
 
 
@@ -338,7 +392,7 @@ def remember_sudarshan_context(user_id: str, case_id: str, context: str) -> str:
 )
 def recall_sudarshan_context(user_id: str, case_id: str, query: str) -> str:
     """Recall session memory."""
-    return get_application().recall_session_context(user_id, case_id, query)
+    return _call("recall_session_context", user_id, case_id, query)
 
 
 @mcp.tool(
@@ -353,7 +407,8 @@ def search_sudarshan_text_evidence(
     top_k: int = 10,
     classification_level: str = "RESTRICTED",
 ) -> list[dict[str, Any]]:
-    return get_application().search_text_evidence(
+    return _call(
+        "search_text_evidence",
         query,
         user_id=user_id,
         case_id=case_id,
@@ -375,7 +430,8 @@ def search_sudarshan_visual_evidence(
     top_k: int = 10,
     classification_level: str = "RESTRICTED",
 ) -> list[dict[str, Any]]:
-    return get_application().search_visual_evidence(
+    return _call(
+        "search_visual_evidence",
         query,
         user_id=user_id,
         case_id=case_id,
@@ -397,7 +453,8 @@ def search_sudarshan_table_evidence(
     top_k: int = 10,
     classification_level: str = "RESTRICTED",
 ) -> list[dict[str, Any]]:
-    return get_application().search_table_evidence(
+    return _call(
+        "search_table_evidence",
         query,
         user_id=user_id,
         case_id=case_id,
@@ -419,7 +476,8 @@ def search_sudarshan_video_segment(
     top_k: int = 10,
     classification_level: str = "RESTRICTED",
 ) -> list[dict[str, Any]]:
-    return get_application().search_video_segment_evidence(
+    return _call(
+        "search_video_segment_evidence",
         query,
         user_id=user_id,
         case_id=case_id,
@@ -440,7 +498,8 @@ def get_sudarshan_evidence(
     task_id: str | None = None,
     classification_level: str = "RESTRICTED",
 ) -> dict[str, Any]:
-    return get_application().get_evidence(
+    return _call(
+        "get_evidence",
         evidence_id,
         user_id=user_id,
         case_id=case_id,
@@ -450,4 +509,5 @@ def get_sudarshan_evidence(
 
 
 if __name__ == "__main__":
+    configure_mcp_tool_profile()
     mcp.run(transport="stdio")

@@ -26,6 +26,7 @@ from api.control_plane import (
     StaleLeaseError,
     new_worker_id,
 )
+from pipelines.common.correlation import HarnessCorrelation
 
 
 TERMINAL_STATES = {"succeeded", "partial", "failed", "cancelled", "completed", "pending"}
@@ -266,6 +267,7 @@ class LocalRunScheduler:
                 skill_result = json.loads(str(row["skill_result_json"]))
             except (TypeError, ValueError):
                 skill_result = None
+        harness_correlation = HarnessCorrelation.from_metadata(metadata)
         return {
             "run_id": str(row["run_id"]),
             "task_id": str(row["task_id"]),
@@ -278,6 +280,11 @@ class LocalRunScheduler:
             "requested_pipelines": list(payload.get("requested_pipelines") or []),
             "skill_id": metadata.get("skill_id"),
             "skill_version": metadata.get("skill_version"),
+            "harness_correlation": (
+                harness_correlation.model_dump(mode="json")
+                if harness_correlation is not None
+                else None
+            ),
             "job_type": str(payload.get("job_type", "run")),
             "source_reference": payload.get("source_reference"),
             "source_hash": payload.get("source_hash"),

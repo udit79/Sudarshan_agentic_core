@@ -364,8 +364,11 @@ sequenceDiagram
 7. Validated pipeline outputs are written back to Case memory according to the
    pipeline's release policy. Revisions create new task/artifact versions.
 
-Cognee is configured through `COGNEE_BASE_URL`, `COGNEE_API_KEY`,
-`COGNEE_TENANT_ID`, and `COGNEE_DATASET_NAME`. The local `MemoryStore` is an
+Cognee Cloud is configured through `COGNEE_BACKEND=cloud`, the tenant
+`COGNEE_BASE_URL`, `COGNEE_API_KEY`, `COGNEE_TENANT_ID`, and
+`COGNEE_DATASET_NAME`. Cloud requests use `X-Api-Key` and `X-Tenant-Id`; the
+adapter rejects local or HTTP URLs in cloud mode. `COGNEE_BACKEND=local` is an
+explicit development-only compatibility mode. The local `MemoryStore` is an
 idempotency/domain cache, not a replacement for Cognee.
 
 ## Pipeline and provider behavior

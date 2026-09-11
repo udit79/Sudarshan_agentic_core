@@ -1,7 +1,8 @@
 # Sudarshan 2.0 current status
 
 Status is measured against the implementation on the `Sudarshan2.0` branch,
-after T28 reliability work. This document separates local capability from
+including the local T43–T60 and H-series integration slices. This document
+separates local capability from
 production readiness so demos, judging material, and engineering work use the
 same claims.
 
@@ -11,6 +12,7 @@ same claims.
 | --- | --- | --- |
 | Agentic control plane | Implemented locally | LangGraph owns routing and lifecycle; specialist pipelines and typed child skills run behind bounded contracts. |
 | Harness/MCP boundary | Implemented locally | DeepSeek Harness is an optional adapter; external MCP/A2A clients use the same Sudarshan application boundary. |
+| H-series agentic integration | Complete locally; staging gates open | H-01–H-08 implementation, native OperationsBridge, sandbox contract, parity tests, and offline benchmark are present; live container, authenticated staging, external interop, and real-artifact evidence remain. |
 | Python backend | Strong local vertical slice | Ingestion, memory, routing, pipelines, quality gates, artifacts, scheduler, cache, telemetry, audit, and recovery are wired and tested locally. |
 | Reference frontend | Functional dashboard | Authenticated gateway mode, case/source flow, run progress, cancellation, artifact preview/download, and safe telemetry are available. |
 | Production deployment | Release-candidate code present; deployment gates open | T43–T52 code paths and local tests are present. Live Redis/object-storage, provider reconciliation, signed-sandbox drills, real-corpus benchmarks, external MCP/A2A, visual approval, backup/restore, and release sign-off remain environment gates. |
@@ -26,6 +28,16 @@ Sudarshan brand and theme are replaceable packages documented in
 [Harness UI composition](harness-ui-plugin.md). This keeps product styling out
 of the official Harness branding package and lets another compatible Harness
 profile use the same Sudarshan application boundary.
+
+### H-series handoff
+
+The native Harness/MCP agentic layer is ready for frontend and backend teams to
+consume through the stable projections and MCP contracts. Teams must not
+introduce a second orchestrator or couple browser code to Harness internals.
+The remaining agentic work is integration evidence: wire the real PPT,
+LinkedIn, infographic, and video planners to typed child plans, demonstrate a
+cross-skill run, and validate the same lifecycle through an independent MCP or
+A2A client.
 
 ### Available now
 

@@ -20,15 +20,21 @@ pair; the core Harness packages and the Sudarshan backend remain unchanged.
 The safe execution monitor, evidence drawer, artifact workspace, and ingestion
 stages now live in the additive
 `@deepseek-ai/dsh-experimental-client-ui-sudarshan-operations` Harness plugin.
-It consumes an explicitly labelled preview projection when no host bridge is
-installed. A compatible host can provide
-`globalThis.SudarshanOperationsBridge` with `getProjection`, artifact
-preview/download, and ingestion action callbacks; the backend/MCP projection
-remains the source of truth. Disabled actions are explicit capability states,
-not fake buttons.
+It installs a typed live bridge when the native plugin loads. The bridge reads
+the backend's safe run projection, refreshes it from the run-events SSE stream,
+and opens only stable artifact preview/download routes. A host can bind a
+Harness session to a backend run with `bindRun(sessionId, runId)`; until then,
+the session ID is used as the run ID. If the API is unavailable, the panel
+falls back to its explicitly labelled preview projection. Disabled actions are
+explicit capability states, not fake buttons.
 The plugin does not copy the standalone dashboard or create a second chat
 store: Harness owns the maintained side chat/session list, while this panel is
 keyed by the active session ID and persists only its selected tab locally.
+The bridge reads `SUDARSHAN_API_ORIGIN` or defaults to `http://localhost:8000`.
+For a gateway deployment, set this to the authenticated backend origin exposed
+to the Harness browser; do not put Cognee credentials in the browser or
+configure the bridge to call Cognee directly.
+The API CORS example includes the native Harness origins on port 3080.
 Approval inboxes and release/operations gates remain planned follow-up surfaces
 until their backend decision and release contracts are connected.
 

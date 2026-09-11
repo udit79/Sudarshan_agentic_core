@@ -1,0 +1,3 @@
+name: Sudarshan Artifact Agent
+description: Governed artifact transformation agent backed by Sudarshan MCP operations.
+order: 1

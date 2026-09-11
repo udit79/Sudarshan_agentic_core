@@ -34,6 +34,8 @@ export interface ArtifactProjection {
   size: string
   classification: string
   previewAvailable: boolean
+  previewUri?: string
+  downloadUri?: string
   repair?: string
 }
 
@@ -54,6 +56,8 @@ export interface OperatorProjection {
 
 export interface OperationsBridge {
   getProjection?: (sessionId: string) => Promise<OperatorProjection> | OperatorProjection
+  subscribeProjection?: (sessionId: string, onProjection: (projection: OperatorProjection) => void) => (() => void)
+  bindRun?: (sessionId: string, runId: string) => void
   previewArtifact?: (artifact: ArtifactProjection) => void
   downloadArtifact?: (artifact: ArtifactProjection) => void
   retryIngestion?: (sessionId: string) => void

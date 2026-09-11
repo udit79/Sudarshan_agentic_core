@@ -193,6 +193,11 @@
       quality_report: raw.quality_report || raw.qualityReport || summary?.quality_report || null,
       wait_reason: raw.wait_reason || raw.waitReason || summary?.wait_reason || summary?.waitReason || "",
       telemetry: raw.telemetry || summary?.telemetry || {},
+      harness_correlation: raw.harness_correlation
+        || raw.harnessCorrelation
+        || summary?.harness_correlation
+        || summary?.harnessCorrelation
+        || null,
       approval: raw.approval || raw.approval_state || summary?.approval || summary?.approval_state || null,
       connector: raw.connector || raw.connector_status || summary?.connector || summary?.connector_status || null,
       receipt: raw.receipt || raw.publish_receipt || summary?.receipt || summary?.publish_receipt || null,

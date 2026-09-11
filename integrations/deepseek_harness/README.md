@@ -64,9 +64,61 @@ repository as their current working directory. For a packaged deployment,
 replace the relative Python command in the overlay with the absolute service
 entry point.
 
+### Production agent profile
+
+The overlay mounts one checked-in `Sudarshan Artifact Agent` preset from
+`agent-presets/sudarshan-artifact-agent`. It deliberately excludes Harness's
+shipped coding presets and the user preset directory, so users cannot switch
+the production session into a shell/filesystem/web/coding composition. The
+profile keeps Harness compaction and clarification support, while all planning,
+skill selection, execution, evidence, artifact, and quality decisions remain
+owned by the Sudarshan MCP application.
+
+The overlay also hides generic preset, plugin, plan, goal, subagent, workflow,
+and command-palette controls. The Sudarshan operations drawer, trajectory,
+approvals, attachments, and model selection remain available. This is a
+composition-level restriction in the replaceable Cordis profile; the vendored
+Harness core is not modified.
+
+The native MCP child process receives `SUDARSHAN_MCP_TOOL_PROFILE=artifact`.
+That profile exposes only lifecycle, skill discovery/dispatch, and verified
+artifact tools to the native agent, reducing tool-schema tokens. External MCP
+clients retain the default `full` profile for compatibility, or can select a
+named profile explicitly.
+
 The MCP server is an application adapter, not a second orchestrator: it calls
 the same application service as the JSONL runner. Do not place Cognee keys in
 Harness workflow scripts or pass them into an E2B sandbox.
+
+### Native operations bridge and sandbox boundary
+
+The operations plugin installs a typed HTTP/SSE bridge at runtime. It maps the
+safe `GET /runs/{run_id}` projection to the native operations drawer, listens
+to `/runs/{run_id}/events`, and opens only the authenticated preview/download
+routes returned by the artifact projection. A host that starts a run should
+call `bindRun(sessionId, runId)` so a Harness session follows the durable
+Sudarshan run; without a binding, the bridge uses the session ID as the run ID.
+Set `SUDARSHAN_API_ORIGIN` when the API is not on `http://localhost:8000`.
+
+Renderers and provider execution use the `pipelines.common.sandbox` protocol.
+The checked-in local adapter enforces an executable allowlist, timeouts,
+cooperative cancellation, output limits, workspace containment, and secret
+redaction. It is a policy boundary for development and tests, not a claim of
+OS-level isolation. Production selects the container adapter with:
+
+```dotenv
+SUDARSHAN_SANDBOX_MODE=container
+SUDARSHAN_SANDBOX_RUNTIME=docker
+SUDARSHAN_SANDBOX_CONTAINER_IMAGE=python:3.12-slim
+```
+
+The container command is shell-free, network-disabled, read-only at the
+container root, capability-dropped, resource-limited, and mounts only a
+temporary `/workspace`. `SUDARSHAN_SANDBOX_MODE=local` is rejected unless
+`SUDARSHAN_ALLOW_LOCAL_SANDBOX=true` is also set. This prevents a deployment
+from silently falling back to a host subprocess when the container runtime is
+missing. A trusted/rootless runtime and approved image registry remain
+deployment responsibilities.
 
 ## Harness web UI composition
 

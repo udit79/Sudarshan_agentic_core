@@ -104,7 +104,10 @@ export function OperationsPanel({ sessionId, t }: PanelProps) {
     }).catch(() => {
       if (active) setProjection(previewProjection(sessionId, refresh))
     })
-    return () => { active = false }
+    const unsubscribe = currentBridge.subscribeProjection?.(sessionId, value => {
+      if (active) setProjection(value)
+    })
+    return () => { active = false; unsubscribe?.() }
   }, [refresh, sessionId])
 
   useEffect(() => {
