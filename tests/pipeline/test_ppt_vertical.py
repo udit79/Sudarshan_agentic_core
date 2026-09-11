@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from pipelines.ppt.schemas import FlowchartNode, FlowchartSpec, VisualIR, LayoutBox
+from pipelines.ppt.schemas import VisualIR, LayoutBox
 from pipelines.ppt.vertical import PresentationVerticalSlice
 
 
@@ -86,4 +86,3 @@ def test_flowchart_vertical_slice_fails_quality_without_delivery(tmp_path) -> No
         assert all(item["quality_status"] == "failed" for item in state["artifacts"])
     finally:
         service.close()
-

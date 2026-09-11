@@ -11,6 +11,7 @@ from ingestion_pipelines.contracts import (
     IngestionBudget,
     IngestionManifest,
     IngestionQualityReport,
+    VideoIngestionPolicy,
     QualityReport,
 )
 from ingestion_pipelines.extract import extract_text
@@ -23,6 +24,8 @@ from ingestion_pipelines.structure import STRUCTURE_COMPILER_VERSION, compile_ev
 from ingestion_pipelines.evidence_index import EvidenceIndex, EvidenceNotFoundError
 from ingestion_pipelines.extract_video import (
     VIDEO_EXTRACTOR_VERSION,
+    VideoIngestionCancelled,
+    default_video_ingestion_policy,
     extract_video_evidence,
     render_video_timeline,
 )
@@ -66,6 +69,7 @@ __all__ = [
     "EvidenceRelationship",
     "ExtractionEvent",
     "IngestionQualityReport",
+    "VideoIngestionPolicy",
     "QualityReport",
     "SourceInspection",
     "SourceSafetyError",
@@ -81,6 +85,8 @@ __all__ = [
     "extract_video_evidence",
     "render_video_timeline",
     "VIDEO_EXTRACTOR_VERSION",
+    "VideoIngestionCancelled",
+    "default_video_ingestion_policy",
     "ingest_file",
     "to_access_context",
     "to_knowledge_unit",

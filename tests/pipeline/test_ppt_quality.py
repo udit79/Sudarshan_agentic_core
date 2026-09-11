@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pipelines.ppt.flowchart import layout_flowchart
-from pipelines.ppt.quality import inspect_flowchart, repair_patches
+from pipelines.ppt.flowchart import layout_flowchart, render_flowchart_svg
+from pipelines.ppt.quality import inspect_flowchart, inspect_flowchart_svg, repair_patches
 from pipelines.ppt.schemas import EvidenceBinding, FlowchartEdge, FlowchartNode, FlowchartSpec
 
 
@@ -36,3 +36,13 @@ def test_quality_report_finds_label_overflow_and_creates_targeted_patch() -> Non
     patches = repair_patches(report)
     assert any(patch.operation == "rewrite" and patch.target_id == "a" for patch in patches)
 
+
+def test_static_flowchart_svg_has_accessibility_and_safety_contract() -> None:
+    spec = FlowchartSpec(
+        flowchart_id="safe-flow",
+        nodes=[FlowchartNode(node_id="a", label="Start")],
+    )
+    svg = render_flowchart_svg(spec)
+    assert inspect_flowchart_svg(svg, required_text=("Start",)) == []
+    unsafe = svg.replace("</svg>", "<script>alert(1)</script></svg>")
+    assert "executable content" in " ".join(inspect_flowchart_svg(unsafe))

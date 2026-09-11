@@ -18,6 +18,7 @@ from pipelines.common.contracts import AdvisoryRequest
 from pipelines.video.contracts import VideoPackage
 from pipelines.video.native_generator import NativeVideoGenerator, NativeVideoResult, scenes_from_package, scenes_from_script
 from pipelines.video.planner import OpenAIVideoPlanner
+from pipelines.video.renderers import MoneyPrinterCompatibleRenderer
 
 
 class NativeVideoStoryboardSkill:
@@ -77,6 +78,7 @@ class NativeVideoRenderSkill:
 
     def __init__(self, generator: NativeVideoGenerator) -> None:
         self.generator = generator
+        self.compatible_renderer = MoneyPrinterCompatibleRenderer(generator)
 
     def render(
         self,
@@ -87,13 +89,24 @@ class NativeVideoRenderSkill:
         cancel_event: Event | None = None,
         authorization_scope: Mapping[str, Any] | None = None,
     ) -> NativeVideoResult:
-        return self.generator.generate(
+        renderer = self.compatible_renderer if package.provider_options.renderer_id == "video.moneyprinter-compatible" else self.generator
+        if renderer is self.compatible_renderer:
+            return renderer.render(
+                package,
+                scenes,
+                run_id=run_id,
+                cancel_event=cancel_event,
+                authorization_scope=authorization_scope,
+            )
+        return renderer.generate(
             subject=package.subject,
             scenes=scenes,
             artifact_name=f"video-{run_id}",
             package_dir=Path("artifacts") / "videos" / str(run_id),
             cancel_event=cancel_event,
             authorization_scope=authorization_scope,
+            provider_options=package.provider_options.model_dump(exclude_none=True),
+            video_source=package.video_source,
         )
 
 

@@ -83,6 +83,14 @@ profile use the same Sudarshan application boundary.
   infographic, presentation, and video.
 - Native media/rendering paths: editable flowchart SVG/PPTX, AntV SSR bridge,
   native video scene generation/composition, and quality reports.
+- Optional PM-1/PM-2 PPT Master adapter: capability registration, bounded
+  non-shell export, workspace/output containment, cooperative cancellation,
+  timeout handling, and required quality-report discovery. It is disabled by
+  default; the native renderer remains the fallback.
+- IF-1–IF-3 AntV infographic hardening: pinned renderer version, cooperative
+  cancellation, and mandatory SVG quality promotion after native SSR.
+- DD-1/DD-2 Diagram Design hardening: static accessible SVG metadata and
+  fail-closed SVG safety checks are applied to native flowchart promotion.
 - Typed skill contracts, versioned manifests, skill workspace resources,
   trust-tier checks, capability/tool allow-lists, side-effect approvals,
   bounded child execution, cooperative timeouts, and token/tool budgets.
@@ -162,6 +170,21 @@ profile use the same Sudarshan application boundary.
   nested result. Scheduler terminal state and its completion event now commit
   atomically, preventing reconnect consumers from observing a terminal status
   before the final event.
+- Video ingestion now has an application-owned `VideoIngestionPolicy` with
+  bounded duration, visual sample count, sampling interval, audio/visual
+  channel switches, cooperative cancellation, subprocess timeout, and
+  policy-sensitive parser cache identity. The selected policy and fallback
+  reasons are preserved on timestamped evidence blocks. This is a local
+  governance slice; long-video staging measurements, shared leases, and
+  production object-store cleanup remain release gates.
+- V84–V95 adds a governed, provider-neutral video media layer: scoped local
+  material reuse, opt-in allow-listed Pexels retrieval, typed subtitle/music
+  records, bounded native rendering profiles, deterministic quality reports,
+  renderer benchmark promotion, and the `video.moneyprinter-compatible`
+  adapter. Native-only renderer controls are kept out of the legacy external
+  provider payload. This is a local capability slice; visual approval,
+  provider/license evidence, distributed usage reconciliation, real-corpus
+  benchmarking, and host-loss cleanup remain open release gates.
 
 ### Backend work still required
 
@@ -189,6 +212,9 @@ These are real engineering gaps, not cosmetic follow-ups:
    archive schema are ready, but are not a substitute for those runs.
 8. Execute the T47 benchmark and T52 backup/restore, rollback, ownership, and
    final release sign-off gates.
+9. For V84–V95, run real codec/font/subtitle/BGM fixtures, review material
+   licenses, collect provider usage receipts, and promote a renderer only from
+   an archived benchmark—not from a local smoke test.
 
 ## Request and data flow
 
@@ -222,8 +248,15 @@ sequenceDiagram
 The current local verification snapshot is:
 
 ```text
-Python: 252 passed, 7 skipped
+Python: 290 passed, 7 skipped, 32 warnings
 T28 reliability focus: 21 passed
+Video/media focused tests: 30 passed
+PPT Master adapter/quality focused tests: 11 passed; PPT lint: passed
+Infographic renderer/quality focused tests: 13 passed; infographic lint: passed
+Diagram SVG/flowchart focused tests: 8 passed; diagram lint: passed
+Offline native FFmpeg smoke: rendered one scene; manifest order verified;
+quality was `partial` because ffprobe was unavailable in that environment
+Ruff (video, ingestion, Harness, related tests): passed
 Frontend projection/cursor tests: 3 passed
 Node gateway tests: 9 passed
 JavaScript syntax checks: passed

@@ -282,6 +282,13 @@ typed evidence, chunks, relationships, and quality reports, and run bounded
 page/slide/scene fan-out through the shared control plane. Add OCR/VLM fallback
 selection from measured modality confidence, not unrestricted agent decisions.
 
+The local video slice now also enforces an application-owned
+`VideoIngestionPolicy`: duration and visual-sample caps, explicit audio/visual
+channel selection, cooperative cancellation, extraction timeout, and
+policy-sensitive parser-cache identity. It records the selected policy and
+fallback reasons on timestamped evidence. This does not replace the shared
+control-plane, object-store, long-video benchmark, or cleanup gates below.
+
 Acceptance:
 
 - Reconnect and restart resume ingestion without reparsing completed stages.
@@ -787,6 +794,104 @@ T72–T76 (social connector, durable scheduling, frontend, and provider-test
 infrastructure), and T79–T83 (renderer hardening, video/PPT repair, and
 release/license ledger). Those require backend/frontend/rendering/release
 ownership beyond the agentic slice.
+
+### Video adaptation track — V84–V95
+
+This track adapts useful media capabilities from the local MoneyPrinterTurbo
+reference without importing its WebUI, controller, task manager, or
+orchestration. Sudarshan remains the owner of planning, skill contracts,
+authorization, budgets, cancellation, provenance, quality gating, and
+delivery.
+
+| Ticket | Local result | Release status |
+| --- | --- | --- |
+| V84 | Reference/license ledger and non-copying adaptation boundary | Complete locally; legal/release review remains required |
+| V85 | Scoped local material resolver plus opt-in, allow-listed Pexels retrieval with bounded downloads | Complete locally; provider/license staging evidence remains open |
+| V86 | Typed media, subtitle, music, and usage contracts with provenance | Complete locally |
+| V87 | Native bounded-parallel scene rendering, material reuse, cheap/balanced/premium profiles, transitions, subtitles, and optional local BGM | Complete locally; real codec/font/media fixtures remain open |
+| V88 | Deterministic FFprobe/media integrity report and delivery gate | Complete locally; visual/human approval remains open |
+| V89 | Offline renderer benchmark and quality-gated promotion summary | Complete locally; real/sanitized corpus benchmark remains open |
+| V90 | `video.moneyprinter-compatible` renderer adapter behind the Sudarshan skill boundary | Complete locally; no upstream WebUI/controller is embedded |
+| V91 | Fingerprints include renderer options, material identity, authorization scope, and provenance | Complete locally |
+| V92 | Legacy external-provider payload is allow-listed so native-only options cannot leak across the adapter boundary | Complete locally |
+| V93 | Video artifact/manifest now exposes subtitle, music, media-use, timeline, and quality references | Complete locally |
+| V94 | Cooperative cancellation, FFmpeg/network deadlines, bounded remote material size, and explicit fallback metadata | Complete locally; host-loss and distributed cleanup tests remain open |
+| V95 | Full regression audit, focused tests, docs, and assumption updates | Complete locally; staging stop/go gates remain open |
+
+The V84–V95 local slice is not a claim that production video quality is
+solved. Promotion still requires T40–T52 evidence: shared object storage,
+distributed budget/usage reconciliation, codec/font/subtitle fixtures,
+visual approval, provider billing reconciliation, external MCP/A2A lifecycle
+tests, and rollback/retention drills.
+
+### PPT Master integration track — PM-1–PM-9
+
+PPT Master is an optional presentation renderer/workspace adapter. It does not
+replace Sudarshan's Harness, planner, evidence boundary, scheduler, budgets,
+quality promotion, or artifact delivery.
+
+| Ticket | Scope | Status |
+| --- | --- | --- |
+| PM-1 | Define a replaceable `presentation.ppt-master` adapter and capability registry entry; preserve the native renderer fallback | Complete locally |
+| PM-2 | Add a bounded, non-shell PPT Master export command with workspace/output path checks, timeout, cooperative cancellation, and quality-report discovery | Complete locally |
+| PM-3 | Compile authorized typed evidence into a PPT Master source workspace with evidence/source manifests | Open |
+| PM-4 | Extend `DeckPlan` with design tokens, template identity, renderer capabilities, and declared slide dependencies | Open |
+| PM-5 | Add the canonical SVG project contract and native export quality gate to the presentation pipeline | Open |
+| PM-6 | Add versioned brand/style/layout/deck template workspaces and Master/Layout validation | Open |
+| PM-7 | Replace implicit slide serialization with dependency-aware bounded parallel slide jobs | Open |
+| PM-8 | Reconcile chart, table, flowchart, infographic, and image child artifacts into the final deck | Open |
+| PM-9 | Run sanitized visual regression, renderer promotion, MCP/A2A, rollback, and human-approval gates | Open |
+
+PM-1 and PM-2 are intentionally adapter-only. No PPT Master code is copied
+into the repository, no external workflow is executed by default, and the
+existing native renderer remains the compatibility path until PM-3–PM-5 pass.
+
+### AntV Infographic integration track — IF-1–IF-9
+
+The checked-out infographic reference is already represented by Sudarshan's
+pinned AntV SSR bridge. These tickets improve that existing native path rather
+than introducing a second renderer or copying the reference editor.
+
+| Ticket | Scope | Status |
+| --- | --- | --- |
+| IF-1 | Record the MIT license/adaptation boundary and map reference capabilities to Sudarshan contracts | Complete locally |
+| IF-2 | Version the AntV renderer, add cooperative cancellation, and keep the Node boundary non-shell and time-bounded | Complete locally |
+| IF-3 | Make SVG structural/visible-text QA a mandatory promotion gate after rendering | Complete locally |
+| IF-4 | Compile authorized `InfographicIR` into an allow-listed template registry | Open |
+| IF-5 | Add versioned NTRO themes/design tokens with contrast, bilingual, and density validation | Open |
+| IF-6 | Add typed chart, hierarchy, comparison, timeline, and mind-map structure compilers | Open |
+| IF-7 | Add sanitized SVG/PNG export and visual regression fixtures | Open |
+| IF-8 | Expose streaming preview/editor behavior through the custom frontend/plugin boundary | Open |
+| IF-9 | Run renderer promotion, rollback, cache, MCP/A2A, and human-approval gates | Open |
+
+IF-1–IF-3 keep the current AntV path authoritative. The renderer must not
+receive raw conversation context, credentials, arbitrary file paths, or
+unvalidated JavaScript. The syntax-only fallback remains available for
+debugging, but it cannot be promoted as a rendered artifact when its SVG
+quality gate fails.
+
+### Diagram Design integration track — DD-1–DD-9
+
+The diagram-design reference is treated as a design-system and validation
+reference behind Sudarshan's existing typed visual IR. It is not a second
+scheduler, editor runtime, or arbitrary HTML execution path.
+
+| Ticket | Scope | Status |
+| --- | --- | --- |
+| DD-1 | Record the MIT license/adaptation boundary and map reference ideas to typed diagram contracts | Complete locally |
+| DD-2 | Add static SVG accessibility/safety checks and wire them into flowchart promotion | Complete locally |
+| DD-3 | Add an allow-listed semantic diagram type registry and deterministic type selection | Open |
+| DD-4 | Add sanitized standalone HTML/SVG/PNG export contracts with artifact manifests | Open |
+| DD-5 | Add bounded Mermaid, draw.io, and Excalidraw import adapters with adversarial fixtures | Open |
+| DD-6 | Add versioned NTRO style profiles, semantic tokens, marker resolution, and contrast checks | Open |
+| DD-7 | Add label geometry, density, bilingual text, and visual regression gates | Open |
+| DD-8 | Add optional motion only through one pinned reviewed controller; keep static output default | Open |
+| DD-9 | Expose diagram preview/edit/export through the custom frontend/plugin and MCP/A2A approval boundary | Open |
+
+DD-1 and DD-2 deliberately improve the current native flowchart path. No
+reference HTML, JavaScript, editor, or import parser is copied into the repo.
+The existing editable PPTX renderer remains available, and all diagrams still
+need evidence lineage and quality approval before delivery.
 
 ### T61–T83 compatibility gate
 

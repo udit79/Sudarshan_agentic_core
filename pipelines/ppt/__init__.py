@@ -15,9 +15,16 @@ from pipelines.ppt.quality import (
     VisualDiagnostic,
     VisualQualityReport,
     inspect_flowchart,
+    inspect_flowchart_svg,
     repair_patches,
 )
 from pipelines.ppt.vertical import PresentationVerticalSlice
+from pipelines.ppt.ppt_master_adapter import (
+    PptMasterAdapter,
+    PptMasterAdapterError,
+    PptMasterConfig,
+    PptMasterExportResult,
+)
 from pipelines.ppt.schemas import (
     DeckPlan,
     EvidenceBinding,
@@ -62,6 +69,11 @@ __all__ = [
     "VisualDiagnostic",
     "VisualQualityReport",
     "inspect_flowchart",
+    "inspect_flowchart_svg",
     "repair_patches",
     "PresentationVerticalSlice",
+    "PptMasterAdapter",
+    "PptMasterAdapterError",
+    "PptMasterConfig",
+    "PptMasterExportResult",
 ]

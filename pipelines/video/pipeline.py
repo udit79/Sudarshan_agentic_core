@@ -73,7 +73,16 @@ class VideoPipeline:
                 cancel_event=cancel_event,
             )
                 
-            if self.client is not None:
+            # An explicitly selected native-compatible renderer must stay
+            # inside Sudarshan even when an optional legacy client is
+            # configured.  The default remains backward-compatible: a
+            # configured external client handles the legacy path unless the
+            # package opts into the native compatibility adapter.
+            native_renderer_requested = (
+                package is not None
+                and package.provider_options.renderer_id == "video.moneyprinter-compatible"
+            )
+            if self.client is not None and not native_renderer_requested:
                 provider_options = package.provider_payload() if package is not None else {}
                 script = str(provider_options.pop("video_script", "") or "\n\n".join(
                     scene.narration for scene in scenes if scene.narration
@@ -163,6 +172,9 @@ class VideoPipeline:
                     "duration_seconds": result.duration_seconds,
                     "scene_count": result.scene_count,
                     "scenes": scene_records,
+                    "quality_report": result.metadata.get("quality_report"),
+                    "subtitle_path": result.metadata.get("subtitle_path"),
+                    "music_path": result.metadata.get("music_path"),
                 }
                 manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
                 artifact = {
@@ -177,7 +189,19 @@ class VideoPipeline:
                     "duration_seconds": result.duration_seconds,
                     "scene_count": result.scene_count,
                     "status_url": f"file://{Path(result.video_path).resolve()}" if result.video_path else None,
+                    "quality_report": result.metadata.get("quality_report"),
+                    "subtitle_path": result.metadata.get("subtitle_path"),
+                    "music_path": result.metadata.get("music_path"),
                 }
+                quality_report = result.metadata.get("quality_report") or {}
+                if quality_report.get("status") == "failed":
+                    writer.write("video_generation", "failed", "Rendered video failed deterministic media QA.")
+                    return PipelineResponse(
+                        status="failed", pipeline=self.pipeline_name, task_id=request.task_id,
+                        run_id=run_id, failure="Rendered video failed deterministic media QA.",
+                        artifact=artifact,
+                        metadata={"provider": "openai-native", "quality_report": quality_report},
+                    )
                 output = {"provider": "openai-native", "subject": subject, "status": "succeeded"}
 
             child_plan = build_child_plan(

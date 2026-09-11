@@ -92,7 +92,9 @@ def default_renderer_registry() -> RendererRegistry:
         RendererCapability("infographic.antv", "1", ("svg",), frozenset({"render", "export", "inspect", "fallback"}), "infographic.native-svg"),
         RendererCapability("infographic.native-svg", "1", ("svg",), frozenset({"render", "export", "inspect"})),
         RendererCapability("presentation.pptx", "1", ("pptx",), frozenset({"render", "export", "inspect"})),
+        RendererCapability("presentation.ppt-master", "local", ("pptx",), frozenset({"render", "export", "inspect", "fallback"}), "presentation.pptx"),
         RendererCapability("video.ffmpeg", "1", ("video",), frozenset({"render", "export", "inspect"})),
+        RendererCapability("video.moneyprinter-compatible", "1", ("video",), frozenset({"render", "export", "inspect", "fallback"}), "video.ffmpeg"),
     ])
 
 

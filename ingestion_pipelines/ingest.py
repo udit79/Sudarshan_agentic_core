@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 from pathlib import Path
 from typing import Callable
+from threading import Event
+from ingestion_pipelines.contracts import VideoIngestionPolicy
 
 if TYPE_CHECKING:
     from memory.memory_manager import MemoryManager
@@ -17,6 +19,8 @@ def ingest_file(
     source_reference: str | None = None,
     stage_charger: Callable[[str, int, int, int], object] | None = None,
     usage_recorder: Callable[[str, str, str, int, int, bool], object] | None = None,
+    video_policy: "VideoIngestionPolicy | None" = None,
+    cancel_event: Event | None = None,
 ) -> IngestedDocument:
     document_id = str(uuid4())
     reference = source_reference or file_path
@@ -30,6 +34,8 @@ def ingest_file(
             source_reference=reference,
             stage_charger=stage_charger,
             usage_recorder=usage_recorder,
+            policy=video_policy,
+            cancel_event=cancel_event,
         )
         raw_text = render_video_timeline(evidence_blocks, source_reference=Path(reference).name)
         doc_type = "video"

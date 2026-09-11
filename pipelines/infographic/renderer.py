@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 
@@ -34,6 +36,7 @@ class AntVInfographicRenderer:
             raise ValueError("ssr_timeout_ms must be at least 100 milliseconds")
         self.last_render_mode = "unknown"
         self.last_render_warning: str | None = None
+        self.renderer_version = os.getenv("ANTV_RENDERER_VERSION", "antv-infographic@0.2.20")
         if timeout_seconds is None:
             raw_timeout = os.getenv("ANTV_RENDER_TIMEOUT_SECONDS", "60")
             try:
@@ -44,7 +47,13 @@ class AntVInfographicRenderer:
             raise ValueError("timeout_seconds must be positive")
         self.timeout_seconds = timeout_seconds
 
-    def __call__(self, syntax: str, *, artifact_name: str) -> str:
+    def __call__(
+        self,
+        syntax: str,
+        *,
+        artifact_name: str,
+        cancel_event: Event | None = None,
+    ) -> str:
         if not syntax.lstrip().startswith("infographic"):
             raise ValueError("AntV renderer requires infographic syntax")
         payload = json.dumps({
@@ -55,23 +64,37 @@ class AntVInfographicRenderer:
             "height": self.height,
             "ssrTimeoutMs": self.ssr_timeout_ms,
         })
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("AntV renderer cancelled before start")
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 [self.node_binary, str(self.renderer_script)],
-                input=payload,
-                text=True,
-                capture_output=True,
-                check=True,
-                timeout=self.timeout_seconds,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 cwd=str(self.renderer_script.parent),
             )
-        except subprocess.CalledProcessError as exc:
-            detail = (exc.stderr or exc.stdout or "AntV renderer failed").strip()
-            raise RuntimeError(detail[-2000:]) from exc
-        except (OSError, subprocess.TimeoutExpired) as exc:
+            if process.stdin is not None:
+                process.stdin.write(payload.encode("utf-8"))
+                process.stdin.close()
+            started = time.monotonic()
+            while process.poll() is None:
+                if cancel_event is not None and cancel_event.is_set():
+                    self._stop(process)
+                    raise RuntimeError("AntV renderer cancelled")
+                if time.monotonic() - started >= self.timeout_seconds:
+                    self._stop(process)
+                    raise RuntimeError("AntV renderer exceeded its deadline")
+                time.sleep(0.05)
+            stdout = process.stdout.read() if process.stdout is not None else b""
+            stderr = process.stderr.read() if process.stderr is not None else b""
+        except OSError as exc:
             raise RuntimeError(f"AntV renderer unavailable: {exc}") from exc
+        if process.returncode != 0:
+            detail = (stderr or stdout or b"AntV renderer failed").decode("utf-8", errors="replace").strip()
+            raise RuntimeError(detail[-2000:])
         try:
-            result: Any = json.loads(completed.stdout)
+            result: Any = json.loads(stdout.decode("utf-8"))
             path = result["path"]
             self.last_render_mode = str(result.get("renderer", "antv"))
             warning = result.get("warning")
@@ -81,3 +104,14 @@ class AntVInfographicRenderer:
         if not isinstance(path, str) or not Path(path).exists():
             raise RuntimeError("AntV renderer did not create an SVG artifact")
         return path
+
+    @staticmethod
+    def _stop(process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)

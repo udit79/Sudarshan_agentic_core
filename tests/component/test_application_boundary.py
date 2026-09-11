@@ -99,6 +99,27 @@ def test_video_package_falls_back_to_transcript_without_storyboard() -> None:
     assert package.provider_payload()["video_script"] == "Full source transcript"
 
 
+def test_video_package_keeps_native_renderer_controls_outside_legacy_payload() -> None:
+    package = VideoPackage(
+        subject="Case briefing",
+        provider_options={
+            "renderer_id": "video.moneyprinter-compatible",
+            "render_profile": "cheap",
+            "subtitle_mode": "scene",
+            "bgm_path": "artifacts/video-bgm/calm.mp3",
+            "video_transition": "fade",
+        },
+    )
+
+    payload = package.provider_payload()
+
+    assert payload["video_transition"] == "fade"
+    assert "renderer_id" not in payload
+    assert "render_profile" not in payload
+    assert "subtitle_mode" not in payload
+    assert "bgm_path" not in payload
+
+
 def test_application_projects_typed_events_and_run_summary() -> None:
     application = object.__new__(SudarshanApplication)
     application.progress_sink = InMemoryProgressSink()

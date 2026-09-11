@@ -5,6 +5,7 @@ def test_default_registry_describes_native_and_fallback_renderers(tmp_path):
     registry = default_renderer_registry()
     assert registry.supports("diagram.native-svg", "inspect", "svg")
     assert registry.get("diagram.pptx").fallback_renderer_id == "diagram.native-svg"
+    assert registry.get("presentation.ppt-master").fallback_renderer_id == "presentation.pptx"
     assert "video.ffmpeg" in registry.as_dict()
 
     svg = tmp_path / "preview.svg"

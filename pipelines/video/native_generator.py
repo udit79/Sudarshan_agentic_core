@@ -34,6 +34,8 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from pipelines.video.contracts import VideoRunManifest, VideoSceneManifest
+from pipelines.video.media import MaterialResolver, select_music, write_scene_subtitles
+from pipelines.video.quality import inspect_video
 from pipelines.video.timeline import build_video_timeline
 from integrations.providers.router import ProviderRouter
 
@@ -70,6 +72,12 @@ class VideoScene:
     image_path: str | None = None
     audio_path: str | None = None
     video_path: str | None = None
+    subtitle_text: str | None = None
+    asset_ids: list[str] = field(default_factory=list)
+    material_path: str | None = None
+    material_provider: str | None = None
+    material_asset_id: str | None = None
+    material_license_scope: str | None = None
     image_fallback: str | None = None
     image_failure_class: str | None = None
     audio_fallback: str | None = None
@@ -240,11 +248,12 @@ class OpenAIImageAdapter:
 
 
 class NativeVideoGenerator:
-    """Assemble a video from scenes using OpenAI media and local FFmpeg.
+    """Assemble a video from governed media sources and local FFmpeg.
 
-    This is the in-process video implementation. The ``stock`` argument is
-    intentionally absent: the supported media provider is OpenAI, while all
-    composition and package persistence remain local.
+    This is the in-process video implementation. Material resolution is
+    provider-neutral and scoped by :class:`MaterialResolver`; OpenAI media is
+    an optional fallback, while composition and package persistence remain
+    local.
     """
 
     def __init__(
@@ -259,6 +268,7 @@ class NativeVideoGenerator:
         max_parallel_scenes: int | None = None,
         renderer_version: str | None = None,
         provider_router: ProviderRouter | None = None,
+        material_resolver: MaterialResolver | None = None,
     ) -> None:
         self.provider_router = provider_router or ProviderRouter()
         self.tts = tts or OpenAITTSAdapter(provider_router=self.provider_router)
@@ -271,6 +281,8 @@ class NativeVideoGenerator:
         if self.max_parallel_scenes < 1 or self.max_parallel_scenes > 16:
             raise ValueError("max_parallel_scenes must be between 1 and 16")
         self.renderer_version = renderer_version or os.getenv("SUDARSHAN_VIDEO_RENDERER_VERSION", "native-video@2")
+        self.material_resolver = material_resolver or MaterialResolver()
+        self._active_provider_options: dict[str, Any] = {}
 
     def generate(
         self,
@@ -281,6 +293,8 @@ class NativeVideoGenerator:
         package_dir: str | Path | None = None,
         cancel_event: Event | None = None,
         authorization_scope: Mapping[str, Any] | None = None,
+        provider_options: Mapping[str, Any] | None = None,
+        video_source: str = "local",
     ) -> NativeVideoResult:
         """Generate a complete video from scenes.
 
@@ -294,6 +308,9 @@ class NativeVideoGenerator:
                 status="failed",
                 error="No scenes provided for video generation",
             )
+
+        self._active_provider_options = dict(provider_options or {})
+        self._prepare_materials(scenes, source=video_source, cancel_event=cancel_event)
 
         artifact_name = artifact_name or f"video-{uuid4().hex[:12]}"
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -342,7 +359,13 @@ class NativeVideoGenerator:
             # source script, storyboard, scene media, and manifest.
             output_path = str(package_root / "final.mp4")
             manifest.status = "composing"
-            manifest.segment_order = [scene.scene_id for scene in scenes if scene.video_path and Path(scene.video_path).exists()]
+            # Use the paths actually produced by this run (including durable
+            # cache hits), not only paths supplied on the input storyboard.
+            manifest.segment_order = [
+                scene.scene_id
+                for scene in scenes
+                if scene.video_path and Path(scene.video_path).is_file()
+            ]
             self._persist_manifest(manifest_path, manifest)
             try:
                 self._concatenate(segment_paths, output_path, work, ffmpeg, cancel_event)
@@ -357,7 +380,36 @@ class NativeVideoGenerator:
                     metadata={"manifest_path": str(manifest_path), "failed_scene_ids": failed_scene_ids},
                 )
 
+            subtitle_path: str | None = None
+            subtitle_mode = str(self._active_provider_options.get("subtitle_mode", "scene"))
+            if subtitle_mode != "none":
+                subtitle_path = str(package_root / "subtitles.srt")
+                write_scene_subtitles(scenes, subtitle_path)
+                if os.getenv("SUDARSHAN_VIDEO_BURN_SUBTITLES", "0") == "1":
+                    burn_path = str(package_root / "final-subtitled.mp4")
+                    try:
+                        self._burn_subtitles(output_path, burn_path, subtitle_path, ffmpeg, cancel_event)
+                        Path(burn_path).replace(output_path)
+                    except Exception:
+                        pass
+            music = select_music(
+                self._active_provider_options.get("bgm_path"),
+                volume=float(self._active_provider_options.get("bgm_volume", 0.12) or 0.12),
+            )
+            if music is not None:
+                mixed_path = str(package_root / "final-mixed.mp4")
+                try:
+                    self._mix_background_music(output_path, mixed_path, music.path, music.volume, ffmpeg, cancel_event)
+                    Path(mixed_path).replace(output_path)
+                except Exception:
+                    music = None
+
             duration = self._probe_duration(output_path)
+            quality = inspect_video(
+                output_path,
+                expected_duration_seconds=sum(max(1, scene.duration_seconds) for scene in scenes),
+                subtitle_path=subtitle_path,
+            )
             manifest.status = "partial" if failed_scene_ids else "succeeded"
             manifest.output_video = output_path
             manifest.failed_scene_ids = failed_scene_ids
@@ -369,6 +421,9 @@ class NativeVideoGenerator:
                 status="partial" if failed_scene_ids else "verified",
             )
             manifest.timeline = timeline
+            manifest.subtitle_path = subtitle_path
+            manifest.music_path = music.path if music is not None else None
+            manifest.quality_report_id = quality.quality_report_id
             self._persist_manifest(manifest_path, manifest)
 
             return NativeVideoResult(
@@ -401,6 +456,19 @@ class NativeVideoGenerator:
                         if scene.image_fallback or scene.audio_fallback
                     ],
                     "timeline": timeline.model_dump(mode="json"),
+                    "subtitle_path": subtitle_path,
+                    "music_path": music.path if music is not None else None,
+                    "quality_report": quality.model_dump(mode="json"),
+                    "media_usage": [
+                        {
+                            "asset_id": scene.material_asset_id or f"{scene.scene_id}:render",
+                            "provider": scene.material_provider or "openai-native",
+                            "operation": "download" if scene.material_path else "compose",
+                            "units": 1,
+                            "is_estimate": True,
+                        }
+                        for scene in scenes
+                    ],
                     "scenes": [
                         {
                             "scene_id": scene.scene_id,
@@ -408,6 +476,12 @@ class NativeVideoGenerator:
                             "visual_description": scene.visual_description,
                             "duration_seconds": scene.duration_seconds,
                             "on_screen_text": scene.on_screen_text,
+                            "subtitle_text": scene.subtitle_text,
+                            "asset_ids": list(scene.asset_ids),
+                            "material_path": scene.material_path,
+                            "material_provider": scene.material_provider,
+                            "material_asset_id": scene.material_asset_id,
+                            "material_license_scope": scene.material_license_scope,
                             "image_path": scene.image_path,
                             "audio_path": scene.audio_path,
                             "video_path": scene.video_path,
@@ -449,6 +523,7 @@ class NativeVideoGenerator:
                     scene,
                     renderer_version=self.renderer_version,
                     authorization_scope=authorization_scope,
+                    render_options=self._active_provider_options,
                 )
                 entry = entries.get(scene.scene_id)
                 if entry is not None and entry.fingerprint == fingerprint and entry.status == "succeeded" and entry.video_path and Path(entry.video_path).is_file():
@@ -498,6 +573,34 @@ class NativeVideoGenerator:
         ordered_paths = [segment_by_scene[scene.scene_id] for scene in scenes if scene.scene_id in segment_by_scene]
         return ordered_paths, failed_scene_ids, cache_hits
 
+    def _prepare_materials(
+        self,
+        scenes: Sequence[VideoScene],
+        *,
+        source: str,
+        cancel_event: Event | None,
+    ) -> None:
+        """Resolve governed local/stock media before scene workers start."""
+
+        aspect = self._active_provider_options.get("video_aspect")
+        for scene in scenes:
+            self._check_cancelled(cancel_event)
+            if scene.video_path or scene.image_path:
+                continue
+            candidate = self.material_resolver.resolve(
+                scene,
+                source=source,
+                aspect=str(aspect) if aspect else None,
+                cancel_event=cancel_event,
+            )
+            if candidate is None:
+                continue
+            scene.material_path = candidate.path
+            scene.material_provider = candidate.provider
+            scene.material_asset_id = candidate.asset_id
+            scene.material_license_scope = candidate.license_scope
+            scene.asset_ids.append(candidate.asset_id)
+
     @staticmethod
     def scene_fingerprint(
         subject: str,
@@ -505,6 +608,7 @@ class NativeVideoGenerator:
         *,
         renderer_version: str | None = None,
         authorization_scope: Mapping[str, Any] | None = None,
+        render_options: Mapping[str, Any] | None = None,
     ) -> str:
         """Hash only scene inputs and renderer/provider versions, never raw cache output."""
 
@@ -515,6 +619,11 @@ class NativeVideoGenerator:
             "visual_description": scene.visual_description,
             "duration_seconds": scene.duration_seconds,
             "on_screen_text": scene.on_screen_text,
+            "subtitle_text": scene.subtitle_text,
+            "material_references": list(scene.material_references),
+            "material_path": scene.material_path,
+            "material_provider": scene.material_provider,
+            "render_options": dict(render_options or {}),
             "renderer_version": renderer_version or os.getenv("SUDARSHAN_VIDEO_RENDERER_VERSION", "native-video@2"),
             "tts_model": os.getenv("OPENAI_TTS_MODEL", "tts-1"),
             "tts_voice": os.getenv("OPENAI_TTS_VOICE", "alloy"),
@@ -551,6 +660,7 @@ class NativeVideoGenerator:
                         scene,
                         renderer_version=self.renderer_version,
                         authorization_scope=authorization_scope,
+                        render_options=self._active_provider_options,
                     ),
                     duration_seconds=scene.duration_seconds,
                 )
@@ -596,7 +706,17 @@ class NativeVideoGenerator:
         scene.audio_path = audio_path
 
         # 2. Generate a durable OpenAI image for this scene.
-        if scene.visual_description.strip() and self.image_generator.configured:
+        if scene.material_path and Path(scene.material_path).suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}:
+            video_source = scene.material_path
+        elif scene.material_path and Path(scene.material_path).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            scene.image_path = scene.material_path
+            video_source = str(work_dir / f"{prefix}_material.mp4")
+            self._generate_image_video(scene.image_path, video_source, scene, ffmpeg, cancel_event)
+        elif (
+            scene.visual_description.strip()
+            and self.image_generator.configured
+            and str(self._active_provider_options.get("render_profile", "balanced")) != "cheap"
+        ):
             image_path = str(package_root / "images" / f"{prefix}.png")
             try:
                 scene.image_path = self.image_generator.generate(
@@ -619,7 +739,15 @@ class NativeVideoGenerator:
 
         # 4. Add on-screen text overlay if provided.
         segment_path = str(package_root / "segments" / f"{prefix}.mp4")
-        self._compose_segment(video_source, audio_path, segment_path, scene, ffmpeg, cancel_event)
+        self._compose_segment(
+            video_source,
+            audio_path,
+            segment_path,
+            scene,
+            ffmpeg,
+            cancel_event,
+            transition=str(self._active_provider_options.get("video_transition") or "cut"),
+        )
 
         scene.video_path = segment_path if Path(segment_path).exists() else None
         return scene.video_path
@@ -729,14 +857,22 @@ class NativeVideoGenerator:
         scene: VideoScene,
         ffmpeg: str,
         cancel_event: Event | None = None,
+        transition: str = "cut",
     ) -> None:
         """Compose a video segment with optional audio and text overlay."""
 
         cmd = [ffmpeg, "-y", "-i", video_path]
+        duration = max(1, scene.duration_seconds)
+        fade = ""
+        if transition in {"fade", "crossfade"}:
+            fade = f",fade=t=in:st=0:d=0.25,fade=t=out:st={max(0, duration - 0.25)}:d=0.25"
+        video_filter = f"format=yuv420p{fade}"
 
         if audio_path and Path(audio_path).exists():
             cmd.extend(["-i", audio_path])
             cmd.extend([
+                "-t", str(duration),
+                "-vf", video_filter,
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac", "-b:a", "128k",
                 "-pix_fmt", "yuv420p",
@@ -744,9 +880,9 @@ class NativeVideoGenerator:
                 output_path,
             ])
         else:
-            duration = max(1, scene.duration_seconds)
             cmd.extend([
                 "-t", str(duration),
+                "-vf", video_filter,
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-pix_fmt", "yuv420p",
                 "-an",
@@ -781,6 +917,46 @@ class NativeVideoGenerator:
         ]
         self._run_process(cmd, timeout_seconds=300, cancel_event=cancel_event)
 
+    def _mix_background_music(
+        self,
+        video_path: str,
+        output_path: str,
+        music_path: str,
+        volume: float,
+        ffmpeg: str,
+        cancel_event: Event | None = None,
+    ) -> None:
+        """Mix local music under narration without replacing the main audio."""
+
+        safe_volume = max(0.0, min(float(volume), 1.0))
+        command = [
+            ffmpeg, "-y", "-i", video_path, "-stream_loop", "-1", "-i", music_path,
+            "-filter_complex",
+            f"[1:a]volume={safe_volume:.3f},aloop=loop=-1:size=2e+09[bgm];"
+            "[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+            "-map", "0:v:0", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-shortest", output_path,
+        ]
+        self._run_process(command, timeout_seconds=300, cancel_event=cancel_event)
+
+    def _burn_subtitles(
+        self,
+        video_path: str,
+        output_path: str,
+        subtitle_path: str,
+        ffmpeg: str,
+        cancel_event: Event | None = None,
+    ) -> None:
+        """Optionally burn the deterministic SRT track into the video."""
+
+        subtitle_filter_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
+        command = [
+            ffmpeg, "-y", "-i", video_path,
+            "-vf", f"subtitles='{subtitle_filter_path}'",
+            "-c:v", "libx264", "-preset", "fast", "-c:a", "copy", output_path,
+        ]
+        self._run_process(command, timeout_seconds=300, cancel_event=cancel_event)
+
     def _probe_duration(self, video_path: str) -> float:
         """Get video duration in seconds using ffprobe."""
 
@@ -811,6 +987,8 @@ def scenes_from_package(package_data: Mapping[str, Any]) -> list[VideoScene]:
             visual_description=scene_data.get("visual_description", ""),
             duration_seconds=int(scene_data.get("duration_seconds", 5)),
             on_screen_text=scene_data.get("on_screen_text", ""),
+            subtitle_text=scene_data.get("subtitle_text"),
+            asset_ids=list(scene_data.get("asset_ids", [])),
             material_references=list(scene_data.get("material_references", [])),
             image_path=scene_data.get("image_path"),
             audio_path=scene_data.get("audio_path"),

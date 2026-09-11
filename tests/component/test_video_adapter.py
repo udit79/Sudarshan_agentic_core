@@ -11,6 +11,7 @@ from integrations.providers.moneyprinterturbo import (
     MoneyPrinterTurboError,
 )
 from pipelines.video import VideoPipeline
+from pipelines.video.native_generator import NativeVideoResult
 
 
 class RecordingMemory:
@@ -136,3 +137,51 @@ def test_video_pipeline_writes_task_and_case_memory_for_real_provider_result() -
     assert response.artifact["combined_videos"] == ["https://provider.invalid/combined.mp4"]
     assert len(memory.writes) == 3
     assert memory.writes[-1]["kwargs"]["scope_type"].value == "case"
+
+
+def test_explicit_native_compatible_renderer_bypasses_optional_legacy_client(tmp_path) -> None:
+    memory = RecordingMemory()
+    calls: list[str] = []
+
+    def transport(method: str, url: str, payload: Mapping[str, Any] | None, timeout: float) -> Mapping[str, Any]:
+        del url, payload, timeout
+        calls.append(method)
+        raise AssertionError("legacy provider must not run for an explicit native renderer")
+
+    client = MoneyPrinterTurboClient("http://moneyprinter.test", transport=transport)
+    pipeline = VideoPipeline(memory, client=client)
+    package_dir = tmp_path / "native"
+    package_dir.mkdir()
+    output_path = package_dir / "final.mp4"
+    output_path.write_bytes(b"synthetic video")
+    pipeline.render_skill.render = lambda *args, **kwargs: NativeVideoResult(
+        status="succeeded",
+        video_path=str(output_path),
+        duration_seconds=1.0,
+        scene_count=1,
+        metadata={
+            "package_dir": str(package_dir),
+            "scenes": [],
+            "quality_report": {"status": "partial"},
+            "subtitle_path": None,
+            "music_path": None,
+        },
+    )
+
+    request = AdvisoryRequest(
+        query="Generate a case-grounded video",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-video-native-selector",
+        metadata={
+            "video_package": {
+                "subject": "Synthetic case briefing",
+                "storyboard": [{"scene_id": "scene-1", "narration": "Verified scene"}],
+                "provider_options": {"renderer_id": "video.moneyprinter-compatible"},
+            }
+        },
+    )
+    response = pipeline.run(request)
+
+    assert response.status == "succeeded"
+    assert calls == []

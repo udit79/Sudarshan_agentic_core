@@ -8,6 +8,7 @@ from pipelines.advisory.schemas import QualityReview
 from pipelines.common.text_generation import TextTransformationFlow
 from pipelines.infographic.agents import build_agents
 from pipelines.infographic.renderer import AntVInfographicRenderer
+from pipelines.infographic.quality import inspect_svg
 from pipelines.infographic.schemas import InfographicOutput
 from pipelines.infographic.tasks import build_tasks
 
@@ -63,6 +64,14 @@ class InfographicFlow(TextTransformationFlow):
                 output.syntax,
                 artifact_name=f"{output.infographic_id}-{self.state.run_id}",
             )
+            quality_report = inspect_svg(
+                artifact_path,
+                required_text=(output.title,),
+                renderer_mode=self.renderer.last_render_mode,
+                renderer_warning=self.renderer.last_render_warning,
+            )
+            if not quality_report.approved:
+                raise RuntimeError(f"Infographic SVG quality gate failed: {quality_report.issues}")
             caveats = list(output.caveats)
             if self.renderer.last_render_mode == "fallback":
                 warning = self.renderer.last_render_warning or "AntV SSR did not complete within its configured bound."
@@ -77,6 +86,8 @@ class InfographicFlow(TextTransformationFlow):
                 "path": artifact_path,
                 "artifact_type": "svg",
                 "renderer_mode": self.renderer.last_render_mode,
+                "renderer_version": getattr(self.renderer, "renderer_version", "unknown"),
+                "quality_report": quality_report.model_dump(mode="json"),
                 "child_plan": [
                     item.model_dump(mode="json")
                     for item in build_child_plan(

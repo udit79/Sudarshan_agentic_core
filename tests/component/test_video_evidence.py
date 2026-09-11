@@ -1,6 +1,11 @@
-from ingestion_pipelines.contracts import EvidenceBlock
+from threading import Event
+
+import pytest
+
+from ingestion_pipelines.contracts import EvidenceBlock, VideoIngestionPolicy
 from ingestion_pipelines.extract_video import (
     VideoEvent,
+    VideoIngestionCancelled,
     extract_video_evidence,
     render_video_timeline,
 )
@@ -94,3 +99,44 @@ def test_video_provider_fallback_is_recorded_on_scene_evidence(tmp_path, monkeyp
 
     scenes = [block for block in evidence if block.modality == "video_scene"]
     assert scenes[0].metadata["fallbacks"] == ["audio_provider_unavailable"]
+
+
+def test_video_ingestion_policy_is_recorded_and_caps_duration(tmp_path, monkeypatch):
+    source = tmp_path / "brief.mp4"
+    source.write_bytes(b"synthetic-video")
+    policy = VideoIngestionPolicy(max_duration_seconds=5, max_visual_samples=2)
+
+    def collect(_path, *, stage_charger=None, fallbacks=None, policy=None, cancel_event=None):
+        assert policy.max_duration_seconds == 5
+        return [VideoEvent(8.0, 9.0, "video_ocr", "outside cap")], 10.0
+
+    monkeypatch.setattr("ingestion_pipelines.extract_video._collect_video_events", collect)
+    evidence = extract_video_evidence(
+        str(source),
+        document_id="doc-video-policy",
+        source_reference="brief.mp4",
+        source_hash="sha256:" + "d" * 64,
+        policy=policy,
+    )
+
+    scenes = [block for block in evidence if block.modality == "video_scene"]
+    events = [block for block in evidence if block.modality != "video_scene"]
+    assert scenes[0].location.end_seconds == 5.0
+    assert not events
+    assert scenes[0].metadata["ingestion_policy"]["max_visual_samples"] == 2
+
+
+def test_video_ingestion_cancellation_is_cooperative(tmp_path):
+    source = tmp_path / "brief.mp4"
+    source.write_bytes(b"synthetic-video")
+    cancel_event = Event()
+    cancel_event.set()
+
+    with pytest.raises(VideoIngestionCancelled):
+        extract_video_evidence(
+            str(source),
+            document_id="doc-video-cancel",
+            source_reference="brief.mp4",
+            source_hash="sha256:" + "e" * 64,
+            cancel_event=cancel_event,
+        )

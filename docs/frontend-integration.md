@@ -6,6 +6,9 @@ runs, displays safe progress, renders returned artifacts, and submits user
 decisions. It does not call Cognee, CrewAI, OpenAI, provider workers, or the
 DeepSeek Harness directly.
 
+For ticket-by-ticket ownership, status, dependencies, and parallel work order,
+see [the frontend/backend feature matrix](frontend-backend-feature-matrix.md).
+
 The backend contract is defined in
 [`docs/backend-integration.md`](backend-integration.md). The internal execution
 diagrams are in

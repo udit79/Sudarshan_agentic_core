@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from threading import Event
 
 from pipelines.infographic.ir import diagram_ir_from_output, infographic_ir_from_output, infographic_ir_to_syntax
 from pipelines.infographic.normalization import normalize_infographic_output
@@ -53,3 +55,22 @@ def test_real_final_output_renders_through_node_boundary(tmp_path) -> None:
     assert report.approved, report.issues
     assert report.width and report.width > 0
     assert report.height and report.height > 0
+
+
+def test_renderer_honors_cancellation_before_start(tmp_path) -> None:
+    script = tmp_path / "renderer.py"
+    script.write_text("", encoding="utf-8")
+    renderer = AntVInfographicRenderer(
+        node_binary=sys.executable,
+        renderer_script=script,
+        output_dir=tmp_path,
+    )
+    cancel = Event()
+    cancel.set()
+
+    try:
+        renderer("infographic list-grid-simple", artifact_name="cancelled", cancel_event=cancel)
+    except RuntimeError as exc:
+        assert "cancelled" in str(exc)
+    else:
+        raise AssertionError("renderer ignored cancellation")

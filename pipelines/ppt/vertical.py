@@ -8,7 +8,6 @@ manifests. It intentionally does not make the Harness session the scheduler.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -20,8 +19,8 @@ from api.control_plane import ControlPlane
 from api.dag_scheduler import DAGSchedulerBridge
 from pipelines.orchestrator.contracts import NodeSpec
 from pipelines.orchestrator.dag import DAGNodeState, DependencyDAG
-from pipelines.ppt.flowchart import FlowchartLayout, layout_flowchart, render_flowchart_pptx, render_flowchart_svg
-from pipelines.ppt.quality import VisualDiagnostic, VisualQualityReport, inspect_flowchart
+from pipelines.ppt.flowchart import layout_flowchart, render_flowchart_pptx, render_flowchart_svg
+from pipelines.ppt.quality import VisualDiagnostic, VisualQualityReport, inspect_flowchart, inspect_flowchart_svg
 from pipelines.common.visual_qa import inspect_visual_artifact
 from pipelines.ppt.schemas import FlowchartSpec, VisualIR
 from pipelines.orchestrator.cache import stable_hash
@@ -169,6 +168,20 @@ class PresentationVerticalSlice:
 
     def _quality_node(self, run_id: str, state: dict[str, Any]) -> Mapping[str, Any]:
         report: VisualQualityReport = inspect_flowchart(state["layout"])
+        svg_safety_issues = inspect_flowchart_svg(
+            state["svg_path"].read_text(encoding="utf-8"),
+            required_text=tuple(node.label for node in state["spec"].nodes),
+        )
+        for issue in svg_safety_issues:
+            report.diagnostics.append(
+                VisualDiagnostic(
+                    issue_id="renderer.svg-safety",
+                    target_id=str(state["svg_path"]),
+                    severity="error",
+                    message=issue,
+                    repairable=False,
+                )
+            )
         renderer_version = os.getenv("SUDARSHAN_PPT_RENDERER_VERSION", "sudarshan-flowchart@1")
         for artifact_path, label in ((state["svg_path"], "svg"), (state["pptx_path"], "pptx")):
             rendered = inspect_visual_artifact(

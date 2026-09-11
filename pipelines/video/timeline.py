@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 from typing import Any, Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,6 +19,10 @@ class TimelineAsset(BaseModel):
     path: str | None = None
     status: Literal["planned", "verified", "fallback", "missing"] = "planned"
     fallback_reason: str | None = None
+    provider: str = "local"
+    checksum: str | None = None
+    license_scope: str | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
 
 class TimelineClip(BaseModel):
@@ -78,7 +83,25 @@ def build_video_timeline(
                     path=str(path) if path else None,
                     status=("verified" if path and Path(path).is_file() else "fallback" if fallback else "missing"),
                     fallback_reason=str(fallback) if fallback else None,
+                    checksum=_file_checksum(path),
+                    provider="openai" if kind == "image" and path else "local",
                 ))
+        material_path = getattr(scene, "material_path", None)
+        if material_path:
+            asset_id = f"{scene_id}:material-path"
+            asset_ids.append(asset_id)
+            assets.append(TimelineAsset(
+                asset_id=asset_id,
+                scene_id=scene_id,
+                kind="material",
+                source_reference=str(material_path),
+                path=str(material_path),
+                status="verified" if Path(material_path).is_file() else "missing",
+                provider=str(getattr(scene, "material_provider", "local") or "local"),
+                checksum=_file_checksum(material_path),
+                license_scope=getattr(scene, "material_license_scope", None),
+                provenance={"asset_id": getattr(scene, "material_asset_id", None)},
+            ))
         for index, reference in enumerate(getattr(scene, "material_references", ()) or ()):
             asset_id = f"{scene_id}:material:{index}"
             asset_ids.append(asset_id)
@@ -107,6 +130,19 @@ def build_video_timeline(
         clips=clips,
         assets=assets,
     )
+
+
+def _file_checksum(path: str | None) -> str | None:
+    if not path or not Path(path).is_file():
+        return None
+    digest = hashlib.sha256()
+    try:
+        with Path(path).open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return f"sha256:{digest.hexdigest()}"
 
 
 __all__ = ["TimelineAsset", "TimelineClip", "VideoTimeline", "build_video_timeline"]

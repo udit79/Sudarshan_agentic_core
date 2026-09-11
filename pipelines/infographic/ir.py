@@ -40,7 +40,7 @@ def infographic_ir_to_syntax(ir: InfographicIR) -> str:
     """Compile semantic IR into the current renderer's stable AntV DSL."""
 
     lines = ["infographic list-grid-simple", "data", "  lists"]
-    lines.extend([f"    - label Brief", f"      desc {_safe(ir.title)}"])
+    lines.extend(["    - label Brief", f"      desc {_safe(ir.title)}"])
     for block in ir.blocks:
         label = f"[{block.block_id}] {_safe(block.label)}"
         desc = _safe(block.description)

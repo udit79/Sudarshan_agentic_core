@@ -5,6 +5,9 @@ DeepSeek Harness integration. The Python application is the source of truth
 for routing, memory policy, pipeline execution, approval, cancellation, and
 artifact metadata. The Harness is the session/tool/runtime layer.
 
+For ticket-by-ticket ownership, status, dependencies, and parallel work order,
+see [the frontend/backend feature matrix](frontend-backend-feature-matrix.md).
+
 ## Integration rule
 
 There is one application boundary. Backend code should call the HTTP API or

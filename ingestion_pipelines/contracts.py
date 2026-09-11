@@ -57,6 +57,20 @@ class IngestionBudget(IngestionContractModel):
     wall_time_seconds: int = Field(default=300, ge=1)
 
 
+class VideoIngestionPolicy(IngestionContractModel):
+    """Deterministic limits for multimodal video extraction.
+
+    The Harness/application owns this policy.  Extractors may implement it,
+    but they must not expand it from model output or source content.
+    """
+
+    max_duration_seconds: int = Field(default=7200, ge=1, le=86_400)
+    max_visual_samples: int = Field(default=12, ge=1, le=256)
+    sample_interval_seconds: float = Field(default=5.0, gt=0, le=3600)
+    audio_enabled: bool = True
+    visual_enabled: bool = True
+
+
 class EvidenceLocation(IngestionContractModel):
     """Address of evidence in the original source or a derived media asset."""
 

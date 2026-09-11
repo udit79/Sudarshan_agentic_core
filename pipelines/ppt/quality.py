@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from html import escape
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from pipelines.ppt.flowchart import FlowchartLayout, LayoutNode
-from pipelines.ppt.schemas import EvidenceBinding, RepairPatch
+from pipelines.ppt.schemas import RepairPatch
 
 
 class VisualDiagnostic(BaseModel):
@@ -120,6 +121,31 @@ def inspect_flowchart(layout: FlowchartLayout) -> VisualQualityReport:
     )
 
 
+def inspect_flowchart_svg(svg: str, *, required_text: tuple[str, ...] = ()) -> list[str]:
+    """Fail closed on unsafe or inaccessible static flowchart SVG output."""
+
+    issues: list[str] = []
+    root = svg.lstrip()
+    if not re.match(r"(?:<\?[^>]*>\s*)*<svg\b", root):
+        issues.append("SVG output has no valid root")
+    if not re.search(r"</svg>\s*$", svg):
+        issues.append("SVG output has no closing root")
+    if not re.search(r"\b(width|viewBox)=", svg):
+        issues.append("SVG output has no dimensions")
+    if not re.search(r"<title>[^<]+</title>", svg):
+        issues.append("SVG output is missing an accessible title")
+    if not re.search(r"<desc>[^<]+</desc>", svg):
+        issues.append("SVG output is missing an accessible description")
+    if re.search(r"<script\b|\bon[a-z]+\s*=|javascript:|data:text/html|@import\b", svg, re.IGNORECASE):
+        issues.append("SVG output contains executable content")
+    if re.search(r"(?:href|xlink:href)\s*=\s*['\"](?:https?:|//|data:)", svg, re.IGNORECASE):
+        issues.append("SVG output contains a remote or data reference")
+    for value in required_text:
+        if value not in svg and escape(value) not in svg:
+            issues.append(f"required visible label is missing: {value}")
+    return issues
+
+
 def repair_patches(report: VisualQualityReport) -> list[RepairPatch]:
     """Convert stable diagnostics into bounded, targeted repair requests."""
 
@@ -174,4 +200,11 @@ def _segments_intersect(a, b, c, d) -> bool:
     return orientation(a, b, c) != orientation(a, b, d) and orientation(c, d, a) != orientation(c, d, b)
 
 
-__all__ = ["SourceMapEntry", "VisualDiagnostic", "VisualQualityReport", "inspect_flowchart", "repair_patches"]
+__all__ = [
+    "SourceMapEntry",
+    "VisualDiagnostic",
+    "VisualQualityReport",
+    "inspect_flowchart",
+    "inspect_flowchart_svg",
+    "repair_patches",
+]

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
 from threading import Event
-from typing import Any
 
 from api.artifacts import ArtifactStore
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse

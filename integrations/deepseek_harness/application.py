@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from threading import Event, Lock
 import hashlib
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from ingestion_pipelines import (
     IngestionBudgetController,
     IngestionStageCache,
     IngestionUsageRecorder,
+    VideoIngestionPolicy,
     build_ingestion_stage_fingerprint,
 )
 from ingestion_pipelines.evidence_index import EvidenceIndex
@@ -43,7 +45,6 @@ from pipelines.orchestrator import (
     RunContext,
     RunEvent,
     RunSummary,
-    RunPolicy,
     PipelineOrchestrator,
     RedisProgressSink,
     RedisObservabilityStore,
@@ -381,19 +382,26 @@ class SudarshanApplication:
 
         if cancel_event is not None and cancel_event.is_set():
             return {"status": "cancelled", "error": "ingestion cancelled before extraction"}
-        result = self.ingest_path(
-            str(payload.get("file_path", "")),
-            source_reference=str(payload["source_reference"]),
-            operator_id=operator_id,
-            user_id=str(payload["user_id"]),
-            case_id=str(payload["case_id"]),
-            task_id=str(payload["task_id"]),
-            classification_level=str(payload.get("classification_level", "RESTRICTED")),
-            ingestion_id=str(payload.get("ingestion_id", payload.get("run_id", ""))) or None,
-            source_hash=str(payload.get("source_hash", "")) or None,
-            source_object_id=str(payload.get("source_object_id", "")) or None,
-            budget=payload.get("budget"),
-        )
+        try:
+            result = self.ingest_path(
+                str(payload.get("file_path", "")),
+                source_reference=str(payload["source_reference"]),
+                operator_id=operator_id,
+                user_id=str(payload["user_id"]),
+                case_id=str(payload["case_id"]),
+                task_id=str(payload["task_id"]),
+                classification_level=str(payload.get("classification_level", "RESTRICTED")),
+                ingestion_id=str(payload.get("ingestion_id", payload.get("run_id", ""))) or None,
+                source_hash=str(payload.get("source_hash", "")) or None,
+                source_object_id=str(payload.get("source_object_id", "")) or None,
+                budget=payload.get("budget"),
+                video_policy=payload.get("video_policy"),
+                cancel_event=cancel_event,
+            )
+        except RuntimeError as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                return {"status": "cancelled", "error": str(exc)}
+            raise
         if cancel_event is not None and cancel_event.is_set():
             return {"status": "cancelled", "error": "ingestion cancelled after extraction"}
         return {"status": "succeeded", "skill_result": result}
@@ -1368,6 +1376,8 @@ class SudarshanApplication:
         source_hash: str | None = None,
         source_object_id: str | None = None,
         budget: IngestionBudget | Mapping[str, Any] | None = None,
+        video_policy: VideoIngestionPolicy | Mapping[str, Any] | None = None,
+        cancel_event: Event | None = None,
     ) -> dict[str, Any]:
         """Perform real source extraction and persist it through MemoryManager."""
 
@@ -1406,13 +1416,30 @@ class SudarshanApplication:
             budget,
             modality=Path(extraction_path).suffix.lower().lstrip("."),
         )
+        resolved_video_policy: VideoIngestionPolicy | None = None
+        if Path(extraction_path).suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
+            from ingestion_pipelines.extract_video import default_video_ingestion_policy
+
+            resolved_video_policy = (
+                video_policy
+                if isinstance(video_policy, VideoIngestionPolicy)
+                else VideoIngestionPolicy.model_validate(video_policy)
+                if isinstance(video_policy, Mapping)
+                else default_video_ingestion_policy()
+            )
+        if cancel_event is not None and cancel_event.is_set():
+            return {"status": "cancelled", "error": "ingestion cancelled before extraction"}
         self.ingestion_budget_controller.register(resolved_ingestion_id, resolved_budget)
         scope = {"user_id": user_id, "case_id": case_id, "task_id": task_id}
         fingerprint = build_ingestion_stage_fingerprint(
             source_hash=resolved_source_hash,
             stage="parser",
             stage_version="ingestion-pipeline@2",
-            configuration_hash=os.getenv("SUDARSHAN_INGESTION_CONFIGURATION_HASH", "local-default"),
+            configuration_hash=(
+                os.getenv("SUDARSHAN_INGESTION_CONFIGURATION_HASH", "local-default")
+                + ("|video-policy=" + json.dumps(resolved_video_policy.model_dump(mode="json"), sort_keys=True)
+                   if resolved_video_policy is not None else "")
+            ),
             model_policy=os.getenv("SUDARSHAN_INGESTION_MODEL_POLICY", "local-first"),
             scope={**scope, "classification_level": classification},
         )
@@ -1481,6 +1508,8 @@ class SudarshanApplication:
                     source_reference=source_reference,
                     stage_charger=charge_stage,
                     usage_recorder=record_usage,
+                    video_policy=resolved_video_policy,
+                    cancel_event=cancel_event,
                 )
                 evidence_count = len(document.evidence_blocks)
                 if evidence_count > 1:
