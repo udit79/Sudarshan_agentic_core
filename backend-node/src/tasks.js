@@ -19,6 +19,11 @@ export function safeTask(task) {
     case_id: task.caseId,
     prompt: task.inputPreview,
     output_types: task.outputTypes,
+    operation: task.operation || "create",
+    parent_run_id: task.parentRunId || null,
+    parent_artifact_id: task.parentArtifactId || null,
+    revision_instruction: task.revisionInstruction || null,
+    revision_scope: Array.isArray(task.revisionScope) ? task.revisionScope : [],
     status: task.status,
     summary: task.runSummary || null,
     event_cursor: Number(task.eventSequence || 0),
@@ -44,6 +49,35 @@ export async function listTasksForUser(userId, limit = 30) {
     .lean();
 }
 
+export function safeArtifact(task, manifest) {
+  const kind = String(manifest?.kind || manifest?.artifact_type || "output").trim().toLowerCase();
+  const artifactId = String(manifest?.artifact_id || `${task.taskId}:${kind}`);
+  return {
+    ...manifest,
+    artifact_id: artifactId,
+    kind,
+    task_id: task.taskId,
+    run_id: task.runId || null,
+    case_id: task.caseId,
+    task_status: task.status,
+    classification_level: task.classificationLevel || "RESTRICTED",
+    created_at: task.createdAt,
+    updated_at: task.updatedAt,
+    gateway_download_uri: `/api/v1/tasks/${encodeURIComponent(task.taskId)}/artifacts/${encodeURIComponent(kind)}`,
+    gateway_manifest_uri: `/api/v1/tasks/${encodeURIComponent(task.taskId)}/artifacts/${encodeURIComponent(kind)}/manifest`,
+  };
+}
+
+export async function listArtifactsForUser(userId, { caseId = "", kind = "", limit = 100 } = {}) {
+  const query = { userId };
+  if (caseId) query.caseId = caseId;
+  const tasks = await Task.find(query).sort({ updatedAt: -1 }).limit(Math.min(Math.max(Number(limit) || 100, 1), 200)).lean();
+  const normalizedKind = kind === "ppt" ? "presentation" : String(kind).trim().toLowerCase();
+  return tasks.flatMap((task) => (Array.isArray(task.artifactManifests) ? task.artifactManifests : [])
+    .filter((manifest) => !normalizedKind || String(manifest?.kind || "").toLowerCase() === normalizedKind)
+    .map((manifest) => safeArtifact(task, manifest)));
+}
+
 function resultFromStatus(status) {
   if (status.responses && typeof status.responses === "object") return status.responses;
   if (status.response) return { [status.response.pipeline || "output"]: status.response };
@@ -65,12 +99,17 @@ export function projectCanonicalStatus(task, status) {
   };
 }
 
-export function idempotencyRequestMatches(task, { query, outputTypes, classificationLevel, distribution }) {
+export function idempotencyRequestMatches(task, { query, outputTypes, classificationLevel, distribution, operation = "create", parentRunId = "", parentArtifactId = "", revisionInstruction = "", revisionScope = [] }) {
   const requestedHash = crypto.createHash("sha256").update(inputText(query)).digest("hex");
   return task.inputHash === requestedHash
     && JSON.stringify(task.outputTypes) === JSON.stringify(outputTypes)
     && (task.classificationLevel || "RESTRICTED") === (classificationLevel || "RESTRICTED")
-    && (task.distribution || "Authorized NTRO personnel") === (distribution || "Authorized NTRO personnel");
+    && (task.distribution || "Authorized NTRO personnel") === (distribution || "Authorized NTRO personnel")
+    && (task.operation || "create") === (operation || "create")
+    && (task.parentRunId || "") === (parentRunId || "")
+    && (task.parentArtifactId || "") === (parentArtifactId || "")
+    && (task.revisionInstruction || "") === (revisionInstruction || "")
+    && JSON.stringify(task.revisionScope || []) === JSON.stringify(revisionScope || []);
 }
 
 export function isTransientPythonError(error) {
@@ -190,6 +229,11 @@ export async function createTransformation({ user, body, idempotencyKey, wait, r
       outputTypes,
       classificationLevel: body.classification_level,
       distribution: body.distribution,
+      operation: body.operation,
+      parentRunId: body.parent_run_id,
+      parentArtifactId: body.parent_artifact_id,
+      revisionInstruction: body.revision_instruction,
+      revisionScope: body.revision_scope,
     })) {
       const error = new Error("Idempotency-Key was already used for a different transformation request");
       error.status = 409;
@@ -218,6 +262,11 @@ export async function createTransformation({ user, body, idempotencyKey, wait, r
       inputHash: crypto.createHash("sha256").update(query).digest("hex"),
       inputPreview: query.slice(0, 1000),
       outputTypes,
+      operation: body.operation,
+      parentRunId: body.parent_run_id || "",
+      parentArtifactId: body.parent_artifact_id || "",
+      revisionInstruction: body.revision_instruction || "",
+      revisionScope: body.revision_scope || [],
       classificationLevel: body.classification_level,
       distribution: body.distribution,
       status: "queued",
@@ -234,6 +283,11 @@ export async function createTransformation({ user, body, idempotencyKey, wait, r
       outputTypes,
       classificationLevel: body.classification_level,
       distribution: body.distribution,
+      operation: body.operation,
+      parentRunId: body.parent_run_id,
+      parentArtifactId: body.parent_artifact_id,
+      revisionInstruction: body.revision_instruction,
+      revisionScope: body.revision_scope,
       metadata: { gateway_task_id: taskId },
     });
     task.runId = accepted.run_id;

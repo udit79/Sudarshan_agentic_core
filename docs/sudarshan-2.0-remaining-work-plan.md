@@ -486,6 +486,12 @@ Acceptance:
 - External providers are represented by typed receipts and failure classes.
 - No connector can bypass scheduler, approval, scope, or artifact policy.
 
+Implementation status: complete locally. `SocialCapabilityBoundary` provides
+typed read/write requests and receipts, manual/draft fallback, approval gating,
+cooperative cancellation, bounded timeout handling, and provider error
+classification. Provider adapters remain optional and SDK-free from the skill
+surface.
+
 ### T64 — LinkedIn environment and configuration contract
 
 Owner: backend/platform. Depends on: T53, T63.
@@ -773,6 +779,10 @@ Completed locally with focused and full-suite verification:
 - T62: Humanizer V2 adds stable rule IDs, paragraph locations, cadence,
   density, reveal-bridge, triad, fragment, over-correction, concrete-detail,
   and explicit voice-policy findings without rewriting evidence.
+- T63: `SocialCapabilityBoundary` provides typed provider-neutral social
+  requests/receipts, manual fallback, approval gating, cooperative
+  cancellation, bounded timeouts, and classified adapter failures without
+  exposing provider SDKs or credentials to skills.
 - T67: LinkedIn visual child plans execute through `SkillRuntime`; successful
   artifact and quality references reconcile into the parent `visual_child`
   projection, while failure remains typed and draft-only.
@@ -788,10 +798,15 @@ Completed locally with focused and full-suite verification:
   are available; hook failures are isolated from the main run.
 - T78: Stable `sudarshan://context/.../L0|L1|L2` references are attached to
   memory/context projections and preserve scope and source identity.
+- T74: The native frontend now renders typed connector, approval, scheduling,
+  receipt, and humanizer projections, supports approval/resume decisions, and
+  preserves safe manual copy/export behavior without exposing raw prompts or
+  provider credentials.
 
-Still open and intentionally not marked complete in this pass: T63–T66,
-T72–T76 (social connector, durable scheduling, frontend, and provider-test
-infrastructure), and T79–T83 (renderer hardening, video/PPT repair, and
+Still open and intentionally not marked complete in this pass: T64–T66,
+T72–T73 and T75–T76 (durable scheduling, monitoring, and provider-test
+infrastructure), and
+T79–T83 (renderer hardening, video/PPT repair, and
 release/license ledger). Those require backend/frontend/rendering/release
 ownership beyond the agentic slice.
 
@@ -880,18 +895,22 @@ scheduler, editor runtime, or arbitrary HTML execution path.
 | --- | --- | --- |
 | DD-1 | Record the MIT license/adaptation boundary and map reference ideas to typed diagram contracts | Complete locally |
 | DD-2 | Add static SVG accessibility/safety checks and wire them into flowchart promotion | Complete locally |
-| DD-3 | Add an allow-listed semantic diagram type registry and deterministic type selection | Open |
-| DD-4 | Add sanitized standalone HTML/SVG/PNG export contracts with artifact manifests | Open |
-| DD-5 | Add bounded Mermaid, draw.io, and Excalidraw import adapters with adversarial fixtures | Open |
-| DD-6 | Add versioned NTRO style profiles, semantic tokens, marker resolution, and contrast checks | Open |
-| DD-7 | Add label geometry, density, bilingual text, and visual regression gates | Open |
+| DD-3 | Add an allow-listed semantic diagram type registry and deterministic type selection | Complete locally |
+| DD-4 | Add sanitized standalone HTML/SVG/PNG export contracts with artifact manifests | Partial locally: HTML/SVG are implemented; PNG/PPT/video export promotion remains open |
+| DD-5 | Add bounded Mermaid, draw.io, and Excalidraw import adapters with adversarial fixtures | Partial locally: bounded basic adapters and hostile-content checks are implemented; compressed/large-corpus coverage remains open |
+| DD-6 | Add versioned NTRO style profiles, semantic tokens, marker resolution, and contrast checks | Complete locally for the initial NTRO profile; profile persistence/marker resolution remains open |
+| DD-7 | Add label geometry, density, bilingual text, and visual regression gates | Partial locally: structural and static SVG gates are implemented; browser screenshot regression remains open |
 | DD-8 | Add optional motion only through one pinned reviewed controller; keep static output default | Open |
-| DD-9 | Expose diagram preview/edit/export through the custom frontend/plugin and MCP/A2A approval boundary | Open |
+| DD-9 | Expose diagram preview/edit/export through the custom frontend/plugin and MCP/A2A approval boundary | Partial locally: isolated frontend preview boundary is implemented; edit/export approval projections remain open |
 
-DD-1 and DD-2 deliberately improve the current native flowchart path. No
-reference HTML, JavaScript, editor, or import parser is copied into the repo.
-The existing editable PPTX renderer remains available, and all diagrams still
-need evidence lineage and quality approval before delivery.
+DD-1 and DD-2 deliberately improve the current native flowchart path. The
+current implementation pass adds the semantic registry, safe HTML/SVG export,
+bounded basic import adapters, the initial NTRO profile, and an isolated
+frontend preview module. No reference HTML, JavaScript, editor, or import
+parser is copied into the repo. The existing editable PPTX renderer remains
+available, and all diagrams still need evidence lineage and quality approval
+before delivery. PNG/browser regression, edit/approval projection, and motion
+remain explicitly open.
 
 ### T61–T83 compatibility gate
 

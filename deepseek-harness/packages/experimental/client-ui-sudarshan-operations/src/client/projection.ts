@@ -52,6 +52,22 @@ export interface OperatorProjection {
   generatedAt: string
 }
 
+export interface OperationsBridge {
+  getProjection?: (sessionId: string) => Promise<OperatorProjection> | OperatorProjection
+  previewArtifact?: (artifact: ArtifactProjection) => void
+  downloadArtifact?: (artifact: ArtifactProjection) => void
+  retryIngestion?: (sessionId: string) => void
+  cancelIngestion?: (sessionId: string) => void
+}
+
+declare global {
+  var SudarshanOperationsBridge: OperationsBridge | undefined
+}
+
+export function getOperationsBridge(): OperationsBridge | undefined {
+  return globalThis.SudarshanOperationsBridge
+}
+
 /** Deterministic fixture used until the typed backend projection is available. */
 export function previewProjection(sessionId: string, refresh = 0): OperatorProjection {
   const suffix = sessionId.slice(-6) || 'local'

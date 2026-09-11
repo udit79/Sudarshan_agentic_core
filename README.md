@@ -43,6 +43,95 @@ matched evaluation benchmarks, and release/rollback sign-off remain open.
 See the detailed [current status](docs/current-status.md) and
 [assumption ledger](docs/sudarshan-2.0-assumptions.md).
 
+## Agent handoff: skills, plugins, and tickets
+
+This repository has two related but different extension concepts:
+
+- A **Sudarshan skill** is a product capability that transforms typed input
+  into a validated result or artifact. Its source lives under
+  `skills/<skill-name>/` and normally contains `SKILL.md`, `manifest.json`,
+  schemas, references, and evaluation fixtures.
+- A **Harness/plugin adapter** is an integration surface for the native
+  DeepSeek Harness, MCP, A2A, or another runtime. It may expose Sudarshan
+  skills and projections, but it must not own routing, memory policy, budgets,
+  approvals, or artifact authorization. The checked-in Harness integration is
+  optional; the native Sudarshan application remains the source of truth.
+
+Runtime skill discovery is defined by [skills/catalog.py](skills/catalog.py),
+the package manifests under [skills](skills), and `SkillWorkspace`. Do not add
+a central `if/else` branch for a new capability and do not import provider SDKs
+or credentials from a skill. Register a versioned manifest, implement the
+adapter behind the existing runtime contract, add deterministic fixtures, and
+let the Harness/MCP/plugin layer discover it.
+
+### Where tickets are stored
+
+Use these files in this order:
+
+1. [Full 2.0 execution plan](docs/sudarshan-2.0-full-execution-plan.md) —
+   research-backed architecture, HLD/LLD, original T00–T52 plan, constraints,
+   sources, and release principles.
+2. [Remaining-work plan](docs/sudarshan-2.0-remaining-work-plan.md) — the
+   active ticket ledger after T38. Each ticket has an ID, owner, dependencies,
+   implementation requirements, and acceptance criteria. Its
+   **Agentic ticket status** and track tables record what is complete locally,
+   what is partial, and what remains open.
+3. [Team-parallel guide](docs/sudarshan-2.0-team-parallel-guide.md) — ownership,
+   branch boundaries, shared contracts, fixtures, and parallel execution order.
+4. [Current status](docs/current-status.md) — honest implementation and
+   production-readiness summary; do not infer completion from a passing unit
+   test alone.
+5. [Skill authoring guide](docs/skill-authoring.md) — the required skill
+   package, manifest, prompt, child-skill, tool, budget, quality, and eval
+   contract.
+
+The active ticket workflow is:
+
+```text
+read plan and assumptions
+  -> inspect current code and reference adaptations
+  -> write/confirm a small ticket with owner, dependencies, and acceptance
+  -> implement behind existing contracts
+  -> add or update deterministic tests/fixtures
+  -> run focused checks and the relevant full suite
+  -> audit for regressions, security, scope, and stale documentation
+  -> update ticket status and assumptions
+```
+
+When taking a ticket, an agent should report: ticket ID, files in scope,
+assumptions, tests to run, and any dependency it is intentionally leaving for
+another team. A ticket is not complete merely because code exists: its
+acceptance criteria, focused tests, compatibility checks, and documentation
+status must be satisfied. Do not commit unless the repository owner asks for a
+commit.
+
+### Adding a new skill or plugin capability
+
+Start with the base skill structure, then specialize it:
+
+```text
+skills/<skill-name>/
+  SKILL.md              # concise operating instructions
+  manifest.json         # ID, version, tools, risk, budget, gates, children
+  schema.json           # typed input/output when applicable
+  references/           # on-demand domain guidance
+  evals/                # deterministic fixtures and smoke cases
+```
+
+The manifest must declare allowed tools, output artifact types, quality gates,
+risk class, model/token budget, wall-time limit, and child skills. Parent
+skills invoke children only through the typed `SkillRuntime` contract with a
+bounded context, budget reservation, cancellation signal, and lineage. A
+child returns structured IR/artifact references; it cannot publish, write
+memory, read credentials, or overwrite a parent artifact by itself.
+
+For every new skill, update the runtime catalog/package discovery, add success,
+ambiguity, prompt-injection, unauthorized-scope, timeout/cancellation, and
+budget fixtures, then add a ticket entry to the remaining-work plan. If a
+reference repository inspired behavior, adapt the behavior natively and record
+the source/license decision in the reference-adaptation or release ledger;
+do not make Sudarshan depend on that repository at runtime.
+
 ## What it delivers
 
 | Pipeline | Output |
@@ -85,7 +174,8 @@ Sudarshan is a hybrid agentic workflow:
   cancellation, approval boundaries, and delivery policy.
 - CrewAI owns specialist collaboration inside each pipeline.
 - MemoryManager owns Cognee access and User/Case/Task scope policy.
-- DeepSeek Harness owns session, MCP, and runtime integration.
+- A Harness adapter owns session, MCP, and runtime integration; the checked-in
+  DeepSeek Harness profile is optional and replaceable.
 - The Node gateway owns browser authentication, ownership, quotas, and safe
   delivery.
 - The frontend owns request composition, uploads, previews, and progress display.

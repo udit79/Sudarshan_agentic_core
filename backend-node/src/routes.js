@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { authMiddleware, currentUser, googleCallback, logout, refreshSession, startGoogle } from "./auth.js";
 import { Case, Task, User } from "./models.js";
 import { cancelRun, configureRuntime, getPythonHealth, ingestSource, resumeRun, streamRunEvents } from "./python-client.js";
-import { createTransformation, getTaskForUser, listTasksForUser, assertCaseOwnership, safeTask } from "./tasks.js";
+import { createTransformation, getTaskForUser, listArtifactsForUser, listTasksForUser, assertCaseOwnership, safeTask } from "./tasks.js";
 import { caseSchema, parse, resumeSchema, transformSchema } from "./validation.js";
 
 const router = express.Router();
@@ -308,6 +308,19 @@ router.get("/tasks", async (req, res, next) => {
   try {
     const tasks = await listTasksForUser(req.auth.sub);
     res.json({ tasks: tasks.map(safeTask) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/artifacts", async (req, res, next) => {
+  try {
+    const artifacts = await listArtifactsForUser(req.auth.sub, {
+      caseId: String(req.query.case_id || "").trim(),
+      kind: String(req.query.kind || "").trim(),
+      limit: req.query.limit,
+    });
+    res.json({ artifacts });
   } catch (error) {
     next(error);
   }

@@ -10,7 +10,7 @@ same claims.
 | Area | Current state | Honest claim |
 | --- | --- | --- |
 | Agentic control plane | Implemented locally | LangGraph owns routing and lifecycle; specialist pipelines and typed child skills run behind bounded contracts. |
-| Harness/MCP boundary | Implemented locally | DeepSeek Harness and external MCP clients use the same Sudarshan application boundary. |
+| Harness/MCP boundary | Implemented locally | DeepSeek Harness is an optional adapter; external MCP/A2A clients use the same Sudarshan application boundary. |
 | Python backend | Strong local vertical slice | Ingestion, memory, routing, pipelines, quality gates, artifacts, scheduler, cache, telemetry, audit, and recovery are wired and tested locally. |
 | Reference frontend | Functional dashboard | Authenticated gateway mode, case/source flow, run progress, cancellation, artifact preview/download, and safe telemetry are available. |
 | Production deployment | Release-candidate code present; deployment gates open | T43–T52 code paths and local tests are present. Live Redis/object-storage, provider reconciliation, signed-sandbox drills, real-corpus benchmarks, external MCP/A2A, visual approval, backup/restore, and release sign-off remain environment gates. |
@@ -50,6 +50,8 @@ profile use the same Sudarshan application boundary.
 - Quality status, failure notices, wait reasons, classification, and safe
   telemetry such as tokens, latency, cache, wait, artifact, and quality
   counters.
+- Artifact history is gateway-backed, with stable task/artifact identifiers and
+  download/manifest URIs; browser storage is only a cache.
 - Development-only one-time OpenAI key setup when enabled by the backend.
   The key is not stored in browser storage.
 
@@ -140,6 +142,8 @@ profile use the same Sudarshan application boundary.
   deployment remain release gates.
 - DeepSeek Harness web composition through replaceable Sudarshan brand and
   theme plugins; generated preview credentials and session state are ignored.
+  The native dashboard remains usable when the optional Harness checkout or
+  port 3080 is unavailable.
 - Current source upload and extraction compatibility path for text, PDF, PPTX,
   image, and video. T31 contracts, T32 source safety, and the T33 local
   asynchronous admission slice, and T34 typed-evidence adapters for text,

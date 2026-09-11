@@ -13,7 +13,22 @@ export const transformSchema = z.object({
   ),
   classification_level: z.enum(["UNCLASSIFIED", "RESTRICTED", "CONFIDENTIAL", "SECRET", "TOP SECRET"]).default("RESTRICTED"),
   distribution: z.string().trim().min(1).max(500).default("Authorized NTRO personnel"),
-}).strict();
+  operation: z.enum(["create", "revise"]).default("create"),
+  parent_run_id: z.string().trim().min(1).max(200).optional(),
+  parent_artifact_id: z.string().trim().min(1).max(300).optional(),
+  revision_instruction: z.string().trim().min(1).max(4000).optional(),
+  revision_scope: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+}).strict().superRefine((value, context) => {
+  if (value.operation === "revise" && !value.parent_run_id && !value.parent_artifact_id) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["parent_artifact_id"], message: "revision requires parent_artifact_id or parent_run_id" });
+  }
+  if (value.operation === "revise" && !value.revision_instruction) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["revision_instruction"], message: "revision requires revision_instruction" });
+  }
+  if (value.operation === "create" && (value.parent_run_id || value.parent_artifact_id || value.revision_instruction || value.revision_scope.length)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["operation"], message: "revision fields require operation=revise" });
+  }
+});
 
 export const resumeSchema = z.object({
   answer: z.string().trim().min(1).max(10000).optional(),

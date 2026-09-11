@@ -2,7 +2,10 @@ param(
     [switch]$SkipInstall,
     [switch]$SkipAntV,
     [switch]$SkipHarness,
+    [switch]$EnableHarness,
     [switch]$SkipNodeGateway,
+    [switch]$SkipDatabaseInit,
+    [switch]$ForceRestart,
     [switch]$NoStart,
     [switch]$OpenBrowser
 )
@@ -15,7 +18,10 @@ $arguments = @()
 if ($SkipInstall) { $arguments += "-SkipInstall" }
 if ($SkipAntV) { $arguments += "-SkipAntV" }
 if ($SkipHarness) { $arguments += "-SkipHarness" }
+if ($EnableHarness) { $arguments += "-EnableHarness" }
 if ($SkipNodeGateway) { $arguments += "-SkipNodeGateway" }
+if ($SkipDatabaseInit) { $arguments += "-SkipDatabaseInit" }
+if ($ForceRestart) { $arguments += "-ForceRestart" }
 if ($NoStart) { $arguments += "-NoStart" }
 if ($OpenBrowser) { $arguments += "-OpenBrowser" }
 & $startup @arguments

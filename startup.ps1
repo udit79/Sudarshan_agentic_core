@@ -3,7 +3,10 @@ param(
     [switch]$SkipInstall,
     [switch]$SkipAntV,
     [switch]$SkipHarness,
+    [switch]$EnableHarness,
     [switch]$SkipNodeGateway,
+    [switch]$SkipDatabaseInit,
+    [switch]$ForceRestart,
     [switch]$NoStart,
     [switch]$OpenBrowser
 )
@@ -13,6 +16,7 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $nodeGatewayRoot = Join-Path $repoRoot "backend-node"
 $antvRoot = Join-Path $repoRoot "pipelines\infographic\antv_renderer"
 $harnessRoot = Join-Path $repoRoot "deepseek-harness"
+$useHarness = $EnableHarness -and -not $SkipHarness
 $frontendRoot = Join-Path $repoRoot "frontend"
 $stateRoot = Join-Path $repoRoot "artifacts\.state"
 $logRoot = Join-Path $stateRoot "startup-logs"
@@ -77,7 +81,7 @@ function Assert-NodeVersion {
     $major = [int]$Matches[1]
     $minor = [int]$Matches[2]
     if ($major -lt 22 -or ($major -eq 22 -and $minor -lt 19)) {
-        throw "Node.js 22.19+ is required because the frozen DeepSeek Harness workspace targets Node 22. Install Node.js LTS from https://nodejs.org/"
+        throw "Node.js 22.19+ is required because the selected Node workspace targets Node 22. Install Node.js LTS from https://nodejs.org/"
     }
 }
 
@@ -223,6 +227,33 @@ function Assert-PortFree([int]$Port, [string]$Service) {
     }
 }
 
+function Stop-ExistingManifestServices {
+    if (-not (Test-Path -LiteralPath $processManifestPath -PathType Leaf)) { return }
+    try {
+        $manifest = Get-Content -LiteralPath $processManifestPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        Write-Warning "Ignoring unreadable stale process manifest: $processManifestPath"
+        Remove-Item -LiteralPath $processManifestPath -Force -ErrorAction SilentlyContinue
+        return
+    }
+    $manifestRoot = [IO.Path]::GetFullPath([string]$manifest.repo_root)
+    $currentRoot = [IO.Path]::GetFullPath($repoRoot)
+    if ($manifestRoot.TrimEnd('\') -ine $currentRoot.TrimEnd('\')) {
+        throw "Refusing to stop processes from another repository: $manifestRoot"
+    }
+    foreach ($service in @($manifest.services)) {
+        $processId = 0
+        if (-not [int]::TryParse([string]$service.pid, [ref]$processId) -or $processId -le 0) { continue }
+        $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        if ($null -eq $process) { continue }
+        Write-Host "Stopping existing $($service.name) (PID $processId) for restart..."
+        Stop-Process -Id $processId -Force -ErrorAction Stop
+    }
+    Remove-Item -LiteralPath $processManifestPath -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 400
+}
+
 function Start-LocalService {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -279,11 +310,17 @@ function Wait-Http {
     param(
         [Parameter(Mandatory = $true)][string]$Url,
         [Parameter(Mandatory = $true)][string]$Service,
-        [int]$TimeoutSeconds = 60
+        [int]$TimeoutSeconds = 60,
+        [System.Diagnostics.Process]$Process = $null
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         try {
+            if ($null -ne $Process -and $Process.HasExited) {
+                $errorLog = Join-Path $logRoot "$Service.err.log"
+                $diagnostic = if (Test-Path -LiteralPath $errorLog) { (Get-Content -LiteralPath $errorLog -Tail 20 -ErrorAction SilentlyContinue) -join "`n" } else { "No stderr log was created." }
+                throw "$Service exited before becoming ready (PID $($Process.Id)).`n$diagnostic"
+            }
             $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
             if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
                 return
@@ -306,6 +343,9 @@ try {
     }
     New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
+    if ($ForceRestart) {
+        Stop-ExistingManifestServices
+    }
     foreach ($artifactDirectory in @(
         (Join-Path $repoRoot "artifacts\presentations"),
         (Join-Path $repoRoot "artifacts\videos"),
@@ -330,7 +370,7 @@ try {
     }
 
     $pythonCommand = Resolve-Python
-    $needsNode = -not $SkipNodeGateway -or -not $SkipAntV -or -not $SkipHarness
+    $needsNode = -not $SkipNodeGateway -or -not $SkipAntV -or $useHarness
     $nodeCommand = $null
     $npmCommand = $null
     if ($needsNode) {
@@ -338,7 +378,7 @@ try {
         $npmCommand = Require-Command "npm" "Install Node.js 22 LTS or newer from https://nodejs.org/"
         Assert-NodeVersion $nodeCommand.Source
     }
-    if (-not $SkipHarness) {
+    if ($useHarness) {
         $pnpmCommand = Get-Command "pnpm" -ErrorAction SilentlyContinue
         if ($null -eq $pnpmCommand) {
             Write-Host "pnpm was not found; installing the pinned pnpm runtime..."
@@ -369,7 +409,7 @@ try {
             Write-Host "Installing the pinned AntV renderer..."
             Invoke-Checked $npmCommand.Source @("ci", "--ignore-scripts", "--no-audit", "--no-fund") $antvRoot
         }
-        if (-not $SkipHarness) {
+        if ($useHarness) {
             Write-Host "Installing the frozen DeepSeek Harness workspace..."
             Invoke-Checked $pnpmCommand.Source @("install", "--frozen-lockfile") $harnessRoot
         }
@@ -379,17 +419,19 @@ try {
         }
     }
 
-    if (-not $SkipHarness) {
+    if ($useHarness) {
         Write-Host "Building the Sudarshan Harness UI plugin bundles..."
         Invoke-Checked $nodeCommand.Source @(
             "node_modules/typescript/bin/tsc",
             "-b",
             "packages/experimental/client-ui-sudarshan/tsconfig.json",
-            "packages/experimental/client-ui-sudarshan-theme/tsconfig.json"
+            "packages/experimental/client-ui-sudarshan-theme/tsconfig.json",
+            "packages/experimental/client-ui-sudarshan-operations/tsconfig.json"
         ) $harnessRoot
         Invoke-Checked $pnpmCommand.Source @(
             "--filter", "@deepseek-ai/dsh-experimental-client-ui-sudarshan",
             "--filter", "@deepseek-ai/dsh-experimental-client-ui-sudarshan-theme",
+            "--filter", "@deepseek-ai/dsh-experimental-client-ui-sudarshan-operations",
             "run", "bundle"
         ) $harnessRoot
     }
@@ -403,7 +445,7 @@ try {
         Assert-PortFree $frontendPort "Frontend"
     }
 
-    if (-not $SkipNodeGateway) {
+    if (-not $SkipNodeGateway -and -not $SkipDatabaseInit) {
         Resolve-MongoSrvUriForWindows
         Write-Host "Building MongoDB Atlas collections and indexes..."
         Invoke-Checked $npmCommand.Source @("run", "db:init", "--silent") $nodeGatewayRoot
@@ -418,17 +460,17 @@ try {
     $env:PORT = [string]$nodePort
     $env:SUDARSHAN_FRONTEND_PORT = [string]$frontendPort
     $pythonProcess = Start-LocalService "python-api" $uvExecutable @("run", "python", "-m", "api.server") $repoRoot -Port $pythonPort
-    Wait-Http "http://127.0.0.1:$pythonPort/health" "python-api"
+    Wait-Http "http://127.0.0.1:$pythonPort/health" "python-api" -Process $pythonProcess
 
     if (-not $SkipNodeGateway) {
         $nodeProcess = Start-LocalService "node-gateway" $nodeCommand.Source @("src/server.js") $nodeGatewayRoot -Port $nodePort
-        Wait-Http "http://127.0.0.1:$nodePort/readyz" "node-gateway"
+        Wait-Http "http://127.0.0.1:$nodePort/readyz" "node-gateway" -Process $nodeProcess
     }
 
     $frontendHost = Get-EnvValue "SUDARSHAN_FRONTEND_HOST"
     if ([string]::IsNullOrWhiteSpace($frontendHost)) { $frontendHost = "127.0.0.1" }
     $frontendProcess = Start-LocalService "frontend" $pythonCommand.Source @("-m", "http.server", [string]$frontendPort, "--bind", $frontendHost, "--directory", $frontendRoot) $repoRoot -Port $frontendPort
-    Wait-Http "http://127.0.0.1:$frontendPort/login.html" "frontend"
+    Wait-Http "http://127.0.0.1:$frontendPort/login.html" "frontend" -Process $frontendProcess
 
     $frontendUrl = "http://localhost:$frontendPort/login.html"
     Write-Host ""
@@ -445,6 +487,15 @@ try {
 }
 catch {
     Stop-StartedServices
-    Write-Error $_
+    Write-Error $_.Exception.Message
+    if (Test-Path -LiteralPath $logRoot -PathType Container) {
+        foreach ($errorLog in @(Get-ChildItem -LiteralPath $logRoot -Filter "*.err.log" -File -ErrorAction SilentlyContinue)) {
+            $lines = @(Get-Content -LiteralPath $errorLog.FullName -Tail 12 -ErrorAction SilentlyContinue)
+            if ($lines.Count -gt 0) {
+                Write-Error ("--- " + $errorLog.Name + " ---`n" + ($lines -join "`n"))
+            }
+        }
+    }
+    Write-Host "Startup failed. Review logs under $logRoot and run .\stop-servers.ps1 before retrying." -ForegroundColor Yellow
     exit 1
 }

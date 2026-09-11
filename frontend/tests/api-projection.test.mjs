@@ -35,6 +35,10 @@ test("normalizes gateway and FastAPI run shapes into one projection", () => {
       },
       output_types: ["presentation", "infographic"],
       event_cursor: 12,
+      approval: { required: true, status: "pending" },
+      connector: { provider: "manual", status: "draft_only" },
+      humanizer_report: { approved: true, issues: [] },
+      schedule: { status: "not_scheduled" },
     },
   });
 
@@ -47,6 +51,10 @@ test("normalizes gateway and FastAPI run shapes into one projection", () => {
   assert.equal(projection.event_cursor, 12);
   assert.equal(projection.quality_status, "pending");
   assert.equal(projection.child_count, 3);
+  assert.equal(projection.approval.status, "pending");
+  assert.equal(projection.connector.provider, "manual");
+  assert.equal(projection.humanizer.approved, true);
+  assert.equal(projection.schedule.status, "not_scheduled");
 });
 
 test("event cursor is persisted and SSE resumes after the newest sequence", () => {

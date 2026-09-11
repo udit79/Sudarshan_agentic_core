@@ -33,6 +33,18 @@ function Stop-ManifestServices {
     return $stopped
 }
 
+function Get-ManifestPorts {
+    param([Parameter(Mandatory = $true)]$Manifest)
+    $ports = [System.Collections.Generic.List[int]]::new()
+    foreach ($service in @($Manifest.services)) {
+        $port = 0
+        if ([int]::TryParse([string]$service.port, [ref]$port) -and $port -ge 1 -and $port -le 65535 -and -not $ports.Contains($port)) {
+            $ports.Add($port)
+        }
+    }
+    return @($ports.ToArray())
+}
+
 $validPorts = @($Ports | Where-Object { $_ -ge 1 -and $_ -le 65535 } | Select-Object -Unique)
 if ($validPorts.Count -eq 0) {
     throw "Provide at least one valid TCP port between 1 and 65535."
@@ -52,7 +64,7 @@ if ($null -ne $manifest -and @($manifest.services).Count -gt 0) {
     Stop-ManifestServices $manifest | Out-Null
     Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 300
-    $manifestPorts = @($manifest.services | Where-Object { [int]$_.port -gt 0 } | Select-Object -ExpandProperty port -Unique)
+    $manifestPorts = Get-ManifestPorts $manifest
     $remaining = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
         Where-Object { $_.LocalPort -in $manifestPorts })
     if ($remaining.Count -gt 0) {

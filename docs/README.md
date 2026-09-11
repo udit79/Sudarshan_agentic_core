@@ -41,6 +41,8 @@ document and the assumption ledger in the same change.
 13. Read the [remaining-work execution plan](sudarshan-2.0-remaining-work-plan.md)
    for the post-T38 production, interoperability, frontend, security, and
    release backlog.
+14. Read the [diagram-design adoption plan](diagram-design-adoption-plan.md)
+   before extending diagram types, imports, visual QA, or diagram delivery.
 
 Research citations are centralized in the [full 2.0 execution plan](sudarshan-2.0-full-execution-plan.md)
 and its [Harness research companion](sudarshan-2.0-harness-research.md). New
@@ -54,6 +56,7 @@ documents should link to those sources instead of copying reference lists.
 | How does a request run? | [Backend integration](backend-integration.md) | [Pipeline orchestration](internal/pipeline-orchestration.md) |
 | How do I add a skill? | [Skill authoring](skill-authoring.md) | `skills/*/manifest.json`, `skills/*/SKILL.md` |
 | How do I add a visual output? | [Rendering and quality](artifact-rendering-and-quality.md) | `pipelines/ppt`, `pipelines/infographic`, `pipelines/video` |
+| How do I extend diagrams safely? | [Diagram Design adoption plan](diagram-design-adoption-plan.md) | `pipelines/diagram`, `skills/visual-flowchart` |
 | How do I use Cognee safely? | [Memory README](../memory/README.md) | `memory/context_builder.py`, `memory/memory_manager.py` |
 | How does the frontend consume runs? | [Frontend integration](frontend-integration.md) | `frontend/api.js`, `frontend/script.js` |
 | How does the gateway enforce ownership? | [Gateway integration](gateway-integration.md) | `backend-node/src` |

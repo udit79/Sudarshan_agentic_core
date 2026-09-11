@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sudarshan AI - Next Gen Transformation</title>
   <script>
-    if (new URLSearchParams(window.location.search).has("dashboard")) {
-      window.location.replace("http://127.0.0.1:3080/");
-    } else {
+    const params = new URLSearchParams(window.location.search);
+    const harnessUrl = window.SUDARSHAN_HARNESS_URL || "";
+    if (params.has("harness") && harnessUrl) {
+      window.location.replace(harnessUrl);
+    } else if (!params.has("dashboard")) {
       window.location.replace("landing.html");
     }
   </script>
@@ -255,6 +257,7 @@
             <strong>Run is waiting</strong>
             <span id="runWaitingReason">The agent is waiting for the next permitted action.</span>
           </div>
+          <section class="run-action-panel" id="runActionPanel" hidden aria-live="polite"></section>
 
           <section class="execution-monitor" id="executionMonitor" hidden aria-label="Execution monitor">
             <div class="execution-monitor-header">
@@ -459,6 +462,7 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <script src="api.js"></script>
+  <script src="diagram/preview.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

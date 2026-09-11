@@ -62,7 +62,7 @@ from pipelines.orchestrator import (
 )
 from pipelines.orchestrator.cross_skill import execute_child_plan
 from pipelines.orchestrator.progress import ProgressEvent
-from integrations.deepseek_harness.skill_catalog import (
+from skills.catalog import (
     build_skill_manifests,
     canonical_skill_id,
     skill_pipeline,

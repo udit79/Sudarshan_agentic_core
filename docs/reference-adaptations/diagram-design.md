@@ -17,8 +17,10 @@ reference plugin marketplace, editor, HTML assets, or controller runtime.
 | Static-by-default output | `render_flowchart_svg` | SVG contains no executable behavior; motion remains out of scope for this slice |
 | Accessible SVG contract | Native SVG title/description metadata and safety checks | Text and provenance still come from typed, authorized IR |
 | Geometry-first QA | `inspect_flowchart` plus SVG safety inspection | Promotion blocks off-canvas, overlap, crossing, unsafe, and missing-label output |
-| Semantic layout selection | `FlowchartSpec` direction/kind/layout hints | Broader type registry is ticketed, not inferred from arbitrary HTML |
-| Import/export ecosystem | Not copied | Mermaid, draw.io, and Excalidraw require sanitized adapters and separate contracts |
+| Semantic layout selection | `diagram_type_registry`, `choose_semantic_pattern`, and `DiagramSpec` metadata | Registry is allow-listed; unsupported types do not become arbitrary HTML |
+| Semantic style profiles | `pipelines/diagram/style.py` and `ntro-default` tokens | Profiles are versioned semantic roles; remote brand scraping is not enabled |
+| Import/export ecosystem | `pipelines/diagram/importers.py` and `export.py` | Basic bounded Mermaid/Draw.io/Excalidraw import and HTML/SVG export are implemented; broader fidelity and PNG/browser export remain ticketed |
+| Frontend artifact boundary | `frontend/diagram/preview.js` | Preview consumes authorized artifact URLs and projections; editing and approval remain outside this slice |
 
 ## Deliberately not copied
 

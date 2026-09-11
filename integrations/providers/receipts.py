@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-from pipelines.orchestrator.contracts import UsageRecord
+if TYPE_CHECKING:
+    from pipelines.orchestrator.contracts import UsageRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,10 @@ class ProviderReceipt:
     provider_fields: dict[str, Any]
 
     def to_usage_record(self, *, usage_id: str, run_id: str, node_id: str | None = None, estimated_cost: float | None = None) -> UsageRecord:
+        # Keep provider receipt imports lightweight; orchestrator contracts
+        # import provider-aware runtime modules during application startup.
+        from pipelines.orchestrator.contracts import UsageRecord
+
         return UsageRecord(
             usage_id=usage_id,
             run_id=run_id,

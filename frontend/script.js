@@ -24,6 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
     resultTitle: document.getElementById("resultTitle"),
     resultMessage: document.getElementById("resultMessage"),
     resultOutput: document.getElementById("resultOutput"),
+    toastContainer: document.getElementById("toastContainer"),
     outputTabsContainer: document.getElementById("outputTabsContainer"),
     outputTabsList: document.getElementById("outputTabsList"),
     richOutputContainer: document.getElementById("richOutputContainer"),
@@ -45,6 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
     runWaitsValue: document.getElementById("runWaitsValue"),
     runWaitingNotice: document.getElementById("runWaitingNotice"),
     runWaitingReason: document.getElementById("runWaitingReason"),
+    runActionPanel: document.getElementById("runActionPanel"),
     executionMonitor: document.getElementById("executionMonitor"),
     executionLanes: document.getElementById("executionLanes"),
     evidenceList: document.getElementById("evidenceList"),
@@ -76,6 +78,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let activeTaskId = null;
   let activeChatId = null;
   let currentTaskData = null;
+  let pendingRevision = null;
   let activeTabType = null;
   let currentSlideIndex = 0;
   let activeRecentFilter = "all";
@@ -172,7 +175,93 @@ document.addEventListener("DOMContentLoaded", () => {
     if (waiting && elements.runWaitingReason) {
       elements.runWaitingReason.textContent = task.wait_reason || task.message || "The agent is waiting for the next permitted action.";
     }
+    renderRunActionPanel(task);
     renderExecutionMonitor(task);
+  }
+
+  function renderRunActionPanel(task) {
+    const panel = elements.runActionPanel;
+    if (!panel) return;
+    panel.replaceChildren();
+    const approval = task?.approval && typeof task.approval === "object" ? task.approval : {};
+    const connector = task?.connector && typeof task.connector === "object" ? task.connector : {};
+    const receipt = task?.receipt && typeof task.receipt === "object" ? task.receipt : {};
+    const schedule = task?.schedule && typeof task.schedule === "object" ? task.schedule : {};
+    const status = String(task?.status || "").toLowerCase();
+    const needsApproval = Boolean(
+      task?.requires_action
+      || ["waiting_for_approval", "approval_required"].includes(status)
+      || approval.required,
+    );
+    const hasOperationalState = Object.keys(connector).length || Object.keys(receipt).length || Object.keys(schedule).length;
+    if (!needsApproval && !hasOperationalState) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+
+    const heading = document.createElement("strong");
+    heading.textContent = needsApproval ? "Operator action required" : "Delivery state";
+    panel.appendChild(heading);
+
+    const state = document.createElement("div");
+    state.className = "run-action-state";
+    const connectorName = connector.provider || connector.name || "manual connector";
+    const connectorStatus = connector.status || (needsApproval ? "approval pending" : "not configured");
+    state.textContent = `Connector: ${String(connectorName)} · ${String(connectorStatus)}`;
+    panel.appendChild(state);
+
+    if (schedule.status || schedule.scheduled_for || schedule.scheduled_at) {
+      const scheduleState = document.createElement("div");
+      scheduleState.className = "run-action-state";
+      scheduleState.textContent = `Schedule: ${String(schedule.status || "scheduled")}${schedule.scheduled_for || schedule.scheduled_at ? ` · ${String(schedule.scheduled_for || schedule.scheduled_at)}` : ""}`;
+      panel.appendChild(scheduleState);
+    }
+    if (receipt.receipt_id || receipt.provider_request_id || receipt.status) {
+      const receiptState = document.createElement("div");
+      receiptState.className = "run-action-state";
+      receiptState.textContent = `Receipt: ${String(receipt.receipt_id || receipt.provider_request_id || receipt.status)}`;
+      panel.appendChild(receiptState);
+    }
+
+    if (!needsApproval || !api.resumeTask || !task?.task_id) return;
+    const actions = document.createElement("div");
+    actions.className = "run-action-buttons";
+    [
+      ["approved", "Approve", false],
+      ["revise", "Request revision", false],
+      ["rejected", "Reject", true],
+    ].forEach(([decision, label, destructive]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `result-action-btn${destructive ? " action-danger" : ""}`;
+      button.textContent = label;
+      button.addEventListener("click", async () => {
+        actions.querySelectorAll("button").forEach((item) => { item.disabled = true; });
+        try {
+          const response = await api.resumeTask(task.task_id, {
+            decision,
+            reviewer_id: currentUser?.id || "operator-local",
+          });
+          const resumed = response?.task || response?.run || response;
+          const normalized = api.normalizeRunProjection
+            ? api.normalizeRunProjection(resumed, task)
+            : { ...task, ...resumed };
+          normalized.task_id = normalized.task_id || task.task_id;
+          normalized.prompt = task.prompt;
+          normalized.output_types = normalized.output_types?.length ? normalized.output_types : task.output_types;
+          currentTaskData = normalized;
+          saveRecentTask(normalized);
+          renderTaskOutput(normalized);
+          showToast(`Decision recorded: ${label}.`);
+        } catch (error) {
+          actions.querySelectorAll("button").forEach((item) => { item.disabled = false; });
+          showApiError(error);
+        }
+      });
+      actions.appendChild(button);
+    });
+    panel.appendChild(actions);
   }
 
   function renderExecutionMonitor(task) {
@@ -506,9 +595,26 @@ document.addEventListener("DOMContentLoaded", () => {
   async function syncRemoteHistory() {
     if (!api.listTasks) return;
     try {
-      const response = await api.listTasks();
+      const [response, artifactResponse] = await Promise.all([
+        api.listTasks(),
+        api.listArtifacts ? api.listArtifacts({ limit: 200 }) : Promise.resolve({ artifacts: [] }),
+      ]);
       const remoteTasks = response?.tasks || [];
       if (!Array.isArray(remoteTasks) || remoteTasks.length === 0) return;
+
+      const artifactsByTask = new Map();
+      for (const artifact of artifactResponse?.artifacts || []) {
+        if (!artifact?.task_id) continue;
+        const list = artifactsByTask.get(artifact.task_id) || [];
+        list.push(artifact);
+        artifactsByTask.set(artifact.task_id, list);
+      }
+      for (const task of remoteTasks) {
+        const artifacts = artifactsByTask.get(task.task_id);
+        if (artifacts?.length && !(task.artifact_manifests || []).length) {
+          task.artifact_manifests = artifacts;
+        }
+      }
 
       const merged = new Map(remoteTasks.filter((task) => task?.task_id).map((task) => [task.task_id, task]));
       for (const localTask of readRecentTasks()) {
@@ -659,6 +765,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function createNewChat() {
     selectedFiles.splice(0);
+    pendingRevision = null;
     renderAttachments();
     const chats = getChats();
     // Check if the current chat is already fresh and unused
@@ -960,7 +1067,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderArtifactPreview(type, data) {
     if (!currentTaskData?.task_id || !elements.richOutputContainer || !api.artifactUrl) return;
-    const artifactTypes = new Set(["presentation", "infographic", "video", "linkedin_post", "advisory"]);
+    const artifactTypes = new Set(["presentation", "infographic", "video", "linkedin_post", "advisory", "diagram", "visual.flowchart"]);
     if (!artifactTypes.has(type)) return;
     const response = extractResponseForType(currentTaskData.result, type);
     const artifact = response?.artifact && typeof response.artifact === "object" ? response.artifact : {};
@@ -1011,7 +1118,15 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    if (type === "video") {
+    if (type === "diagram" || type === "visual.flowchart") {
+      if (globalThis.SudarshanDiagramPreview?.createPreview) {
+        panel.appendChild(globalThis.SudarshanDiagramPreview.createPreview({
+          url,
+          title: output?.title || manifest?.name || "Diagram artifact",
+          alt: output?.alt_text || output?.accessibility?.description || "Generated diagram artifact",
+        }));
+      }
+    } else if (type === "video") {
       const video = document.createElement("video");
       video.className = "artifact-video-player";
       video.controls = true;
@@ -1035,7 +1150,36 @@ document.addEventListener("DOMContentLoaded", () => {
     link.rel = "noopener";
     link.textContent = type === "video" ? "Open video" : `Open ${formatShort(type)} artifact`;
     panel.appendChild(link);
+    if (manifest?.artifact_id || manifest?.artifactId) {
+      const revise = document.createElement("button");
+      revise.type = "button";
+      revise.className = "result-action-btn artifact-revise-link";
+      revise.textContent = "Revise this artifact";
+      revise.addEventListener("click", () => beginArtifactRevision(type, manifest));
+      panel.appendChild(revise);
+    }
     elements.richOutputContainer.appendChild(panel);
+  }
+
+  function beginArtifactRevision(type, manifest) {
+    const artifactId = String(manifest?.artifact_id || manifest?.artifactId || "").trim();
+    if (!artifactId || !currentTaskData) return;
+    pendingRevision = {
+      operation: "revise",
+      parent_run_id: currentTaskData.run_id || undefined,
+      parent_artifact_id: artifactId,
+      revision_scope: [],
+    };
+    selectedOutputTypes.clear();
+    selectedOutputTypes.add(type === "ppt" ? "presentation" : type);
+    updateOutputSelection();
+    if (elements.promptInput) {
+      elements.promptInput.value = `Revise ${formatName(type)} artifact ${artifactId}: `;
+      elements.promptInput.focus();
+      elements.promptInput.setSelectionRange(elements.promptInput.value.length, elements.promptInput.value.length);
+      elements.charCount.textContent = `${elements.promptInput.value.length.toLocaleString()}/50,000`;
+    }
+    showToast(`Revision mode enabled for ${formatName(type)}. Describe the exact change.`);
   }
 
   function extractResponseForType(result, type) {
@@ -1477,14 +1621,25 @@ document.addEventListener("DOMContentLoaded", () => {
     const author = document.createElement("div");
     author.className = "social-author-row";
     const authorName = data.author || (currentUser?.name ? `${currentUser.name} (Sudarshan AI)` : "Sudarshan AI Intelligence");
-    author.innerHTML = `
-      <div class="social-avatar">S</div>
-      <div class="social-author-info">
-        <span class="social-author-name">${authorName}</span>
-        <span class="social-time">${data.audience ? `Audience: ${data.audience}` : "🌐 Public"}</span>
-      </div>
-      <button class="result-action-btn" id="copyPostBtn" style="margin-left: auto; padding: 4px 10px; font-size: 0.75rem;">Copy Post</button>
-    `;
+    const avatar = document.createElement("div");
+    avatar.className = "social-avatar";
+    avatar.textContent = "S";
+    const authorInfo = document.createElement("div");
+    authorInfo.className = "social-author-info";
+    const authorLabel = document.createElement("span");
+    authorLabel.className = "social-author-name";
+    authorLabel.textContent = String(authorName);
+    const audience = document.createElement("span");
+    audience.className = "social-time";
+    audience.textContent = data.audience ? `Audience: ${String(data.audience)}` : "🌐 Public";
+    authorInfo.append(authorLabel, audience);
+    const copyButton = document.createElement("button");
+    copyButton.className = "result-action-btn";
+    copyButton.id = "copyPostBtn";
+    copyButton.type = "button";
+    copyButton.textContent = "Copy Post";
+    copyButton.style.cssText = "margin-left: auto; padding: 4px 10px; font-size: 0.75rem;";
+    author.append(avatar, authorInfo, copyButton);
 
     const bodyText = data.post_text || data.body || "";
     const body = document.createElement("div");
@@ -1507,8 +1662,34 @@ document.addEventListener("DOMContentLoaded", () => {
     if (data.call_to_action) {
       const ctaBox = document.createElement("div");
       ctaBox.style.cssText = "margin-top: 12px; padding: 8px 12px; background: rgba(99, 102, 241, 0.08); border-radius: 6px; font-size: 0.82rem; color: #a5b4fc;";
-      ctaBox.innerHTML = `<strong>Call to Action:</strong> ${data.call_to_action}`;
+      const ctaLabel = document.createElement("strong");
+      ctaLabel.textContent = "Call to Action: ";
+      ctaBox.append(ctaLabel, document.createTextNode(String(data.call_to_action)));
       card.appendChild(ctaBox);
+    }
+
+    const report = data.humanizer_report || data.humanizer;
+    if (report && typeof report === "object") {
+      const review = document.createElement("details");
+      review.className = "social-review-details";
+      const summary = document.createElement("summary");
+      summary.textContent = `Humanizer review · ${report.approved === false ? "needs revision" : "passed"}`;
+      review.appendChild(summary);
+      const issues = Array.isArray(report.issues) ? report.issues : [];
+      if (!issues.length) {
+        const clean = document.createElement("p");
+        clean.textContent = "No deterministic humanizer issues were reported.";
+        review.appendChild(clean);
+      } else {
+        const list = document.createElement("ul");
+        issues.slice(0, 8).forEach((issue) => {
+          const item = document.createElement("li");
+          item.textContent = typeof issue === "string" ? issue : `${issue.rule_id || issue.code || "Finding"}: ${issue.message || issue.advice || "Review required"}`;
+          list.appendChild(item);
+        });
+        review.appendChild(list);
+      }
+      wrap.appendChild(review);
     }
 
     wrap.appendChild(card);
@@ -1548,6 +1729,22 @@ document.addEventListener("DOMContentLoaded", () => {
   function exportActiveOutput() {
     if (!currentTaskData || !activeTabType) return;
     const format = formatName(activeTabType);
+    const artifactId = api.activeMode === "fastapi"
+      ? (currentTaskData.run_id || currentTaskData.task_id)
+      : currentTaskData.task_id;
+    const manifest = (currentTaskData.artifact_manifests || []).find((candidate) => {
+      const kind = String(candidate?.kind || "").toLowerCase();
+      return kind === (activeTabType === "ppt" ? "presentation" : activeTabType);
+    });
+    if (manifest && api.artifactUrl) {
+      const link = document.createElement("a");
+      link.href = api.artifactUrl(artifactId, activeTabType);
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.click();
+      showToast(`Opened ${format} artifact.`);
+      return;
+    }
     const content = JSON.stringify(currentTaskData.result?.[activeTabType] || currentTaskData.result, null, 2);
     const blob = new Blob([content], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1556,7 +1753,7 @@ document.addEventListener("DOMContentLoaded", () => {
     a.download = `sudarshan-${activeTabType}-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast(`Exported ${format} payload.`);
+    showToast(`Downloaded ${format} structured payload.`);
   }
 
   // Render Recent Tasks with Filter Support
@@ -1594,11 +1791,16 @@ document.addEventListener("DOMContentLoaded", () => {
       snippet.className = "recent-snippet";
       snippet.textContent = task.prompt || task.task_id;
 
+      const artifactCount = document.createElement("span");
+      artifactCount.className = "recent-artifact-count";
+      const count = Array.isArray(task.artifact_manifests) ? task.artifact_manifests.length : 0;
+      artifactCount.textContent = `${count} artifact${count === 1 ? "" : "s"} · ${task.status || "queued"}`;
+
       const timestamp = document.createElement("span");
       timestamp.className = "recent-timestamp";
       timestamp.textContent = formatTime(task.created_at);
 
-      card.append(title, snippet, timestamp);
+      card.append(title, snippet, artifactCount, timestamp);
 
       card.addEventListener("click", () => {
         loadTaskIntoView(task);
@@ -1729,8 +1931,13 @@ document.addEventListener("DOMContentLoaded", () => {
         input,
         output_types: outputTypes,
         classification_level: "RESTRICTED",
-        distribution: "Authorized NTRO personnel"
+        distribution: "Authorized NTRO personnel",
+        ...(pendingRevision ? {
+          ...pendingRevision,
+          revision_instruction: input,
+        } : {}),
       });
+      pendingRevision = null;
 
       const task = response.task || response;
       task.prompt = input;

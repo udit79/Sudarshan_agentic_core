@@ -25,8 +25,9 @@ Copy-Item .env.example .env
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
 @@@
 
-The bootstrap installs the locked Python environment, AntV renderer, vendored
-DeepSeek Harness workspace, and Node gateway dependencies. It then initializes
+The bootstrap installs the locked Python environment, AntV renderer, and Node
+gateway dependencies. The optional DeepSeek Harness workspace is installed
+and built only when `-EnableHarness` is passed. It then initializes
 MongoDB collections/indexes and starts:
 
 | Service | Default URL | Responsibility |
@@ -46,7 +47,8 @@ Useful switches:
 
 @@@powershell
 .\startup.ps1 -NoStart
-.\startup.ps1 -SkipHarness
+.\startup.ps1 -EnableHarness
+.\startup.ps1 -SkipHarness # compatibility no-op unless -EnableHarness is used
 .\startup.ps1 -SkipNodeGateway
 .\startup.ps1 -SkipAntV
 .\startup.ps1 -SkipInstall
@@ -301,3 +303,32 @@ approved SSO identity source, secret management, encrypted durable state,
 observability, backups, and provider-specific cancellation/retry policies.
 Configure the approved shared state and worker infrastructure for the target
 deployment before exposing the system to operational users.
+## Windows startup and shutdown
+
+The canonical local bootstrap is `startup.ps1`. It loads the ignored `.env`,
+starts the Python API, optional Node gateway, and static frontend, and records
+the owned process IDs in `artifacts/.state/sudarshan-processes.json`.
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
+```
+
+Useful recovery modes:
+
+```powershell
+# Restart only services previously recorded by this checkout.
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1 -ForceRestart
+
+# Run the Python/API/frontend bootstrap without Mongo index initialization.
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1 -SkipDatabaseInit
+
+# Stop services recorded by startup.ps1; harmless when they are already down.
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\stop-servers.ps1
+```
+
+`-SkipDatabaseInit` is for local debugging only; the Node gateway still needs a
+reachable MongoDB when it is started. The optional DeepSeek Harness is not
+installed or started unless `-EnableHarness` is supplied. If startup exits with
+status 1, it now prints the failing service's stderr tail and the log folder;
+check those logs before retrying. Do not use `stop-servers.ps1 -ByPort` unless
+you have verified that the listeners belong to Sudarshan.

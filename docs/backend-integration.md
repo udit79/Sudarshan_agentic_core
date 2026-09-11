@@ -3,7 +3,7 @@
 This document is the contract between the backend, frontend, and the
 DeepSeek Harness integration. The Python application is the source of truth
 for routing, memory policy, pipeline execution, approval, cancellation, and
-artifact metadata. The Harness is the session/tool/runtime layer.
+artifact metadata. The Harness is an optional session/tool/runtime adapter.
 
 For ticket-by-ticket ownership, status, dependencies, and parallel work order,
 see [the frontend/backend feature matrix](frontend-backend-feature-matrix.md).
@@ -39,7 +39,8 @@ The normal backend path is `api/server.py -> get_application() ->
 SudarshanApplication -> PipelineOrchestrator`. The MCP path starts at
 `mcp_server.py` but joins the same `get_application()` boundary. Both paths
 therefore use the same router, memory manager, checkpoint store, progress
-sink, pipeline registry, and audit behavior.
+sink, pipeline registry, and audit behavior. A different harness can join
+through the same application boundary without importing DeepSeek code.
 
 ## Start the service
 

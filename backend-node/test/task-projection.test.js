@@ -10,8 +10,30 @@ const {
   idempotencyRequestMatches,
   isTransientPythonError,
   projectCanonicalStatus,
+  safeArtifact,
   safeTask,
 } = await import("../src/tasks.js");
+
+test("safeArtifact keeps artifact identity separate from the task projection", () => {
+  const artifact = safeArtifact({
+    taskId: "task-9",
+    runId: "run-9",
+    caseId: "case-9",
+    status: "succeeded",
+    classificationLevel: "RESTRICTED",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:01.000Z",
+  }, {
+    artifact_id: "artifact-9",
+    kind: "presentation",
+    name: "briefing.pptx",
+  });
+
+  assert.equal(artifact.artifact_id, "artifact-9");
+  assert.equal(artifact.task_id, "task-9");
+  assert.equal(artifact.gateway_download_uri, "/api/v1/tasks/task-9/artifacts/presentation");
+  assert.equal(artifact.gateway_manifest_uri, "/api/v1/tasks/task-9/artifacts/presentation/manifest");
+});
 
 test("safeTask exposes the canonical run projection and artifact cursor", () => {
   const projected = safeTask({
@@ -20,6 +42,11 @@ test("safeTask exposes the canonical run projection and artifact cursor", () => 
     caseId: "case-1",
     inputPreview: "brief",
     outputTypes: ["presentation"],
+    operation: "revise",
+    parentRunId: "run-original",
+    parentArtifactId: "artifact-deck-v1",
+    revisionInstruction: "Change slide 4 title",
+    revisionScope: ["slides[4].title"],
     status: "waiting_for_approval",
     runSummary: {
       run_id: "run-1",
@@ -43,6 +70,8 @@ test("safeTask exposes the canonical run projection and artifact cursor", () => 
   assert.equal(projected.event_cursor, 12);
   assert.equal(projected.artifact_manifests[0].artifact_id, "artifact-1");
   assert.equal(projected.classification_level, "RESTRICTED");
+  assert.equal(projected.operation, "revise");
+  assert.equal(projected.parent_artifact_id, "artifact-deck-v1");
 });
 
 test("partial canonical status preserves the latest result and advances the cursor", () => {

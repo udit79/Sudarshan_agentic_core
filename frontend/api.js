@@ -186,10 +186,18 @@
       requires_action: Boolean(summary?.requires_action ?? raw.requires_action ?? raw.requiresAction ?? false),
       child_count: Number(summary?.child_count ?? raw.child_count ?? 0),
       parent_task_id: raw.parent_task_id || raw.parentTaskId || summary?.parent_task_id || null,
+      operation: raw.operation || summary?.operation || "create",
+      parent_artifact_id: raw.parent_artifact_id || raw.parentArtifactId || summary?.parent_artifact_id || null,
+      revision_scope: Array.isArray(raw.revision_scope) ? raw.revision_scope : [],
       children: Array.isArray(raw.children) ? raw.children : (Array.isArray(summary?.children) ? summary.children : []),
       quality_report: raw.quality_report || raw.qualityReport || summary?.quality_report || null,
       wait_reason: raw.wait_reason || raw.waitReason || summary?.wait_reason || summary?.waitReason || "",
       telemetry: raw.telemetry || summary?.telemetry || {},
+      approval: raw.approval || raw.approval_state || summary?.approval || summary?.approval_state || null,
+      connector: raw.connector || raw.connector_status || summary?.connector || summary?.connector_status || null,
+      receipt: raw.receipt || raw.publish_receipt || summary?.receipt || summary?.publish_receipt || null,
+      humanizer: raw.humanizer || raw.humanizer_report || summary?.humanizer || summary?.humanizer_report || null,
+      schedule: raw.schedule || raw.schedule_state || summary?.schedule || summary?.schedule_state || null,
       error: raw.error || fallback.error || null,
       wait_timed_out: Boolean(raw.wait_timed_out ?? fallback.wait_timed_out ?? false),
     };
@@ -340,6 +348,11 @@
             case_id: body.case_id || "case-default",
             classification_level: body.classification_level || "RESTRICTED",
             distribution: body.distribution || "Authorized NTRO personnel",
+            operation: body.operation || "create",
+            parent_run_id: body.parent_run_id,
+            parent_artifact_id: body.parent_artifact_id,
+            revision_instruction: body.revision_instruction,
+            revision_scope: body.revision_scope || [],
             task_id: body.task_id || `task-${Date.now()}`,
           }
         }).then((res) => {
@@ -391,6 +404,20 @@
         task: normalizeRunProjection(res?.task || res, { task_id: taskId }),
       }));
     },
+    resumeTask: (taskId, decision) => {
+      if (activeMode === "fastapi") {
+        const runId = taskToRunMap.get(taskId) || taskId;
+        return request(`/runs/${encodeURIComponent(runId)}/resume`, {
+          method: "POST",
+          headers: { "X-Operator-Id": "operator-local" },
+          body: { ...decision, task_id: taskId },
+        });
+      }
+      return request(`/api/v1/tasks/${encodeURIComponent(taskId)}/resume`, {
+        method: "POST",
+        body: decision,
+      });
+    },
     getArtifactManifest: (taskId, artifactKey) => {
       const targetId = activeMode === "fastapi" ? (taskToRunMap.get(taskId) || taskId) : taskId;
       return request(
@@ -405,6 +432,14 @@
         ...res,
         tasks: (res?.tasks || []).map((task) => normalizeRunProjection(task)),
       }));
+    },
+    listArtifacts: ({ caseId = "", kind = "", limit = 100 } = {}) => {
+      if (activeMode === "fastapi") return Promise.resolve({ artifacts: [] });
+      const params = new URLSearchParams();
+      if (caseId) params.set("case_id", caseId);
+      if (kind) params.set("kind", kind);
+      if (limit) params.set("limit", String(limit));
+      return request(`/api/v1/artifacts${params.toString() ? `?${params}` : ""}`);
     },
     cancelTask: (taskId) => {
       if (activeMode === "fastapi") {

@@ -25,8 +25,11 @@ python -m http.server 3000
 ```
 
 Open `http://localhost:3000/` for the public landing page. After sign-in,
-`index.html?dashboard=1` hands off to the redesigned DeepSeek Harness chat at
-`http://127.0.0.1:3080/`. Do not open the HTML files with
+`index.html?dashboard=1` opens the native Sudarshan dashboard. The normal
+`startup.ps1` path installs and runs no external Harness checkout. An optional
+Harness profile can be launched with `index.html?harness=1` only when
+`window.SUDARSHAN_HARNESS_URL` is configured. Sudarshan does not require the
+Harness repository to run. Do not open the HTML files with
 `file://`; browser cookies and CORS require an HTTP origin.
 
 The gateway defaults to `http://localhost:8080`. To use another gateway,
@@ -49,8 +52,11 @@ define `window.SUDARSHAN_API_ORIGIN` before `api.js` in both HTML files:
 - `index.html` / `script.js` — authenticated case selector, file attachments,
   output selection, transformation submission, task polling, live agentic
   progress, wait/quality/telemetry display, cooperative stop/cancellation,
-  artifact preview/download, and output display.
+  artifact preview/download, artifact selection, lineage-preserving revision
+  commands, approval/resume actions, and output display.
 - `styles.css` / `login.css` — visual system and responsive layout.
+- `diagram/preview.js` — isolated diagram artifact preview module used by the
+  dashboard for `diagram` and `visual.flowchart` artifact projections.
 
 Never put Google secrets, JWTs, provider API keys, or MongoDB credentials in
 this directory. The gateway owns those secrets.
@@ -67,6 +73,31 @@ stores the last SSE sequence per task in `sessionStorage`, so reconnects ask
 the backend for only events after the last acknowledged sequence. Terminal
 FastAPI runs also hydrate their artifact manifests through the canonical
 manifest endpoint.
+
+## Artifact updates
+
+Use **Revise this artifact** beside a rendered artifact, then describe the
+bounded change in the prompt. The frontend submits a new operation with the
+parent artifact ID; the original artifact remains immutable and the backend
+creates a new version after the normal planning, quality, and approval gates.
+
+Examples:
+
+```text
+Revise presentation artifact artifact-deck-v1: change slide 4 title to
+"Collection priorities"; preserve all evidence bindings and speaker notes.
+
+Revise video artifact artifact-video-v1: replace scene scene-04 narration
+with a 12-second neutral explanation; keep all other scenes unchanged.
+
+Revise infographic artifact artifact-infographic-v1: increase the contrast of
+the risk panel without changing any claim or source reference.
+```
+
+For an exact field-level repair, include a scope such as
+`slides[4].title`, `scenes[04].narration`, or `layout.risk_panel`. The system
+uses the selected artifact as `parent_artifact_id`, routes only the requested
+output type, and never overwrites sibling artifacts.
 
 The current UI does not yet expose a full parent/child execution graph,
 interactive visual repair editor, or audit-log explorer. Those are planned

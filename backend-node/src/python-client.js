@@ -23,7 +23,7 @@ async function request(path, options = {}) {
   }
 }
 
-export async function createRun({ userId, caseId, taskId, query, outputTypes, classificationLevel, distribution, metadata }) {
+export async function createRun({ userId, caseId, taskId, query, outputTypes, classificationLevel, distribution, metadata, operation, parentRunId, parentArtifactId, revisionInstruction, revisionScope }) {
   return request("/runs", {
     method: "POST",
     body: JSON.stringify({
@@ -34,6 +34,11 @@ export async function createRun({ userId, caseId, taskId, query, outputTypes, cl
       classification_level: classificationLevel,
       distribution,
       requested_pipelines: outputTypes,
+      operation: operation || "create",
+      parent_run_id: parentRunId || undefined,
+      parent_artifact_id: parentArtifactId || undefined,
+      revision_instruction: revisionInstruction || undefined,
+      revision_scope: revisionScope || [],
       metadata: metadata || {},
     }),
     headers: {

@@ -1,7 +1,8 @@
 # Harness UI composition
 
-Sudarshan's visual changes are now loaded as replaceable DeepSeek Harness
-plugins rather than by forking or relabeling the official branding package.
+Sudarshan's visual changes are loaded as replaceable Harness plugins when that
+profile is enabled. The Sudarshan core does not require the DeepSeek Harness
+checkout to execute runs, render artifacts, or serve the native dashboard.
 
 ## Product plugins
 
@@ -19,13 +20,26 @@ pair; the core Harness packages and the Sudarshan backend remain unchanged.
 The safe execution monitor, evidence drawer, artifact workspace, and ingestion
 stages now live in the additive
 `@deepseek-ai/dsh-experimental-client-ui-sudarshan-operations` Harness plugin.
-It consumes an explicitly labelled preview projection today; the backend/MCP
-projection remains the source of truth and will replace that adapter later.
+It consumes an explicitly labelled preview projection when no host bridge is
+installed. A compatible host can provide
+`globalThis.SudarshanOperationsBridge` with `getProjection`, artifact
+preview/download, and ingestion action callbacks; the backend/MCP projection
+remains the source of truth. Disabled actions are explicit capability states,
+not fake buttons.
 The plugin does not copy the standalone dashboard or create a second chat
 store: Harness owns the maintained side chat/session list, while this panel is
 keyed by the active session ID and persists only its selected tab locally.
 Approval inboxes and release/operations gates remain planned follow-up surfaces
 until their backend decision and release contracts are connected.
+
+## Harness independence
+
+The reusable skill catalog lives in `skills/catalog.py`, and pipeline
+execution uses the core `PipelineAdapter`/`PipelineRegistry` contract. DeepSeek
+Harness is one optional session/MCP adapter. Other harnesses or skill hosts can
+use the same application boundary through MCP, A2A, JSONL, HTTP, or Python
+entry points without importing DeepSeek code. Reference repositories informed
+the design of skills, renderers, and memory, but are not runtime dependencies.
 
 Backend integration must keep the safe boundary from `docs/frontend-integration.md`:
 source references and evidence IDs are allowed, but raw extracted text,

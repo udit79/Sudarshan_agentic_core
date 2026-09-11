@@ -1539,6 +1539,14 @@ body {
   height: 34px;
 }
 
+.recent-artifact-count {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  text-transform: capitalize;
+}
+
 .recent-timestamp {
   font-size: 0.72rem;
   color: var(--text-muted);
@@ -1736,6 +1744,29 @@ body {
   margin-top: 8px;
 }
 
+.diagram-artifact-preview {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border-specular);
+  border-radius: var(--radius-md);
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.diagram-artifact-preview img {
+  display: block;
+  width: 100%;
+  max-height: 560px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.diagram-artifact-preview figcaption {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 .run-observability {
   display: flex;
   flex-wrap: wrap;
@@ -1777,6 +1808,43 @@ body {
 
 .run-waiting-notice span {
   color: var(--text-secondary);
+}
+
+.run-action-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(56, 189, 248, 0.26);
+  border-radius: var(--radius-md);
+  background: rgba(8, 47, 73, 0.22);
+  color: #bae6fd;
+  font-size: 0.76rem;
+}
+
+.run-action-state {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.run-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  width: 100%;
+  margin-top: 3px;
+}
+
+.run-action-buttons .result-action-btn {
+  padding: 5px 9px;
+  font-size: 0.72rem;
+}
+
+.run-action-buttons .action-danger {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.35);
 }
 
 .execution-monitor {
@@ -1937,6 +2005,10 @@ body {
 .artifact-download-link {
   align-self: flex-start;
   text-decoration: none;
+}
+
+.artifact-revise-link {
+  margin-left: 8px;
 }
 
 .pipeline-failure-notice {
@@ -2588,6 +2660,27 @@ body {
   color: #e2e8f0;
   white-space: pre-line;
   margin-bottom: 14px;
+}
+
+.social-review-details {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid rgba(129, 140, 248, 0.22);
+  border-radius: var(--radius-md);
+  background: rgba(30, 41, 59, 0.32);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.social-review-details summary {
+  cursor: pointer;
+  color: #c4b5fd;
+  font-weight: 600;
+}
+
+.social-review-details ul {
+  margin: 8px 0 0 17px;
+  padding: 0;
 }
 
 .social-hashtags {
