@@ -22,8 +22,8 @@ function readTab(sessionId: string): Tab {
   } catch { return 'monitor' }
 }
 
-function Status({ status }: { status: ProjectionStatus | ArtifactProjection['status'] }) {
-  const label = status.replace('-', ' ')
+function Status({ status, t }: { status: ProjectionStatus | ArtifactProjection['status']; t: (key: OperationKey) => string }) {
+  const label = t(`status.${status}` as OperationKey)
   return <span className={css.status}><span className={css.dot} data-status={status} />{label}</span>
 }
 
@@ -31,17 +31,30 @@ function Progress({ value }: { value: number }) {
   return <div className={css.progress} aria-label={`${value}% complete`}><span style={{ width: `${value}%` }} /></div>
 }
 
-function Monitor({ projection }: { projection: OperatorProjection }) {
+function Metric({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return <div className={css.metric}><div className={css.metricLabel}>{label}</div><div className={css.metricValue}>{value}</div>{detail && <div className={css.metricDetail}>{detail}</div>}</div>
+}
+
+function Monitor({ projection, t }: { projection: OperatorProjection; t: (key: OperationKey) => string }) {
+  const usage = projection.telemetry
+  const totalTokens = usage.inputTokens + usage.outputTokens + usage.reasoningTokens
   return <>
     <div className={css.hero}>
-      <div className={css.heroRow}><div><div className={css.heroLabel}>Parent run</div><div className={css.heroValue}>{projection.stage}</div></div><Status status={projection.status} /></div>
+      <div className={css.heroRow}><div><div className={css.heroLabel}>Parent run</div><div className={css.heroValue}>{projection.stage}</div></div><Status status={projection.status} t={t} /></div>
       <Progress value={projection.progress} />
       <div className={css.chipRow}><span className={css.chip}>{projection.runId}</span><span className={css.chip}>{projection.queue}</span></div>
       <div className={css.detail}>{projection.waitReason}</div>
     </div>
+    <div className={css.metricGrid} aria-label={t('telemetry')}>
+      <Metric label={t('queueWait')} value={`${usage.queueWaitMs} ${t('milliseconds')}`} />
+      <Metric label={t('usage')} value={`${totalTokens.toLocaleString()} ${t('tokens')}`} detail={usage.usageIsEstimate ? t('estimated') : undefined} />
+      <Metric label={t('cache')} value={`${usage.cacheHits} ${t('cacheHit')} · ${usage.cacheWaits} ${t('cacheWait')}`} />
+      <Metric label={t('quality')} value={projection.qualityStatus} detail={usage.fallbackCount ? `${usage.fallbackCount} ${t('fallback')}` : undefined} />
+    </div>
+    {projection.fallbacks.length > 0 && <div className={css.fallback} role="status"><strong>{t('fallbacks')}</strong>{projection.fallbacks.join(' · ')}</div>}
     <div className={css.sectionTitle}>Child lanes</div>
     <div>{projection.children.map(child => <div key={child.id} className={css.lane}>
-      <div className={css.laneTop}><span className={css.name}>{child.label}</span><Status status={child.status} /></div>
+      <div className={css.laneTop}><span className={css.name}>{child.label}</span><Status status={child.status} t={t} /></div>
       <div className={css.detail}>{child.pipeline}{child.waitReason ? ` · ${child.waitReason}` : ''}</div>
       <div className={css.miniProgress}><span style={{ width: `${child.progress}%` }} /></div>
     </div>)}</div>
@@ -65,11 +78,11 @@ function artifactLabel(type: ArtifactProjection['type']): string {
   return ({ markdown: 'MD', presentation: 'PPT', infographic: 'SVG', video: 'MP4', linkedin: 'IN' })[type]
 }
 
-function Artifacts({ projection, bridge }: { projection: OperatorProjection; bridge: OperationsBridge | undefined }) {
+function Artifacts({ projection, bridge, t }: { projection: OperatorProjection; bridge: OperationsBridge | undefined; t: (key: OperationKey) => string }) {
   return <>
     <div className={css.muted}>{bridge ? 'Artifacts are controlled by the authenticated Sudarshan adapter.' : 'Preview fixture: connect the Sudarshan adapter to enable artifact actions.'}</div>
     {projection.artifacts.map(artifact => <div key={artifact.id} className={css.card}>
-      <div className={css.cardTop}><div className={css.artifactInfo}><span className={css.artifactIcon}>{artifactLabel(artifact.type)}</span><span className={`${css.name} ${css.artifactName}`}>{artifact.name}</span></div><Status status={artifact.status} /></div>
+      <div className={css.cardTop}><div className={css.artifactInfo}><span className={css.artifactIcon}>{artifactLabel(artifact.type)}</span><span className={`${css.name} ${css.artifactName}`}>{artifact.name}</span></div><Status status={artifact.status} t={t} /></div>
       <div className={css.detail}>{artifact.renderer} v{artifact.version} · {artifact.size} · {artifact.classification}</div>
       {artifact.repair && <div className={css.repair}>{artifact.repair}</div>}
       <div className={css.actionRow}><button className={css.button} type="button" disabled={!artifact.previewAvailable || !bridge?.previewArtifact} onClick={() => { bridge?.previewArtifact?.(artifact) }}>Preview</button><button className={`${css.button} ${css.buttonSecondary}`} type="button" disabled={!artifact.previewAvailable || !bridge?.downloadArtifact} onClick={() => { bridge?.downloadArtifact?.(artifact) }}>Open / download</button></div>
@@ -77,10 +90,10 @@ function Artifacts({ projection, bridge }: { projection: OperatorProjection; bri
   </>
 }
 
-function Ingestion({ projection, sessionId, bridge }: { projection: OperatorProjection; sessionId: string; bridge: OperationsBridge | undefined }) {
+function Ingestion({ projection, sessionId, bridge, t }: { projection: OperatorProjection; sessionId: string; bridge: OperationsBridge | undefined; t: (key: OperationKey) => string }) {
   return <>
     <div className={css.muted}>Upload and ingestion stay receipt-driven. Large files use multipart upload; extracted content is never rendered as raw chat text.</div>
-    {projection.ingestionStages.map(stage => <div key={stage.label} className={css.row}><div className={css.rowTop}><span className={css.name}>{stage.label}</span><Status status={stage.status} /></div><div className={css.detail}>{stage.detail}</div></div>)}
+    {projection.ingestionStages.map(stage => <div key={stage.label} className={css.row}><div className={css.rowTop}><span className={css.name}>{stage.label}</span><Status status={stage.status} t={t} /></div><div className={css.detail}>{stage.detail}</div></div>)}
     <div className={css.actionRow}><button className={css.button} type="button" disabled={!bridge?.retryIngestion} onClick={() => { bridge?.retryIngestion?.(sessionId) }}>Retry failed stage</button><button className={`${css.button} ${css.buttonSecondary}`} type="button" disabled={!bridge?.cancelIngestion} onClick={() => { bridge?.cancelIngestion?.(sessionId) }}>Cancel ingestion</button></div>
   </>
 }
@@ -121,10 +134,10 @@ export function OperationsPanel({ sessionId, t }: PanelProps) {
     </div>
     <div className={css.body} role="tabpanel">
       <div className={css.toolbar}><span>{projection.status} · synced {projection.generatedAt}</span><button className={css.refresh} type="button" onClick={() => { setRefresh((value: number) => value + 1) }}>{t('refresh')}</button></div>
-      {tab === 'monitor' && <Monitor projection={projection} />}
+      {tab === 'monitor' && <Monitor projection={projection} t={t} />}
       {tab === 'evidence' && <Evidence projection={projection} />}
-      {tab === 'artifacts' && <Artifacts projection={projection} bridge={bridge} />}
-      {tab === 'ingestion' && <Ingestion projection={projection} sessionId={sessionId} bridge={bridge} />}
+      {tab === 'artifacts' && <Artifacts projection={projection} bridge={bridge} t={t} />}
+      {tab === 'ingestion' && <Ingestion projection={projection} sessionId={sessionId} bridge={bridge} t={t} />}
     </div>
   </div>
 }

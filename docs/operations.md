@@ -25,16 +25,16 @@ Copy-Item .env.example .env
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\startup.ps1
 @@@
 
-The bootstrap installs the locked Python environment, AntV renderer, and Node
-gateway dependencies. The optional DeepSeek Harness workspace is installed
-and built only when `-EnableHarness` is passed. It then initializes
-MongoDB collections/indexes and starts:
+The bootstrap installs the locked Python environment, AntV renderer, Node
+gateway, and DeepSeek Harness dependencies. It then initializes MongoDB
+collections/indexes and starts:
 
 | Service | Default URL | Responsibility |
 | --- | --- | --- |
 | FastAPI | http://127.0.0.1:8000 | Python application and orchestrator |
 | Node gateway | http://127.0.0.1:8080 | OAuth, cases, quotas, browser API |
-| Static frontend | http://127.0.0.1:3000 | Login and output UI |
+| Landing app | http://127.0.0.1:4173 | Public landing, About, and sign-in UI |
+| DeepSeek Harness | http://127.0.0.1:3080 | Authenticated application frontend |
 
 When services are started, `startup.ps1` writes
 `artifacts/.state/sudarshan-processes.json` containing only service names,
@@ -47,8 +47,7 @@ Useful switches:
 
 @@@powershell
 .\startup.ps1 -NoStart
-.\startup.ps1 -EnableHarness
-.\startup.ps1 -SkipHarness # compatibility no-op unless -EnableHarness is used
+.\startup.ps1 -SkipHarness # optional: start backend and landing without Harness
 .\startup.ps1 -SkipNodeGateway
 .\startup.ps1 -SkipAntV
 .\startup.ps1 -SkipInstall
@@ -58,8 +57,8 @@ Useful switches:
 For frontend-only work:
 
 @@@powershell
-python -m http.server 3000 --directory frontend
-Start-Process http://localhost:3000/login.html
+npm run dev -- --host 127.0.0.1 --port 4173
+Start-Process http://localhost:4173/
 @@@
 
 Do not open the frontend with file://; cookies and CORS require an HTTP
@@ -70,7 +69,8 @@ For manual service debugging:
 @@@powershell
 uv run python -m api.server
 Push-Location backend-node; npm start; Pop-Location
-python -m http.server 3000 --directory frontend
+Push-Location 'landing page\landing page'; npm run dev -- --host 127.0.0.1 --port 4173; Pop-Location
+Push-Location deepseek-harness; node --import tsx/esm apps/cli/src/bin.ts web --no-open --port 3080; Pop-Location
 @@@
 
 ## Configuration
@@ -116,7 +116,7 @@ If the manifest is missing or stale, inspect the port owners first. The
 explicit fallback is available with `-ByPort`:
 
 @@@powershell
-.\stop-servers.ps1 -ByPort -Ports 3000,8000,8080
+.\stop-servers.ps1 -ByPort -Ports 4173,3080,8000,8080
 @@@
 
 Use a unique `SUDARSHAN_CONTROL_PLANE_PREFIX` per environment. Redis Streams
@@ -201,12 +201,10 @@ npm run check
 Pop-Location
 @@@
 
-Reference frontend:
+Landing and Harness frontend checks:
 
 @@@powershell
-node --check frontend\script.js
-node --check frontend\api.js
-node --check frontend\login.js
+node --check "landing page\landing page\public\login.js"
 @@@
 
 The repository tests are offline and deterministic. They mock provider and
@@ -307,7 +305,8 @@ deployment before exposing the system to operational users.
 ## Windows startup and shutdown
 
 The canonical local bootstrap is `startup.ps1`. It loads the ignored `.env`,
-starts the Python API, optional Node gateway, and static frontend, and records
+starts the Python API, optional Node gateway, DeepSeek Harness, and the Vite
+landing app, and records
 the owned process IDs in `artifacts/.state/sudarshan-processes.json`.
 
 ```powershell

@@ -1,5 +1,40 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createLiveOperationsBridge, observeHarnessEvent } from '../src/client/live-bridge.ts'
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = []
+  readonly listeners = new Map<string, (event: Event) => void>()
+  onerror: (() => void) | null = null
+  closed = false
+
+  constructor(readonly url: string) { FakeEventSource.instances.push(this) }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.listeners.set(type, listener as (event: Event) => void)
+  }
+
+  close(): void { this.closed = true }
+
+  emit(type: string, data = ''): void {
+    this.listeners.get(type)?.({ data } as MessageEvent<string>)
+  }
+
+  fail(): void { this.onerror?.() }
+}
+
+const storage = new Map<string, string>()
+const sessionStorageMock = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => { storage.set(key, value) },
+  removeItem: (key: string) => { storage.delete(key) },
+  clear: () => { storage.clear() },
+}
+
+afterEach(() => {
+  FakeEventSource.instances = []
+  storage.clear()
+  vi.useRealTimers()
+})
 
 describe('Sudarshan live operations bridge', () => {
   it('hydrates terminal pipeline manifests through stable artifact routes', async () => {
@@ -44,5 +79,66 @@ describe('Sudarshan live operations bridge', () => {
     })
 
     expect(bindRun).toHaveBeenCalledWith('session-1', 'run-42')
+  })
+
+  it('keeps the safe status taxonomy and telemetry projection', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      run_id: 'run-1',
+      task_id: 'task-1',
+      status: 'cancelled',
+      stage: 'cancellation',
+      children: [
+        { id: 'child-approval', status: 'waiting_for_approval', pipeline: 'publish' },
+        { id: 'child-provider', status: 'pending', pipeline: 'video' },
+        { id: 'child-retry', status: 'retrying', pipeline: 'brief' },
+      ],
+      telemetry: {
+        queue_wait_ms: 240,
+        input_tokens: 100,
+        output_tokens: 40,
+        reasoning_tokens: 10,
+        usage_is_estimate: true,
+        cache_hits: 2,
+        cache_waits: 1,
+        fallback_count: 1,
+      },
+    }), { status: 200 }))
+    const bridge = createLiveOperationsBridge({ fetcher })
+
+    const projection = await bridge.getProjection?.('run-1')
+
+    expect(projection).toMatchObject({
+      status: 'cancelled',
+      telemetry: {
+        queueWaitMs: 240,
+        inputTokens: 100,
+        outputTokens: 40,
+        reasoningTokens: 10,
+        usageIsEstimate: true,
+        cacheHits: 2,
+        cacheWaits: 1,
+        fallbackCount: 1,
+      },
+    })
+    expect(projection?.children.map(child => child.status)).toEqual(['approval', 'provider-pending', 'retry'])
+  })
+
+  it('reconnects from the latest event cursor without replaying from zero', async () => {
+    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: sessionStorageMock })
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ run_id: 'run-1', status: 'running', events: [] }), { status: 200 }))
+    const bridge = createLiveOperationsBridge({ fetcher, eventSource: FakeEventSource as unknown as typeof EventSource })
+
+    const dispose = bridge.subscribeProjection?.('session-1', () => undefined)
+    const first = FakeEventSource.instances[0]
+    expect(first.url).toContain('after_sequence=0')
+    vi.useFakeTimers()
+    first.emit('progress', JSON.stringify({ sequence: 12 }))
+    first.fail()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    const second = FakeEventSource.instances[1]
+    expect(second.url).toContain('after_sequence=12')
+    dispose?.()
   })
 })

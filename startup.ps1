@@ -16,8 +16,8 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $nodeGatewayRoot = Join-Path $repoRoot "backend-node"
 $antvRoot = Join-Path $repoRoot "pipelines\infographic\antv_renderer"
 $harnessRoot = Join-Path $repoRoot "deepseek-harness"
-$useHarness = $EnableHarness -and -not $SkipHarness
-$frontendRoot = Join-Path $repoRoot "frontend"
+$useHarness = -not $SkipHarness
+$landingRoot = Join-Path $repoRoot "landing page\landing page"
 $stateRoot = Join-Path $repoRoot "artifacts\.state"
 $logRoot = Join-Path $stateRoot "startup-logs"
 $processManifestPath = Join-Path $stateRoot "sudarshan-processes.json"
@@ -311,7 +311,8 @@ function Wait-Http {
         [Parameter(Mandatory = $true)][string]$Url,
         [Parameter(Mandatory = $true)][string]$Service,
         [int]$TimeoutSeconds = 60,
-        [System.Diagnostics.Process]$Process = $null
+        [System.Diagnostics.Process]$Process = $null,
+        [switch]$AcceptUnauthorized
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -321,8 +322,8 @@ function Wait-Http {
                 $diagnostic = if (Test-Path -LiteralPath $errorLog) { (Get-Content -LiteralPath $errorLog -Tail 20 -ErrorAction SilentlyContinue) -join "`n" } else { "No stderr log was created." }
                 throw "$Service exited before becoming ready (PID $($Process.Id)).`n$diagnostic"
             }
-            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 5
+            if (($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) -or ($AcceptUnauthorized -and $response.StatusCode -eq 401)) {
                 return
             }
         }
@@ -336,10 +337,13 @@ function Wait-Http {
 
 try {
     Set-Location $repoRoot
-    foreach ($requiredPath in @($nodeGatewayRoot, $frontendRoot, $repoRoot)) {
+    foreach ($requiredPath in @($nodeGatewayRoot, $landingRoot, $repoRoot)) {
         if (-not (Test-Path -LiteralPath $requiredPath -PathType Container)) {
             throw "Required repository directory is missing: $requiredPath"
         }
+    }
+    if ($useHarness -and -not (Test-Path -LiteralPath $harnessRoot -PathType Container)) {
+        throw "DeepSeek Harness directory is missing: $harnessRoot"
     }
     New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
@@ -370,7 +374,7 @@ try {
     }
 
     $pythonCommand = Resolve-Python
-    $needsNode = -not $SkipNodeGateway -or -not $SkipAntV -or $useHarness
+    $needsNode = $true
     $nodeCommand = $null
     $npmCommand = $null
     if ($needsNode) {
@@ -438,11 +442,13 @@ try {
 
     $pythonPort = Get-Port "SUDARSHAN_API_PORT" 8000
     $nodePort = Get-Port "PORT" 8080
-    $frontendPort = Get-Port "SUDARSHAN_FRONTEND_PORT" 3000
+    $landingPort = Get-Port "SUDARSHAN_FRONTEND_PORT" 4173
+    $harnessPort = Get-Port "SUDARSHAN_HARNESS_PORT" 3080
     if (-not $NoStart) {
         Assert-PortFree $pythonPort "Python orchestrator/pipelines API"
         if (-not $SkipNodeGateway) { Assert-PortFree $nodePort "Node gateway" }
-        Assert-PortFree $frontendPort "Frontend"
+        Assert-PortFree $landingPort "Landing app"
+        if ($useHarness) { Assert-PortFree $harnessPort "DeepSeek Harness" }
     }
 
     if (-not $SkipNodeGateway -and -not $SkipDatabaseInit) {
@@ -458,7 +464,8 @@ try {
 
     $env:SUDARSHAN_API_PORT = [string]$pythonPort
     $env:PORT = [string]$nodePort
-    $env:SUDARSHAN_FRONTEND_PORT = [string]$frontendPort
+    $env:SUDARSHAN_FRONTEND_PORT = [string]$landingPort
+    $env:SUDARSHAN_HARNESS_PORT = [string]$harnessPort
     $pythonProcess = Start-LocalService "python-api" $uvExecutable @("run", "python", "-m", "api.server") $repoRoot -Port $pythonPort
     Wait-Http "http://127.0.0.1:$pythonPort/health" "python-api" -Process $pythonProcess
 
@@ -467,22 +474,29 @@ try {
         Wait-Http "http://127.0.0.1:$nodePort/readyz" "node-gateway" -Process $nodeProcess
     }
 
-    $frontendHost = Get-EnvValue "SUDARSHAN_FRONTEND_HOST"
-    if ([string]::IsNullOrWhiteSpace($frontendHost)) { $frontendHost = "127.0.0.1" }
-    $frontendProcess = Start-LocalService "frontend" $pythonCommand.Source @("-m", "http.server", [string]$frontendPort, "--bind", $frontendHost, "--directory", $frontendRoot) $repoRoot -Port $frontendPort
-    Wait-Http "http://127.0.0.1:$frontendPort/login.html" "frontend" -Process $frontendProcess
+    if ($useHarness) {
+        $harnessProcess = Start-LocalService "deepseek-harness" $nodeCommand.Source @("--import", "tsx/esm", "apps/cli/src/bin.ts", "web", "--no-open", "--port", [string]$harnessPort) $harnessRoot -Port $harnessPort
+        Wait-Http "http://127.0.0.1:$harnessPort/" "deepseek-harness" -Process $harnessProcess -AcceptUnauthorized
+    }
 
-    $frontendUrl = "http://localhost:$frontendPort/login.html"
+    $landingHost = Get-EnvValue "SUDARSHAN_FRONTEND_HOST"
+    if ([string]::IsNullOrWhiteSpace($landingHost)) { $landingHost = "127.0.0.1" }
+    $landingProcess = Start-LocalService "landing" $npmCommand.Source @("run", "dev", "--", "--host", $landingHost, "--port", [string]$landingPort) $landingRoot -Port $landingPort
+    Wait-Http "http://127.0.0.1:$landingPort/login.html" "landing" -Process $landingProcess
+
+    $landingUrl = "http://localhost:$landingPort/"
+    $harnessUrl = "http://localhost:$harnessPort/"
     Write-Host ""
     Write-Host "Sudarshan is running locally:" -ForegroundColor Green
-    Write-Host "  Frontend:   $frontendUrl"
+    Write-Host "  Landing:    $landingUrl"
+    if ($useHarness) { Write-Host "  Harness:    $harnessUrl" }
     Write-Host "  Node API:   http://localhost:$nodePort"
     Write-Host "  Python API: http://localhost:$pythonPort"
     Write-Host "  Logs:       $logRoot"
     Write-ProcessManifest
     Write-Host "  Process manifest: $processManifestPath"
     if ($OpenBrowser -or (Get-EnvValue "SUDARSHAN_OPEN_BROWSER") -eq "true") {
-        Start-Process $frontendUrl
+        Start-Process $landingUrl
     }
 }
 catch {

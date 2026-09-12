@@ -4,7 +4,7 @@
 .title { margin: 5px 0 3px; font-size: 17px; font-weight: 650; }
 .meta { color: #8fa3c6; font-size: 11px; }
 .fixture { margin-top: 10px; padding: 8px 9px; border: 1px solid rgba(255, 168, 74, .28); border-radius: 8px; color: #ffc47d; background: rgba(255, 150, 50, .08); font-size: 11px; line-height: 1.35; }
-.tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 10px 12px; border-bottom: 1px solid rgba(130, 159, 207, .13); }
+.tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 10px 12px; border-bottom: 1px solid rgba(130, 159, 207, .13); }
 .tab { min-height: 30px; border: 1px solid transparent; border-radius: 6px; color: #91a5c5; background: transparent; cursor: pointer; font: inherit; font-size: 11px; }
 .tab:hover, .tab:focus-visible { color: #eaf2ff; background: rgba(105, 152, 230, .1); outline: none; }
 .tabActive { border-color: rgba(117, 170, 255, .32); color: #f1f6ff; background: rgba(82, 137, 233, .17); }
@@ -18,6 +18,12 @@
 .heroValue { margin-top: 3px; font-size: 14px; font-weight: 600; }
 .progress { height: 5px; margin-top: 11px; overflow: hidden; border-radius: 5px; background: rgba(160, 187, 226, .16); }
 .progress > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #5f9aff, #73d7ff); }
+.metricGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.metric { min-width: 0; padding: 9px 10px; border: 1px solid rgba(130, 159, 207, .14); border-radius: 8px; background: rgba(21, 36, 66, .42); }
+.metricLabel { color: #8fa3c6; font-size: 10px; }
+.metricValue { margin-top: 4px; overflow: hidden; color: #e9f1ff; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.metricDetail { margin-top: 3px; color: #ffc47d; font-size: 9px; }
+.fallback { display: flex; flex-direction: column; gap: 3px; padding: 8px 9px; border-left: 2px solid #ffbd67; color: #ffc47d; background: rgba(255, 169, 74, .06); font-size: 10px; line-height: 1.4; }
 .muted { color: #8fa3c6; font-size: 11px; line-height: 1.45; }
 .sectionTitle { color: #c2d2ec; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
 .lane, .card, .row { padding: 10px; border: 1px solid rgba(130, 159, 207, .15); border-radius: 8px; background: rgba(21, 36, 66, .48); }

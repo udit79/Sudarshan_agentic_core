@@ -26,7 +26,102 @@
    rail (10px side padding), 12px vertical rhythm, 18px from the rail top to
    the whale's box (24px to the 24-wide whale glyph itself). */
 .root.collapsed {
-  padding: 18px 10px 6px;
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 40;
+  width: max-content !important;
+  height: 78px;
+  min-height: 78px;
+  padding: 10px 18px;
+  box-sizing: border-box;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  transform: translateX(-50%);
+  border: 2px solid color-mix(in srgb, white 42%, transparent);
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, white 34%, transparent), color-mix(in srgb, #59616d 78%, transparent)),
+    color-mix(in srgb, var(--dsw-specific-sidebar-fill) 82%, #687078 18%);
+  box-shadow:
+    0 18px 40px rgb(0 0 0 / 30%),
+    inset 0 1px 0 rgb(255 255 255 / 20%);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+
+/* The compact rail is a floating application dock in the collapsed state.
+   The sidebar column still owns the layout reservation; the dock itself is
+   intentionally lifted above the conversation surface to match the compact
+   icon-navigation reference treatment. */
+.collapsed .logoRow {
+  flex: none;
+  width: auto;
+  height: 56px;
+  min-height: 56px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  justify-content: flex-start;
+}
+
+.collapsed .newSession {
+  flex: none;
+  width: 36px;
+  height: 56px;
+  min-height: 56px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  align-self: flex-start;
+}
+
+.collapsed .regionArea {
+  flex: none;
+  width: auto;
+  height: 56px;
+  min-height: 56px;
+  margin: 0;
+  box-sizing: border-box;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+}
+
+.collapsed .footArea,
+.collapsed .footerActions,
+.collapsed .settingsArea {
+  flex: none;
+  width: auto;
+  height: 56px;
+  min-height: 56px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.collapsed .logoRow,
+.collapsed .newSession,
+.collapsed .regionArea,
+.collapsed .footerActions,
+.collapsed .settingsArea {
+  position: relative;
+}
+
+.collapsed .logoRow::after,
+.collapsed .newSession::after,
+.collapsed .regionArea::after,
+.collapsed .footerActions::after,
+.collapsed .settingsArea::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 54%);
+  transform: translateX(-50%);
 }
 
 /* Scrollbars in the column are a pointer affordance: the shell adds this
@@ -101,10 +196,8 @@
 }
 
 .collapsed .logoRow {
-  height: 36px;
-  padding: 0;
-  margin-bottom: 12px;
-  justify-content: flex-start;
+  height: 56px;
+  justify-content: center;
 }
 
 /* Brand group (figma I133:7632): the full wordmark rides the text ink
@@ -197,8 +290,16 @@
 }
 
 .collapsed .iconButton {
-  width: 36px;
-  height: 36px;
+  width: 56px;
+  height: 56px;
+  border-radius: 17px;
+  background: linear-gradient(145deg, #6170ff, #4253dd);
+  color: white;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 20%), 0 7px 14px rgb(46 62 170 / 30%);
+}
+
+.collapsed .iconButton:hover {
+  background: linear-gradient(145deg, #7180ff, #5062f3);
 }
 
 /* Rail logo swap: collapsed, the toggle rests as the whale mark (brand ink,
@@ -272,18 +373,21 @@
 }
 
 .collapsed .newSession {
-  align-self: flex-start;
-  width: 36px;
-  height: 36px;
+  align-self: center;
+  width: 56px;
+  height: 56px;
   padding: 0;
-  margin: 0 0 12px;
+  margin: 0;
   gap: 0;
-  border-color: transparent;
-  background: transparent;
+  border: none;
+  border-radius: 17px;
+  background: linear-gradient(145deg, #4c82ff, #1f5de8);
+  color: white;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 20%), 0 7px 14px rgb(30 79 185 / 26%);
 }
 
 .collapsed .newSession:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: linear-gradient(145deg, #6495ff, #2e6cf0);
 }
 
 .newSessionLabel {
@@ -311,9 +415,73 @@
 }
 
 .collapsed .regionArea {
+  display: flex;
+  align-items: center;
   margin-left: 0;
   margin-right: 0;
   padding-left: 0;
+  overflow: visible;
+}
+
+.collapsed .regionArea > div {
+  display: flex !important;
+  align-items: center;
+  width: auto;
+  height: 56px;
+}
+
+/* The workspace rail contains a header and search seat. In the dock they
+   become adjacent tiles; the session list stays hidden until the sidebar is
+   expanded. */
+.collapsed .regionArea > div > div {
+  display: flex !important;
+  flex: none;
+  flex-direction: row;
+  align-items: center;
+  width: auto;
+  height: 56px;
+  min-height: 56px;
+  margin: 0;
+  padding: 0;
+  gap: 14px;
+  overflow: visible;
+}
+
+.collapsed .regionArea > div > div > div:nth-child(1),
+.collapsed .regionArea > div > div > div:nth-child(2) {
+  display: flex !important;
+  flex: none;
+  align-items: center;
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+}
+
+.collapsed .regionArea > div > div > div:nth-child(3) {
+  display: none !important;
+}
+
+.collapsed .regionArea > div > div > div:nth-child(1) button {
+  background: linear-gradient(145deg, #ffcf4a, #eea900);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 24%), 0 7px 14px rgb(176 111 0 / 24%);
+}
+
+.collapsed .regionArea > div > div > div:nth-child(2) button {
+  background: linear-gradient(145deg, #36c982, #09a95f);
+}
+
+.collapsed .regionArea button {
+  width: 56px;
+  height: 56px;
+  border-radius: 17px;
+  background: linear-gradient(145deg, #36c982, #09a95f);
+  color: white;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 20%), 0 7px 14px rgb(10 132 77 / 24%);
+}
+
+.collapsed .regionArea button:hover {
+  background: linear-gradient(145deg, #4ddd99, #13bf70);
 }
 
 /* Footer seats: additive actions stack above Settings. Each occupant owns its
@@ -336,6 +504,9 @@
 }
 
 .collapsed .footArea {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
   align-items: center;
 }
 
@@ -344,6 +515,37 @@
   display: flex;
   justify-content: center;
   width: auto;
+}
+
+.collapsed .settingsArea button,
+.collapsed .footerActions button {
+  width: 56px;
+  height: 56px;
+  border-radius: 17px;
+  padding: 0;
+  justify-content: center;
+  background: linear-gradient(145deg, #6e7888, #515b6a);
+  color: white;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 20%), 0 7px 14px rgb(55 64 79 / 24%);
+}
+
+.collapsed .settingsArea button:hover,
+.collapsed .footerActions button:hover {
+  background: linear-gradient(145deg, #818b9b, #626d7e);
+}
+
+@media (max-width: 720px) {
+  .root.collapsed {
+    bottom: 14px;
+    max-width: calc(100vw - 20px);
+    gap: 8px;
+    padding-inline: 10px;
+    overflow-x: auto;
+  }
+
+  .collapsed .footArea {
+    gap: 8px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -4,6 +4,7 @@ import type {
   OperationsBridge,
   OperatorProjection,
   ProjectionStatus,
+  TelemetryProjection,
 } from './projection.ts'
 
 export interface LiveBridgeConfig {
@@ -16,6 +17,7 @@ type JsonObject = Record<string, unknown>
 
 const DEFAULT_API_ORIGIN = 'http://localhost:8000'
 const RUN_KEY_PREFIX = 'sudarshan.operations.run.'
+const CURSOR_KEY_PREFIX = 'sudarshan.operations.cursor.'
 const toolNamesBySession = new Map<string, Map<string, string>>()
 
 function apiOrigin(config: LiveBridgeConfig): string {
@@ -29,12 +31,31 @@ function runKey(sessionId: string): string {
   return `${RUN_KEY_PREFIX}${sessionId}`
 }
 
+function cursorKey(sessionId: string): string {
+  return `${CURSOR_KEY_PREFIX}${sessionId}`
+}
+
 function readRunId(sessionId: string): string {
   try { return globalThis.sessionStorage.getItem(runKey(sessionId)) || sessionId } catch { return sessionId }
 }
 
 function writeRunId(sessionId: string, runId: string): void {
   try { globalThis.sessionStorage.setItem(runKey(sessionId), runId) } catch { /* storage is optional */ }
+}
+
+function readCursor(sessionId: string): number {
+  try {
+    const value = Number(globalThis.sessionStorage.getItem(cursorKey(sessionId)) || 0)
+    return Number.isInteger(value) && value > 0 ? value : 0
+  } catch { return 0 }
+}
+
+function writeCursor(sessionId: string, sequence: number): void {
+  if (!Number.isInteger(sequence) || sequence <= 0) return
+  try {
+    const current = readCursor(sessionId)
+    if (sequence > current) globalThis.sessionStorage.setItem(cursorKey(sessionId), String(sequence))
+  } catch { /* storage is optional */ }
 }
 
 function text(value: unknown, fallback = ''): string {
@@ -45,15 +66,34 @@ function number(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : fallback
 }
 
-function status(value: unknown): ProjectionStatus {
-  const raw = text(value, 'queued')
-  if (raw === 'waiting_on_dependency' || raw === 'waiting_on_child_skill' || raw === 'waiting_for_approval' || raw === 'waiting_for_input') return 'waiting'
+function count(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
+}
+
+function normalizedStatus(value: unknown, stage = '', waitReason = ''): ProjectionStatus {
+  const raw = text(value, 'queued').toLowerCase()
+  const context = `${stage} ${waitReason}`.toLowerCase()
+  if (raw === 'cancelled' || raw === 'canceled') return 'cancelled'
+  if (raw === 'retrying' || raw === 'retry') return 'retry'
+  if (raw === 'pending' || raw === 'provider_pending' || raw === 'provider-pending') return 'provider-pending'
+  if (raw === 'waiting_for_approval' || raw === 'approval') return 'approval'
+  if (raw === 'waiting_for_input' || raw === 'waiting') return 'waiting'
+  if (raw === 'waiting_on_dependency' || raw === 'waiting_on_child_skill') {
+    return /capacity|concurrency|queue|worker/.test(context) ? 'capacity-wait' : 'waiting'
+  }
+  if (raw === 'queued' && /capacity|concurrency|queue wait|worker/.test(context)) return 'capacity-wait'
   if (raw === 'accepted' || raw === 'planning' || raw === 'validating' || raw === 'rendering' || raw === 'quality_check' || raw === 'repairing') return 'running'
   if (raw === 'completed') return 'succeeded'
   if (raw === 'partial') return 'partial'
   if (raw === 'failed' || raw === 'cancelled') return 'failed'
   if (raw === 'running' || raw === 'waiting' || raw === 'succeeded') return raw
   return 'queued'
+}
+
+function sequence(value: unknown): number | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = (value as JsonObject).sequence
+  return typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0 ? candidate : undefined
 }
 
 function artifactType(value: unknown): ArtifactType {
@@ -81,6 +121,7 @@ function uri(value: unknown): string | undefined {
 function projectionFromPayload(payload: JsonObject, runId: string): OperatorProjection {
   const summary = (payload.summary ?? {}) as JsonObject
   const telemetry = (payload.telemetry ?? {}) as JsonObject
+  const summaryTelemetry = (summary.telemetry ?? {}) as JsonObject
   const responseItems = Array.isArray(payload.responses) ? payload.responses : []
   const rawArtifacts = Array.isArray(payload.artifacts) ? payload.artifacts : (Array.isArray(payload.artifact_manifests) ? payload.artifact_manifests : [])
   const rawIngestion = Array.isArray(payload.ingestion_stages) ? payload.ingestion_stages : []
@@ -113,7 +154,7 @@ function projectionFromPayload(payload: JsonObject, runId: string): OperatorProj
   return {
     runId: text(payload.run_id, runId),
     taskId: text(payload.task_id, runId),
-    status: status(payload.status ?? summary.status),
+    status: normalizedStatus(payload.status ?? summary.status, text(payload.stage ?? summary.stage), text(payload.wait_reason ?? summary.wait_reason)),
     stage: text(payload.stage ?? summary.stage, 'Sudarshan run'),
     progress: number(payload.progress ?? telemetry.progress),
     queue: text(payload.queue, 'sudarshan'),
@@ -123,7 +164,7 @@ function projectionFromPayload(payload: JsonObject, runId: string): OperatorProj
       return {
         id: text(value.id ?? value.task_id, `child-${index + 1}`),
         label: text(value.label ?? value.pipeline, 'Child task'),
-        status: status(value.status),
+        status: normalizedStatus(value.status, text(value.stage ?? value.pipeline), text(value.wait_reason)),
         progress: number(value.progress),
         pipeline: text(value.pipeline, 'sudarshan'),
         ...(typeof value.wait_reason === 'string' ? { waitReason: value.wait_reason } : {}),
@@ -143,9 +184,27 @@ function projectionFromPayload(payload: JsonObject, runId: string): OperatorProj
     artifacts,
     ingestionStages: rawIngestion.map((item) => {
       const value = (item ?? {}) as JsonObject
-      return { label: text(value.label ?? value.stage, 'Ingestion stage'), status: status(value.status), detail: text(value.detail, '') }
+      return { label: text(value.label ?? value.stage, 'Ingestion stage'), status: normalizedStatus(value.status, text(value.stage), text(value.detail)), detail: text(value.detail, '') }
     }),
+    telemetry: telemetryProjection(telemetry, summaryTelemetry, payload),
+    qualityStatus: text(payload.quality_status ?? summary.quality_status, 'pending'),
+    fallbacks: Array.isArray(payload.fallbacks) ? payload.fallbacks.filter((value): value is string => typeof value === 'string' && value.trim().length > 0) : [],
     generatedAt: text(payload.generated_at, new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
+  }
+}
+
+function telemetryProjection(telemetry: JsonObject, summary: JsonObject, payload: JsonObject): TelemetryProjection {
+  const value = (key: string, fallback = 0): number => count(telemetry[key] ?? summary[key] ?? payload[key], fallback)
+  return {
+    queueWaitMs: value('queue_wait_ms'),
+    inputTokens: value('input_tokens'),
+    outputTokens: value('output_tokens'),
+    reasoningTokens: value('reasoning_tokens'),
+    estimatedCost: value('estimated_cost'),
+    usageIsEstimate: Boolean(telemetry.usage_is_estimate ?? summary.usage_is_estimate ?? payload.usage_is_estimate),
+    cacheHits: value('cache_hits'),
+    cacheWaits: value('cache_waits'),
+    fallbackCount: value('fallback_count'),
   }
 }
 
@@ -179,21 +238,56 @@ export function createLiveOperationsBridge(config: LiveBridgeConfig = {}): Opera
         payload.artifact_manifests = manifests.filter(Boolean)
       }
     }
+    if (Array.isArray(payload.events)) {
+      for (const event of payload.events) {
+        const current = sequence(event)
+        if (current !== undefined) writeCursor(sessionId, current)
+      }
+    }
     return projectionFromPayload(payload, runId)
   }
 
   return {
     getProjection,
-    bindRun(sessionId, runId) { if (sessionId && runId) writeRunId(sessionId, runId) },
+    bindRun(sessionId, runId) {
+      if (!sessionId || !runId) return
+      if (readRunId(sessionId) !== runId) {
+        try { globalThis.sessionStorage.removeItem(cursorKey(sessionId)) } catch { /* storage is optional */ }
+      }
+      writeRunId(sessionId, runId)
+    },
     subscribeProjection(sessionId, onProjection) {
       if (!EventSourceCtor) return () => undefined
-      const runId = readRunId(sessionId)
-      const source = new EventSourceCtor(`${origin}/runs/${encodeURIComponent(runId)}/events?after_sequence=0`)
+      let source: EventSource | undefined
+      let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+      let disposed = false
       const refresh = () => { void getProjection(sessionId).then(onProjection).catch(() => undefined) }
-      source.addEventListener('progress', refresh)
-      source.addEventListener('heartbeat', refresh)
-      source.onerror = () => undefined
-      return () => source.close()
+      const connect = (): void => {
+        if (disposed) return
+        const runId = readRunId(sessionId)
+        source = new EventSourceCtor(`${origin}/runs/${encodeURIComponent(runId)}/events?after_sequence=${readCursor(sessionId)}`)
+        source.addEventListener('progress', (event: Event) => {
+          try {
+            const parsed = JSON.parse((event as MessageEvent<string>).data) as unknown
+            const current = sequence(parsed)
+            if (current !== undefined) writeCursor(sessionId, current)
+          } catch { /* malformed event data is ignored; status polling remains authoritative */ }
+          refresh()
+        })
+        source.addEventListener('heartbeat', refresh)
+        source.onerror = () => {
+          source?.close()
+          if (!disposed && reconnectTimer === undefined) {
+            reconnectTimer = setTimeout(() => { reconnectTimer = undefined; connect() }, 1_000)
+          }
+        }
+      }
+      connect()
+      return () => {
+        disposed = true
+        if (reconnectTimer !== undefined) clearTimeout(reconnectTimer)
+        source?.close()
+      }
     },
     previewArtifact(artifact) { openArtifact(origin, artifact.previewUri) },
     downloadArtifact(artifact) { openArtifact(origin, artifact.downloadUri) },

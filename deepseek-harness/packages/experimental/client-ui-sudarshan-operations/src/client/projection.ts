@@ -3,7 +3,7 @@
  * It deliberately contains references and measurements, never raw source text,
  * prompts, provider payloads, credentials, or hidden reasoning.
  */
-export type ProjectionStatus = 'queued' | 'running' | 'waiting' | 'succeeded' | 'partial' | 'failed'
+export type ProjectionStatus = 'queued' | 'capacity-wait' | 'running' | 'waiting' | 'provider-pending' | 'approval' | 'retry' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
 export type ArtifactType = 'markdown' | 'presentation' | 'infographic' | 'video' | 'linkedin'
 
 export interface ChildProjection {
@@ -39,6 +39,18 @@ export interface ArtifactProjection {
   repair?: string
 }
 
+export interface TelemetryProjection {
+  queueWaitMs: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  estimatedCost: number
+  usageIsEstimate: boolean
+  cacheHits: number
+  cacheWaits: number
+  fallbackCount: number
+}
+
 export interface OperatorProjection {
   runId: string
   taskId: string
@@ -51,6 +63,9 @@ export interface OperatorProjection {
   evidence: readonly EvidenceProjection[]
   artifacts: readonly ArtifactProjection[]
   ingestionStages: readonly { label: string; status: ProjectionStatus; detail: string }[]
+  telemetry: TelemetryProjection
+  qualityStatus: string
+  fallbacks: readonly string[]
   generatedAt: string
 }
 
@@ -108,6 +123,19 @@ export function previewProjection(sessionId: string, refresh = 0): OperatorProje
       { label: 'Text extraction', status: 'succeeded', detail: 'PDF, XLSX, SVG' },
       { label: 'Memory persistence', status: 'running', detail: 'L1 projection pending' },
     ],
+    telemetry: {
+      queueWaitMs: 800,
+      inputTokens: 4_820,
+      outputTokens: 1_260,
+      reasoningTokens: 640,
+      estimatedCost: 0.18,
+      usageIsEstimate: true,
+      cacheHits: 4,
+      cacheWaits: 1,
+      fallbackCount: 1,
+    },
+    qualityStatus: 'repairable',
+    fallbacks: ['Video child is using the native renderer fallback.'],
     generatedAt,
   }
 }

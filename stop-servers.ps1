@@ -1,6 +1,6 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [int[]]$Ports = @(3000, 8000, 8080),
+    [int[]]$Ports = @(4173, 3080, 8000, 8080),
     [switch]$ByPort
 )
 

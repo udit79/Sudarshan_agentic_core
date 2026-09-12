@@ -11,17 +11,18 @@ same claims.
 | Area | Current state | Honest claim |
 | --- | --- | --- |
 | Agentic control plane | Implemented locally | LangGraph owns routing and lifecycle; specialist pipelines and typed child skills run behind bounded contracts. |
-| Harness/MCP boundary | Implemented locally | DeepSeek Harness is an optional adapter; external MCP/A2A clients use the same Sudarshan application boundary. |
+| Harness/MCP boundary | Implemented locally | DeepSeek Harness is the authenticated application frontend and the MCP/A2A clients use the same Sudarshan application boundary. |
 | H-series agentic integration | Complete locally; staging gates open | H-01–H-08 implementation, native OperationsBridge, sandbox contract, parity tests, and offline benchmark are present; live container, authenticated staging, external interop, and real-artifact evidence remain. |
 | Python backend | Strong local vertical slice | Ingestion, memory, routing, pipelines, quality gates, artifacts, scheduler, cache, telemetry, audit, and recovery are wired and tested locally. |
-| Reference frontend | Functional dashboard | Authenticated gateway mode, case/source flow, run progress, cancellation, artifact preview/download, and safe telemetry are available. |
+| Frontend shell | Active landing + Harness flow | The new landing/About/sign-in shell is the public entry point; successful sign-in opens the DeepSeek Harness application frontend. |
 | Production deployment | Release-candidate code present; deployment gates open | T43–T52 code paths and local tests are present. Live Redis/object-storage, provider reconciliation, signed-sandbox drills, real-corpus benchmarks, external MCP/A2A, visual approval, backup/restore, and release sign-off remain environment gates. |
 
 ## Frontend capabilities
 
-The frontend is a gateway-first static application in `frontend/`. It is a
-reference operator dashboard, not the security boundary; identity, ownership,
-quotas, and artifact authorization belong to the gateway/backend.
+The public frontend is the Vite app in `landing page/landing page/`. It owns
+the landing, About, and sign-in shell. After authentication, the browser opens
+the DeepSeek Harness web frontend; identity, ownership, quotas, and artifact
+authorization remain responsibilities of the gateway/backend.
 
 The optional DeepSeek Harness web surface is composed separately: the
 Sudarshan brand and theme are replaceable packages documented in

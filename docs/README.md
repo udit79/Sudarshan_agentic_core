@@ -58,7 +58,7 @@ documents should link to those sources instead of copying reference lists.
 | How do I add a visual output? | [Rendering and quality](artifact-rendering-and-quality.md) | `pipelines/ppt`, `pipelines/infographic`, `pipelines/video` |
 | How do I extend diagrams safely? | [Diagram Design adoption plan](diagram-design-adoption-plan.md) | `pipelines/diagram`, `skills/visual-flowchart` |
 | How do I use Cognee safely? | [Memory README](../memory/README.md) | `memory/context_builder.py`, `memory/memory_manager.py` |
-| How does the frontend consume runs? | [Frontend integration](frontend-integration.md) | `frontend/api.js`, `frontend/script.js` |
+| How does the frontend consume runs? | [Frontend integration](frontend-integration.md) | The landing shell hands authenticated users to the DeepSeek Harness web frontend. |
 | How does the gateway enforce ownership? | [Gateway integration](gateway-integration.md) | `backend-node/src` |
 | How are files converted into reusable evidence? | [Ingestion architecture](ingestion-architecture.md) | `ingestion_pipelines/` |
 | How does Harness connect? | [Harness integration](../integrations/deepseek_harness/README.md) | [Harness UI plugin](harness-ui-plugin.md) |
