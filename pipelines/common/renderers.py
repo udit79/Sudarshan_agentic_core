@@ -34,6 +34,22 @@ class RendererCapability:
             raise ValueError("renderer cannot fall back to itself")
 
 
+@dataclass(frozen=True, slots=True)
+class RendererSelection:
+    """Resolved renderer choice for one artifact operation."""
+
+    requested_renderer_id: str
+    selected_renderer_id: str
+    version: str
+    artifact_kind: str
+    operation: RendererOperation
+    degraded: bool = False
+
+    @property
+    def renderer_version(self) -> str:
+        return f"{self.selected_renderer_id}@{self.version}"
+
+
 class RendererRegistry:
     """Validated renderer metadata; registration is deterministic and local."""
 
@@ -56,6 +72,47 @@ class RendererRegistry:
     def supports(self, renderer_id: str, operation: RendererOperation, artifact_kind: str) -> bool:
         capability = self.get(renderer_id)
         return operation in capability.operations and artifact_kind in capability.artifact_kinds
+
+    def resolve(
+        self,
+        renderer_id: str,
+        artifact_kind: str,
+        operation: RendererOperation = "render",
+    ) -> RendererSelection:
+        """Resolve a requested renderer or its declared fallback.
+
+        A fallback is returned as degraded so manifests and frontends cannot
+        silently present it as equivalent to the requested renderer.
+        """
+
+        requested = renderer_id.strip()
+        kind = artifact_kind.strip()
+        if not requested or not kind:
+            raise ValueError("renderer_id and artifact_kind are required")
+        seen: set[str] = set()
+        current = requested
+        degraded = False
+        while current:
+            if current in seen:
+                raise ValueError(f"renderer fallback cycle detected at {current}")
+            seen.add(current)
+            capability = self.get(current)
+            if operation in capability.operations and kind in capability.artifact_kinds:
+                return RendererSelection(
+                    requested_renderer_id=requested,
+                    selected_renderer_id=capability.renderer_id,
+                    version=capability.version,
+                    artifact_kind=kind,
+                    operation=operation,
+                    degraded=degraded,
+                )
+            if capability.fallback_renderer_id is None:
+                raise ValueError(
+                    f"renderer {current!r} cannot {operation} {kind!r} and has no compatible fallback"
+                )
+            current = capability.fallback_renderer_id
+            degraded = True
+        raise ValueError(f"renderer {requested!r} could not be resolved")
 
     def inspect(self, renderer_id: str, path: str | Path, *, required_text: Iterable[str] = ()):
         """Run the shared integrity gate for a registered inspect-capable renderer."""
@@ -98,4 +155,4 @@ def default_renderer_registry() -> RendererRegistry:
     ])
 
 
-__all__ = ["RendererCapability", "RendererOperation", "RendererRegistry", "default_renderer_registry"]
+__all__ = ["RendererCapability", "RendererOperation", "RendererRegistry", "RendererSelection", "default_renderer_registry"]

@@ -45,7 +45,6 @@ from pipelines.orchestrator import (
     RunContext,
     RunEvent,
     RunSummary,
-    PipelineOrchestrator,
     RedisProgressSink,
     RedisObservabilityStore,
     SkillCall,
@@ -56,7 +55,6 @@ from pipelines.orchestrator import (
     ObservableProgressSink,
     SQLiteObservabilityStore,
     TelemetrySummary,
-    create_sqlite_checkpointer,
     event_dict,
     project_progress_event,
     orchestration_result_to_dict,
@@ -75,6 +73,11 @@ class SudarshanApplication:
     """Own the real application services behind Harness-facing tools."""
 
     def __init__(self) -> None:
+        # Keep the application boundary importable for artifact-only routes.
+        # The graph pulls optional generation runtimes such as CrewAI, so load
+        # it only when a live application instance is actually constructed.
+        from pipelines.orchestrator.graph import PipelineOrchestrator, create_sqlite_checkpointer
+
         control_plane = self._build_control_plane()
         self.control_plane = control_plane
         self.control_plane_mode = "redis" if control_plane is not None else "sqlite"

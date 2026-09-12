@@ -3,7 +3,9 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { SudarshanBrandMark, SudarshanBrandName, SudarshanHeroBrandMark } from './Brand.tsx'
+import { CaseDocumentDrop } from './CaseDocumentDrop.tsx'
 
 /** Required service: the UI slot registry. */
 export const inject = ['slots']
@@ -17,4 +19,13 @@ export function apply(ctx: ClientContext): void {
         yield ctx.slots.register({ name: 'sidebar.brand.name' }, SudarshanBrandName)
         yield ctx.slots.register({ name: 'conversation.hero.brand.mark' }, SudarshanHeroBrandMark)
       })))
+  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
+    name: 'conversation.composer.dock',
+    id: 'sudarshan-case-document-drop',
+    order: -10,
+  }, CaseDocumentDrop))
+  ctx.slots.inject('conversation.hero.caseDocuments', () => ctx.slots.register({
+    name: 'conversation.hero.caseDocuments',
+    id: 'sudarshan-hero-case-document-drop',
+  }, CaseDocumentDrop))
 }

@@ -6,24 +6,18 @@ type SudarshanMarkProps = {
   className?: string | undefined
 }
 
-/** Render the scalable Sudarshan mandala mark used by host brand slots. */
+/** Render the supplied landing-page S mark in every compact brand slot. */
 function SudarshanMark({ size, className }: SudarshanMarkProps) {
   return (
-    <svg
+    <img
       data-sudarshan-brand-mark="true"
       className={className}
+      src="/assets/sudarshan-icon.png"
       width={size}
       height={size}
-      viewBox="0 0 40 40"
-      fill="none"
+      alt=""
       aria-hidden="true"
-    >
-      <circle className="sudarshan-brand-orbit" cx="20" cy="20" r="18" stroke="#8b5cf6" strokeWidth="1.5" strokeDasharray="3 2" opacity="0.9" />
-      <circle className="sudarshan-brand-ring" cx="20" cy="20" r="12" stroke="#60a5fa" strokeWidth="1.5" />
-      <path className="sudarshan-brand-rays" d="M20 4V36M4 20H36M8.7 8.7L31.3 31.3M8.7 31.3L31.3 8.7" stroke="#c084fc" strokeWidth="1.2" />
-      <circle className="sudarshan-brand-core-glow" cx="20" cy="20" r="7" fill="#6366f1" opacity="0.18" />
-      <circle className="sudarshan-brand-core" cx="20" cy="20" r="4" fill="#38bdf8" />
-    </svg>
+    />
   )
 }
 

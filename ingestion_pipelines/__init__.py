@@ -22,13 +22,6 @@ from ingestion_pipelines.evidence import (
 )
 from ingestion_pipelines.structure import STRUCTURE_COMPILER_VERSION, compile_evidence_structure
 from ingestion_pipelines.evidence_index import EvidenceIndex, EvidenceNotFoundError
-from ingestion_pipelines.extract_video import (
-    VIDEO_EXTRACTOR_VERSION,
-    VideoIngestionCancelled,
-    default_video_ingestion_policy,
-    extract_video_evidence,
-    render_video_timeline,
-)
 from ingestion_pipelines.ingest import ingest_file
 from ingestion_pipelines.models import IngestedDocument
 from ingestion_pipelines.source_safety import SourceInspection, SourceSafetyError, inspect_source
@@ -112,3 +105,19 @@ __all__ = [
     "archive_benchmark_report",
     "run_multimodal_benchmark",
 ]
+
+
+def __getattr__(name: str):
+    """Load OpenCV-backed video extraction only when requested."""
+    video_exports = {
+        "VIDEO_EXTRACTOR_VERSION",
+        "VideoIngestionCancelled",
+        "default_video_ingestion_policy",
+        "extract_video_evidence",
+        "render_video_timeline",
+    }
+    if name in video_exports:
+        from ingestion_pipelines import extract_video
+
+        return getattr(extract_video, name)
+    raise AttributeError(name)

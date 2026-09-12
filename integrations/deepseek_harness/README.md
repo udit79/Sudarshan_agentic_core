@@ -74,11 +74,14 @@ profile keeps Harness compaction and clarification support, while all planning,
 skill selection, execution, evidence, artifact, and quality decisions remain
 owned by the Sudarshan MCP application.
 
-The overlay also hides generic preset, plugin, plan, goal, subagent, workflow,
-and command-palette controls. The Sudarshan operations drawer, trajectory,
-approvals, attachments, and model selection remain available. This is a
-composition-level restriction in the replaceable Cordis profile; the vendored
-Harness core is not modified.
+The overlay hides generic preset, plugin, plan, goal, subagent, workflow, and
+command-palette controls. The Sudarshan operations drawer and clarification
+support remain available. The inherited attachment, workspace, generic
+approval, trajectory, model/provider, and permission controls are not yet
+Sudarshan-compatible; the control-by-control findings and follow-up tickets
+are recorded in `docs/harness-ui-compatibility-audit.md` and T84-T90. This is
+a composition-level restriction in the replaceable Cordis profile; the
+vendored Harness core is not modified.
 
 The native MCP child process receives `SUDARSHAN_MCP_TOOL_PROFILE=artifact`.
 That profile exposes only lifecycle, skill discovery/dispatch, and verified

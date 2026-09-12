@@ -1,6 +1,5 @@
 """PPT pipeline package."""
 
-from pipelines.ppt.crew import PresentationFlow
 from pipelines.ppt.flowchart import (
     FlowchartLayout,
     FlowchartRenderArtifact,
@@ -77,3 +76,12 @@ __all__ = [
     "PptMasterConfig",
     "PptMasterExportResult",
 ]
+
+
+def __getattr__(name: str):
+    """Load the optional CrewAI-backed presentation flow on demand."""
+    if name == "PresentationFlow":
+        from pipelines.ppt.crew import PresentationFlow
+
+        return PresentationFlow
+    raise AttributeError(name)

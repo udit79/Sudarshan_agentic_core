@@ -16,6 +16,8 @@ export interface ComposerContentEditableProps extends HTMLAttributes<HTMLDivElem
   readonly editor: LexicalEditor | null
   /** Whether the user may edit (readOnly/disabled states fold in here). */
   readonly editable: boolean
+  /** Allows a product-owned no-session draft to use the resident surface. */
+  readonly plainEditable?: boolean
 }
 
 /**
@@ -23,7 +25,7 @@ export interface ComposerContentEditableProps extends HTMLAttributes<HTMLDivElem
  * @param props - editor binding, editability, and div passthroughs.
  * @returns the resident contenteditable div.
  */
-export function ComposerContentEditable({ editor, editable, ...rest }: ComposerContentEditableProps): ReactNode {
+export function ComposerContentEditable({ editor, editable, plainEditable = false, ...rest }: ComposerContentEditableProps): ReactNode {
   const ref = useRef<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
     const el = ref.current
@@ -39,7 +41,7 @@ export function ComposerContentEditable({ editor, editable, ...rest }: ComposerC
       ref={ref}
       // Lexical's setRootElement never touches contenteditable; the binding
       // renders it, and setEditable above keeps the editor's own gate in step.
-      contentEditable={editor !== null && editable}
+      contentEditable={(editor !== null && editable) || (editor === null && plainEditable)}
       suppressContentEditableWarning
       role="textbox"
       aria-multiline="true"

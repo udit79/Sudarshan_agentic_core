@@ -74,6 +74,7 @@ export const InputBar = memo(function InputBar({
   // prompt failures): the seq keys the Toast so an identical repeated message
   // restarts the hold-then-fade cycle instead of reusing the faded one.
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
+  const [guestDraft, setGuestDraft] = useState('')
   const toastSeq = useRef(0)
   const showToast = useCallback((text: string) => {
     toastSeq.current += 1
@@ -113,11 +114,14 @@ export const InputBar = memo(function InputBar({
   // but its independent Stop below stays available while it runs.
   const continuable = subagent?.address.mode === 'continuable'
   const parentOffline = continuable && subagent.parentAvailable !== true
+  // The no-workspace surface remains the resident DOM node but acts as the
+  // case-start trigger until a Session is created.
+  const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
   // Running input stays free; locked = session removed, the
   // inert no-workspace state, the machine faces absent (no session), or a
   // parent-offline continuable child. An owner block also disables input;
   // adjudicating and submitting render read-only so the draft stays visible.
-  const disabled = removed || inert || !live || blocked !== undefined || parentOffline
+  const disabled = removed || (!workspaceTrigger && (inert || !live)) || blocked !== undefined || parentOffline
   const locked = disabled
   // The model seat is the ONE control a block leaves live: every block this
   // contract has is cleared by choosing a model, so locking it too would leave
@@ -125,13 +129,8 @@ export const InputBar = memo(function InputBar({
   // be disabled do lock it — there is no session to choose a model for.
   const modelSeatLocked = removed || inert || !live
   const machineBusy = input?.phase === 'adjudicating' || input?.phase === 'submitting'
-  // The no-workspace surface remains the resident DOM node but acts as the
-  // existing picker trigger. Message controls stay locked until a Session
-  // exists; the trigger itself is read-only rather than disabled so pointer
-  // and keyboard users can reach the recovery action.
-  const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
   const editorDisabled = removed || (locked && !workspaceTrigger)
-  const editable = live && !locked && !machineBusy
+  const editable = (live && !locked && !machineBusy) || workspaceTrigger
   const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
     && input.queue.some(row => row.placement === 'queued')
 
@@ -311,9 +310,9 @@ export const InputBar = memo(function InputBar({
   // picker trigger for keyboard users (no editor is bound in this state).
   const onWorkspaceKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (!workspaceTrigger) return
-    if (e.key === 'Enter' || e.key === ' ') {
+    if (e.key === 'Enter') {
       e.preventDefault()
-      onRequestWorkspace()
+      onRequestWorkspace(guestDraft)
     }
   }
 
@@ -324,6 +323,10 @@ export const InputBar = memo(function InputBar({
   const interruptible = running && continuable
   const primaryLabel = primaryStops ? t('input.stop') : t('input.send')
   const onPrimary = (): void => {
+    if (workspaceTrigger) {
+      if (!empty && onRequestWorkspace !== undefined) onRequestWorkspace(guestDraft)
+      return
+    }
     if (primaryStops) {
       stop?.()
       return
@@ -420,20 +423,22 @@ export const InputBar = memo(function InputBar({
             browser's own. */}
         <div ref={scrollRef} className={css.scroll} data-input-scroll>
           <div className={css.grow}>
-            <ComposerContentEditable
-              editor={workspaceTrigger ? null : editor}
-              editable={editable}
-              className={clsx(css.input, editorDisabled && css.inputDisabled)}
+              <ComposerContentEditable
+                editor={workspaceTrigger ? null : editor}
+                editable={editable}
+                plainEditable={workspaceTrigger}
+                className={clsx(css.input, editorDisabled && css.inputDisabled)}
               data-phase={input?.phase ?? 'inert'}
               aria-disabled={editorDisabled || undefined}
               data-placeholder={placeholderText}
               // The placeholder was the textarea's accessible name; a div's
               // data attribute is not, so the label restores it.
-              aria-label={workspaceTrigger ? t('hero.chooseWorkspace') : placeholderText}
+              aria-label={workspaceTrigger ? t('placeholder.hero') : placeholderText}
               aria-haspopup={workspaceTrigger ? 'menu' : undefined}
               aria-expanded={workspaceTrigger ? workspacePickerOpen : undefined}
               tabIndex={workspaceTrigger ? 0 : undefined}
               onKeyDown={workspaceTrigger ? onWorkspaceKeyDown : undefined}
+              onInput={workspaceTrigger ? (event) => { setGuestDraft(event.currentTarget.textContent ?? '') } : undefined}
               style={hint === null ? undefined : { '--dsh-composer-hint': JSON.stringify(hint) } as CSSProperties}
             />
             {empty && !claimActive && (
@@ -517,7 +522,7 @@ export const InputBar = memo(function InputBar({
                 type="button"
                 className={css.primary}
                 aria-label={primaryLabel}
-                disabled={primaryStops ? stop === undefined : empty || disabled || machineBusy}
+                disabled={primaryStops ? stop === undefined : (workspaceTrigger ? guestDraft.trim() === '' : empty || disabled || machineBusy)}
                 onMouseDown={keepFocus}
                 onClick={onPrimary}
               >

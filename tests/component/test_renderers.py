@@ -13,6 +13,23 @@ def test_default_registry_describes_native_and_fallback_renderers(tmp_path):
     report = registry.inspect("diagram.native-svg", svg, required_text=("ok",))
     assert report.approved is True
 
+    selection = registry.resolve("presentation.ppt-master", "pptx", "inspect")
+    assert selection.selected_renderer_id == "presentation.ppt-master"
+    assert selection.renderer_version == "presentation.ppt-master@local"
+    assert selection.degraded is False
+
+
+def test_registry_resolves_declared_fallback_as_degraded():
+    registry = RendererRegistry([
+        RendererCapability("requested", "1", ("svg",), frozenset({"render", "fallback"}), "fallback"),
+        RendererCapability("fallback", "2", ("svg",), frozenset({"inspect"})),
+    ])
+
+    selection = registry.resolve("requested", "svg", "inspect")
+
+    assert selection.selected_renderer_id == "fallback"
+    assert selection.degraded is True
+
 
 def test_registry_rejects_duplicates_and_self_fallback():
     capability = RendererCapability("demo", "1", ("svg",), frozenset({"inspect"}))

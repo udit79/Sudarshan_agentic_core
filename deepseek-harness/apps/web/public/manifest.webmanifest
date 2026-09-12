@@ -7,9 +7,9 @@
   "display": "fullscreen",
   "icons": [
     {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/assets/sudarshan-icon.png",
+      "sizes": "606x606",
+      "type": "image/png",
       "purpose": "any"
     }
   ]

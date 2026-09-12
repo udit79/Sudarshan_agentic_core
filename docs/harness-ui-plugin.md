@@ -35,8 +35,13 @@ For a gateway deployment, set this to the authenticated backend origin exposed
 to the Harness browser; do not put Cognee credentials in the browser or
 configure the bridge to call Cognee directly.
 The API CORS example includes the native Harness origins on port 3080.
-Approval inboxes and release/operations gates remain planned follow-up surfaces
-until their backend decision and release contracts are connected.
+Generic Harness attachments, workspace browsing, model/provider settings,
+permission presets, approval panels, trajectory inspectors, and deliverable
+rows are not assumed to be compatible merely because the web bundle exposes
+them. They require the governed adapters and browser evidence tracked by
+T84-T90 in the remaining-work plan. Until then, only the Sudarshan operations
+projection, clarification flow, and manifest-backed artifact actions should
+be treated as product-compatible.
 
 ## Harness independence
 

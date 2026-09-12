@@ -47,9 +47,9 @@ function Monitor({ projection, t }: { projection: OperatorProjection; t: (key: O
     </div>
     <div className={css.metricGrid} aria-label={t('telemetry')}>
       <Metric label={t('queueWait')} value={`${usage.queueWaitMs} ${t('milliseconds')}`} />
-      <Metric label={t('usage')} value={`${totalTokens.toLocaleString()} ${t('tokens')}`} detail={usage.usageIsEstimate ? t('estimated') : undefined} />
+      <Metric label={t('usage')} value={`${totalTokens.toLocaleString()} ${t('tokens')}`} {...(usage.usageIsEstimate ? { detail: t('estimated') } : {})} />
       <Metric label={t('cache')} value={`${usage.cacheHits} ${t('cacheHit')} · ${usage.cacheWaits} ${t('cacheWait')}`} />
-      <Metric label={t('quality')} value={projection.qualityStatus} detail={usage.fallbackCount ? `${usage.fallbackCount} ${t('fallback')}` : undefined} />
+      <Metric label={t('quality')} value={projection.qualityStatus} {...(usage.fallbackCount ? { detail: `${usage.fallbackCount} ${t('fallback')}` } : {})} />
     </div>
     {projection.fallbacks.length > 0 && <div className={css.fallback} role="status"><strong>{t('fallbacks')}</strong>{projection.fallbacks.join(' · ')}</div>}
     <div className={css.sectionTitle}>Child lanes</div>
@@ -78,15 +78,55 @@ function artifactLabel(type: ArtifactProjection['type']): string {
   return ({ markdown: 'MD', presentation: 'PPT', infographic: 'SVG', video: 'MP4', linkedin: 'IN' })[type]
 }
 
-function Artifacts({ projection, bridge, t }: { projection: OperatorProjection; bridge: OperationsBridge | undefined; t: (key: OperationKey) => string }) {
+function Artifacts({ projection, bridge, sessionId, t }: { projection: OperatorProjection; bridge: OperationsBridge | undefined; sessionId: string; t: (key: OperationKey) => string }) {
+  const [reviewArtifact, setReviewArtifact] = useState<ArtifactProjection | undefined>()
+  const [rejectReason, setRejectReason] = useState('')
+  const [reviewError, setReviewError] = useState<string | undefined>()
+  const [reviewPending, setReviewPending] = useState(false)
+
+  const submitReview = async (decision: 'approve' | 'reject'): Promise<void> => {
+    if (!reviewArtifact || !bridge?.reviewArtifact) return
+    if (decision === 'reject' && !rejectReason.trim()) {
+      setReviewError(t('reasonRequired'))
+      return
+    }
+    setReviewPending(true)
+    setReviewError(undefined)
+    try {
+      await bridge.reviewArtifact(sessionId, reviewArtifact, decision, rejectReason.trim() || undefined)
+      setReviewArtifact(undefined)
+      setRejectReason('')
+    } catch {
+      setReviewError(t('reviewFailed'))
+    } finally {
+      setReviewPending(false)
+    }
+  }
+
   return <>
     <div className={css.muted}>{bridge ? 'Artifacts are controlled by the authenticated Sudarshan adapter.' : 'Preview fixture: connect the Sudarshan adapter to enable artifact actions.'}</div>
     {projection.artifacts.map(artifact => <div key={artifact.id} className={css.card}>
       <div className={css.cardTop}><div className={css.artifactInfo}><span className={css.artifactIcon}>{artifactLabel(artifact.type)}</span><span className={`${css.name} ${css.artifactName}`}>{artifact.name}</span></div><Status status={artifact.status} t={t} /></div>
       <div className={css.detail}>{artifact.renderer} v{artifact.version} · {artifact.size} · {artifact.classification}</div>
+      {artifact.degraded && <div className={css.degraded}>{t('degraded')}{artifact.fallbackRenderer ? ` · ${t('fallbackRenderer')}: ${artifact.fallbackRenderer}` : ''}</div>}
+      {artifact.qualityReportId && <div className={css.detail}>{t('qualityReport')}: {artifact.qualityReportId}</div>}
+      {artifact.qualityIssues.length > 0 && <div className={css.issues}><div className={css.issueTitle}>{t('qualityIssues')}</div><ul>{artifact.qualityIssues.map(issue => <li key={issue}>{issue}</li>)}</ul></div>}
+      {artifact.comparison && <details className={css.comparison}><summary>{t('comparePreview')}</summary><div className={css.comparisonGrid}>
+        <div className={css.comparisonPane}><div className={css.comparisonLabel}>{t('currentRenderer')}</div><div className={css.detail}>{artifact.renderer} v{artifact.version}</div>{artifact.previewUri && <a className={css.previewLink} href={artifact.previewUri} target="_blank" rel="noreferrer">{t('openPreview')}</a>}</div>
+        <div className={css.comparisonPane}><div className={css.comparisonLabel}>{t('previousRenderer')}</div><div className={css.detail}>{artifact.comparison.previousRenderer ?? '—'}{artifact.comparison.previousVersion ? ` v${artifact.comparison.previousVersion}` : ''}</div>{artifact.comparison.previousPreviewUri ? <a className={css.previewLink} href={artifact.comparison.previousPreviewUri} target="_blank" rel="noreferrer">{t('openPreview')}</a> : <div className={css.detail}>{t('noComparisonPreview')}</div>}</div>
+      </div></details>}
       {artifact.repair && <div className={css.repair}>{artifact.repair}</div>}
-      <div className={css.actionRow}><button className={css.button} type="button" disabled={!artifact.previewAvailable || !bridge?.previewArtifact} onClick={() => { bridge?.previewArtifact?.(artifact) }}>Preview</button><button className={`${css.button} ${css.buttonSecondary}`} type="button" disabled={!artifact.previewAvailable || !bridge?.downloadArtifact} onClick={() => { bridge?.downloadArtifact?.(artifact) }}>Open / download</button></div>
+      <div className={css.actionRow}><button className={css.button} type="button" disabled={!artifact.previewAvailable || !bridge?.previewArtifact} onClick={() => { bridge?.previewArtifact?.(artifact) }}>Preview</button><button className={`${css.button} ${css.buttonSecondary}`} type="button" disabled={!artifact.previewAvailable || !bridge?.downloadArtifact} onClick={() => { bridge?.downloadArtifact?.(artifact) }}>Open / download</button>{(artifact.status === 'quality-review' || artifact.status === 'partial' || artifact.degraded) && <button className={`${css.button} ${css.buttonSecondary}`} type="button" disabled={!bridge?.reviewArtifact} onClick={() => { setReviewError(undefined); setReviewArtifact(artifact) }}>{t('review')}</button>}</div>
     </div>)}
+    {reviewArtifact && <div className={css.dialogBackdrop}>
+      <section className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="sudarshan-review-title">
+        <div className={css.dialogHeader}><div><div className={css.eyebrow}>{t('reviewArtifact')}</div><div className={css.title} id="sudarshan-review-title">{reviewArtifact.name}</div></div><Status status={reviewArtifact.status} t={t} /></div>
+        <div className={css.comparisonGrid}><div className={css.comparisonPane}><div className={css.comparisonLabel}>{t('currentRenderer')}</div><div className={css.detail}>{reviewArtifact.renderer} v{reviewArtifact.version}</div></div><div className={css.comparisonPane}><div className={css.comparisonLabel}>{t('previousRenderer')}</div><div className={css.detail}>{reviewArtifact.comparison?.previousRenderer ?? '—'}{reviewArtifact.comparison?.previousVersion ? ` v${reviewArtifact.comparison.previousVersion}` : ''}</div></div></div>
+        <label className={css.reasonLabel}>{t('rejectionReason')}<textarea className={css.textarea} value={rejectReason} onChange={event => { setRejectReason(event.target.value); setReviewError(undefined) }} rows={3} /></label>
+        {reviewError && <div className={css.reviewError} role="alert">{reviewError}</div>}
+        <div className={css.actionRow}><button className={`${css.button} ${css.buttonSecondary}`} type="button" disabled={reviewPending} onClick={() => { setReviewArtifact(undefined); setRejectReason(''); setReviewError(undefined) }}>{t('cancel')}</button><button className={`${css.button} ${css.rejectButton}`} type="button" disabled={reviewPending} onClick={() => { void submitReview('reject') }}>{t('rejectArtifact')}</button><button className={css.button} type="button" disabled={reviewPending} onClick={() => { void submitReview('approve') }}>{t('approveArtifact')}</button></div>
+      </section>
+    </div>}
   </>
 }
 
@@ -136,7 +176,7 @@ export function OperationsPanel({ sessionId, t }: PanelProps) {
       <div className={css.toolbar}><span>{projection.status} · synced {projection.generatedAt}</span><button className={css.refresh} type="button" onClick={() => { setRefresh((value: number) => value + 1) }}>{t('refresh')}</button></div>
       {tab === 'monitor' && <Monitor projection={projection} t={t} />}
       {tab === 'evidence' && <Evidence projection={projection} />}
-      {tab === 'artifacts' && <Artifacts projection={projection} bridge={bridge} t={t} />}
+      {tab === 'artifacts' && <Artifacts projection={projection} bridge={bridge} sessionId={sessionId} t={t} />}
       {tab === 'ingestion' && <Ingestion projection={projection} sessionId={sessionId} bridge={bridge} t={t} />}
     </div>
   </div>

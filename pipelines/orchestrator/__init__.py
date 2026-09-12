@@ -1,10 +1,5 @@
 """Central LangGraph orchestration for Sudarshan application pipelines."""
 
-from pipelines.orchestrator.graph import (
-    PipelineOrchestrator,
-    build_default_pipeline_registry,
-    create_sqlite_checkpointer,
-)
 from pipelines.orchestrator.contracts import (
     ArtifactManifest,
     ChildTaskOutcome,
@@ -146,3 +141,24 @@ __all__ = [
     "default_intent_resolver",
     "resolve_requested_pipelines",
 ]
+
+
+def __getattr__(name: str):
+    """Load the application graph only when orchestration is requested.
+
+    Contract consumers such as the artifact store should not need the optional
+    CrewAI-backed pipeline graph merely to import manifest types.
+    """
+    if name in {"PipelineOrchestrator", "build_default_pipeline_registry", "create_sqlite_checkpointer"}:
+        from pipelines.orchestrator.graph import (
+            PipelineOrchestrator,
+            build_default_pipeline_registry,
+            create_sqlite_checkpointer,
+        )
+
+        return {
+            "PipelineOrchestrator": PipelineOrchestrator,
+            "build_default_pipeline_registry": build_default_pipeline_registry,
+            "create_sqlite_checkpointer": create_sqlite_checkpointer,
+        }[name]
+    raise AttributeError(name)

@@ -769,6 +769,139 @@ Acceptance:
 - MIT/Apache reuse retains required notices and review records.
 - Release documentation identifies which behavior is native Sudarshan code.
 
+## T84–T90 — Harness UI compatibility audit tickets
+
+These tickets were generated from the control-by-control audit in
+[Harness UI compatibility audit](harness-ui-compatibility-audit.md). They
+close the gap between a control being present in the web bundle and that
+control being authorized, routed, and observable through Sudarshan's typed
+application boundary.
+
+### T84 — Authenticated Harness lifecycle action bridge
+
+Owner: frontend/backend. Depends on: T42, T45, H-05.
+
+Complete the live bridge for artifact review and run lifecycle actions. The
+host must provide authenticated operator and case identity; browser code must
+not invent identity from a free-text field.
+
+Acceptance:
+
+- Approve/reject sends the required operator/case identity through the
+  authenticated gateway and records run, task, case, actor, decision, and
+  reason.
+- Cooperative run cancellation is exposed through the same typed bridge and
+  `/runs/{run_id}/cancel` contract.
+- 401/403/409/422 responses become explicit UI states and never look like a
+  successful approval or cancellation.
+- Bridge tests cover headers, payloads, retries, and stable run/task recovery.
+
+### T85 — Case-scoped Harness ingestion controls
+
+Owner: frontend/backend. Depends on: T40, T45, T46, T84.
+
+Replace generic Harness attachments/workspace browsing with a case-scoped
+Sudarshan ingestion adapter, or hide those controls in the governed profile.
+Expose ingestion identity and implement an explicit retry policy rather than a
+permanently disabled button.
+
+Acceptance:
+
+- Upload sends authenticated multipart data with case, task, classification,
+  source reference, and idempotency identity to `/ingest`.
+- The safe projection includes `ingestion_id`, stage status, retryability, and
+  cancellation capability.
+- Cancel calls `/ingestions/{ingestion_id}/cancel`; retry is either a typed
+  backend operation or is not rendered.
+- No local filesystem path or raw extracted content enters the Harness UI.
+
+### T86 — Model, provider, credential, and permission capability fence
+
+Owner: frontend/backend/platform. Depends on: T41, T42, H-03, H-04.
+
+Hide or replace generic Harness model selection, model settings, provider
+configuration, credential setup, and permission presets for the Sudarshan
+profile. Sudarshan provider routing, budgets, credentials, and receipts remain
+backend-owned.
+
+Acceptance:
+
+- A Harness model/provider choice cannot silently diverge from the model and
+  provider used by Sudarshan.
+- No browser settings card accepts or persists Cognee/provider credentials.
+- Permission controls cannot grant shell, filesystem, web, subagent, or
+  workflow authority to the artifact agent.
+- Capability discovery is typed and read-only when shown to the operator.
+
+### T87 — Safe approval and trajectory projections
+
+Owner: frontend/backend/security. Depends on: T42, T45, H-05.
+
+Adapt the generic Harness approval and trajectory/tool-inspector surfaces to
+Sudarshan's safe projections, or disable them in the governed profile.
+
+Acceptance:
+
+- Artifact/run approval renders the Sudarshan decision contract, not generic
+  tool approval semantics.
+- Trajectory rows are allow-listed and redacted; raw prompts, source text,
+  memory payloads, provider payloads, credentials, and hidden reasoning never
+  render.
+- Approval decisions resume the durable run and remain auditable after refresh.
+
+### T88 — Manifest-backed Harness deliverables
+
+Owner: frontend/backend. Depends on: T40, T47, T50, T84.
+
+Bind any generic produced-files/deliverables surface to Sudarshan artifact
+manifests, quality reports, classification markings, renderer metadata, and
+authenticated preview/download routes.
+
+Acceptance:
+
+- Every delivered file is addressed by an opaque artifact ID and verified
+  manifest, never a local path.
+- Quality failure, degraded fallback, and approval state are visible before
+  open/download.
+- The generic deliverables row cannot bypass artifact authorization or create
+  a second artifact history.
+
+### T89 — Case identity and history distinction in Harness
+
+Owner: frontend/backend. Depends on: T40, T45, T60, H-05.
+
+Make case, operator, task, and durable run identity visible and stable in the
+Harness session flow. Clearly distinguish Harness session history from
+Sudarshan case-based memory history.
+
+Acceptance:
+
+- A run cannot start without an authenticated operator and case context.
+- Refresh/reconnect recovers the same session-to-run/task/case binding.
+- Operators can see case-scoped artifact/run history without exposing private
+  memory payloads.
+- The UI labels session transcript history and case-memory history as separate
+  stores and contracts.
+
+### T90 — Authenticated browser compatibility matrix
+
+Owner: frontend/evaluation/release. Depends on: T84–T89.
+
+Add a browser E2E matrix for the actual Sudarshan Harness overlay and a fake
+typed backend. Exercise every visible button, menu, picker, and settings option
+under authenticated and unauthenticated/error states.
+
+Acceptance:
+
+- The matrix records each control as enabled-compatible, read-only-compatible,
+  disabled-by-policy, or blocked with an actionable error.
+- Preview, download, approve, reject, cancel, ingestion, reconnect, and
+  clarification paths are covered.
+- The test proves hidden generic controls remain unavailable in the governed
+  profile and that safe projections contain no restricted payloads.
+- Staging evidence covers real browser authentication and SSE/preview routes;
+  local unit tests alone do not close this ticket.
+
 ## Agentic ticket status — current implementation pass
 
 Completed locally with focused and full-suite verification:

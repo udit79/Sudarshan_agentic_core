@@ -1,6 +1,5 @@
 """Case-grounded infographic generation and rendering pipeline."""
 
-from pipelines.infographic.crew import InfographicFlow
 from pipelines.infographic.renderer import AntVInfographicRenderer
 from pipelines.infographic.schemas import InfographicOutput
 from pipelines.infographic.schemas import DiagramEdge, DiagramIR, DiagramNode, InfographicBlock, InfographicIR
@@ -24,3 +23,18 @@ __all__ = [
     "SVGQualityReport",
     "inspect_svg",
 ]
+
+
+def __getattr__(name: str):
+    """Load the CrewAI-backed flow only when it is actually requested.
+
+    Deterministic rendering and quality helpers are usable without the optional
+    generation runtime. Keeping this import lazy lets artifact checks run in
+    lightweight environments while preserving ``from pipelines.infographic
+    import InfographicFlow`` for full pipeline deployments.
+    """
+    if name == "InfographicFlow":
+        from pipelines.infographic.crew import InfographicFlow
+
+        return InfographicFlow
+    raise AttributeError(name)

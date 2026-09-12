@@ -26,6 +26,29 @@ def test_artifact_store_registers_and_verifies_immutable_manifest(tmp_path) -> N
     assert manifest.uri.endswith(f"{manifest.artifact_id}/download")
 
 
+def test_artifact_store_register_checked_saves_quality_report_and_renderer_metadata(tmp_path) -> None:
+    root = tmp_path / "artifacts"
+    source = root / "preview.svg"
+    source.parent.mkdir(parents=True)
+    source.write_text('<svg width="10" height="10"><text>ok</text></svg>', encoding="utf-8")
+    store = ArtifactStore(root)
+
+    checked = store.register_checked(
+        source,
+        run_id="run-checked",
+        kind="diagram-svg",
+        artifact_kind="svg",
+        renderer_id="diagram.native-svg",
+        classification_level="RESTRICTED",
+        required_text=("ok",),
+    )
+
+    assert checked.manifest.quality_status == "passed"
+    assert checked.manifest.quality_report_id == checked.quality_report_id
+    assert checked.renderer_version == "diagram.native-svg@1"
+    assert (store.quality_report_root / f"{checked.quality_report_id}.json").is_file()
+
+
 def test_artifact_store_rejects_source_outside_root(tmp_path) -> None:
     root = tmp_path / "artifacts"
     outside = tmp_path / "outside.bin"

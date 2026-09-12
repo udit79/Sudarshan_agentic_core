@@ -33,6 +33,15 @@ export interface ArtifactProjection {
   version: string
   size: string
   classification: string
+  qualityReportId?: string
+  qualityIssues: readonly string[]
+  degraded: boolean
+  fallbackRenderer?: string
+  comparison?: {
+    previousPreviewUri?: string
+    previousRenderer?: string
+    previousVersion?: string
+  }
   previewAvailable: boolean
   previewUri?: string
   downloadUri?: string
@@ -75,6 +84,7 @@ export interface OperationsBridge {
   bindRun?: (sessionId: string, runId: string) => void
   previewArtifact?: (artifact: ArtifactProjection) => void
   downloadArtifact?: (artifact: ArtifactProjection) => void
+  reviewArtifact?: (sessionId: string, artifact: ArtifactProjection, decision: 'approve' | 'reject', reason?: string) => void | Promise<void>
   retryIngestion?: (sessionId: string) => void
   cancelIngestion?: (sessionId: string) => void
 }
@@ -111,11 +121,11 @@ export function previewProjection(sessionId: string, refresh = 0): OperatorProje
       { id: 'ev-033', sourceReference: 'source://case/brand-kit', location: 'asset manifest · logo.svg', confidence: '1.00', provenance: 'operator supplied', classification: 'INTERNAL' },
     ],
     artifacts: [
-      { id: 'art-brief', name: 'executive-brief.md', type: 'markdown', status: 'ready', renderer: 'markdown-safe', version: '1.3', size: '18 KB', classification: 'RESTRICTED', previewAvailable: true },
-      { id: 'art-deck', name: 'board-deck.pptx', type: 'presentation', status: 'quality-review', renderer: 'pptx-native', version: '2.1', size: '2.4 MB', classification: 'RESTRICTED', previewAvailable: true, repair: '1 slide needs contrast review' },
-      { id: 'art-infographic', name: 'metrics.svg', type: 'infographic', status: 'partial', renderer: 'svg-deterministic', version: '1.0', size: '86 KB', classification: 'RESTRICTED', previewAvailable: true, repair: 'Missing source label on 1 chart' },
-      { id: 'art-video', name: 'briefing.mp4', type: 'video', status: 'blocked', renderer: 'video-compositor', version: '0.8', size: '—', classification: 'RESTRICTED', previewAvailable: false, repair: 'Waiting for visual child' },
-      { id: 'art-linkedin', name: 'linkedin-draft.md', type: 'linkedin', status: 'ready', renderer: 'linkedin-safe', version: '1.1', size: '9 KB', classification: 'RESTRICTED', previewAvailable: true },
+      { id: 'art-brief', name: 'executive-brief.md', type: 'markdown', status: 'ready', renderer: 'markdown-safe', version: '1.3', size: '18 KB', classification: 'RESTRICTED', qualityIssues: [], degraded: false, previewAvailable: true },
+      { id: 'art-deck', name: 'board-deck.pptx', type: 'presentation', status: 'quality-review', renderer: 'pptx-native', version: '2.1', size: '2.4 MB', classification: 'RESTRICTED', qualityIssues: ['Contrast on slide 4'], degraded: false, comparison: { previousRenderer: 'pptx-native', previousVersion: '2.0' }, previewAvailable: true, repair: '1 slide needs contrast review' },
+      { id: 'art-infographic', name: 'metrics.svg', type: 'infographic', status: 'partial', renderer: 'svg-deterministic', version: '1.0', size: '86 KB', classification: 'RESTRICTED', qualityIssues: ['Missing source label on 1 chart'], degraded: true, fallbackRenderer: 'infographic.native-svg', previewAvailable: true, repair: 'Missing source label on 1 chart' },
+      { id: 'art-video', name: 'briefing.mp4', type: 'video', status: 'blocked', renderer: 'video-compositor', version: '0.8', size: '—', classification: 'RESTRICTED', qualityIssues: [], degraded: true, fallbackRenderer: 'video.ffmpeg', previewAvailable: false, repair: 'Waiting for visual child' },
+      { id: 'art-linkedin', name: 'linkedin-draft.md', type: 'linkedin', status: 'ready', renderer: 'linkedin-safe', version: '1.1', size: '9 KB', classification: 'RESTRICTED', qualityIssues: [], degraded: false, previewAvailable: true },
     ],
     ingestionStages: [
       { label: 'Upload receipt', status: 'succeeded', detail: '3 sources · 7.2 MB' },

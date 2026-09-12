@@ -9,7 +9,6 @@ from threading import Event
 
 from api.artifacts import ArtifactStore
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
-from pipelines.common.visual_qa import inspect_visual_artifact
 from pipelines.orchestrator.cache import stable_hash
 from pipelines.ppt.flowchart import flowchart_from_visual_ir, layout_flowchart, render_flowchart_pptx, render_flowchart_svg
 from pipelines.ppt.quality import inspect_flowchart
@@ -50,26 +49,29 @@ def run_visual_flowchart(request: AdvisoryRequest, *, cancel_event: Event | None
     svg_path.write_text(render_flowchart_svg(spec, layout=layout), encoding="utf-8")
     render_flowchart_pptx(spec, pptx_path, layout=layout, title=visual.alt_text)
     graph_quality = inspect_flowchart(layout)
-    for artifact_path, kind in ((svg_path, "flowchart-svg"), (pptx_path, "flowchart-pptx")):
-        graph_quality.approved = graph_quality.approved and inspect_visual_artifact(artifact_path, kind="svg" if kind.endswith("svg") else "pptx").approved
     quality_id = "quality-" + stable_hash({"run_id": request.task_id, "visual": visual.model_dump(mode="json")})[:24]
     quality_path = root / ".state" / "quality_reports" / f"{quality_id}.json"
     quality_path.parent.mkdir(parents=True, exist_ok=True)
     quality_path.write_text(graph_quality.model_dump_json(indent=2), encoding="utf-8")
     store = ArtifactStore(root)
-    manifests = [
-        store.register(
+    checked_artifacts = [
+        store.register_checked(
             path,
             run_id=request.metadata.get("parent_run_id", request.task_id),
             kind=kind,
+            artifact_kind=artifact_kind,
+            renderer_id=renderer_id,
             classification_level=request.classification_level,
-            quality_status="passed" if graph_quality.approved else "failed",
-            renderer_version=os.getenv("SUDARSHAN_PPT_RENDERER_VERSION", "sudarshan-flowchart@1"),
             schema_version="flowchart-ir@1",
             source_ir_hash=stable_hash(visual.model_dump(mode="json")),
         )
-        for path, kind in ((svg_path, "flowchart-svg"), (pptx_path, "flowchart-pptx"))
+        for path, kind, artifact_kind, renderer_id in (
+            (svg_path, "flowchart-svg", "svg", "diagram.native-svg"),
+            (pptx_path, "flowchart-pptx", "pptx", "diagram.pptx"),
+        )
     ]
+    graph_quality.approved = graph_quality.approved and all(not item.quality_issues for item in checked_artifacts)
+    manifests = [item.manifest for item in checked_artifacts]
     artifact_ids = [manifest.artifact_id for manifest in manifests]
     if not graph_quality.approved:
         return PipelineResponse(

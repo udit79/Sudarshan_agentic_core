@@ -1,0 +1,70 @@
+.root {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 680px);
+  margin: 8px auto 0;
+  padding: 9px 12px;
+  border: 1px dashed rgba(151, 174, 255, 0.34);
+  border-radius: 14px;
+  background: rgba(4, 8, 24, 0.56);
+  color: var(--sudarshan-text-soft, #b7c4e2);
+  box-sizing: border-box;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.active {
+  border-color: rgba(125, 151, 255, 0.9);
+  background: rgba(28, 35, 87, 0.78);
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(98, 132, 255, 0.2);
+  color: #cbd6ff;
+  font: 600 10px/1 var(--ds-font-family-code, monospace);
+  letter-spacing: .04em;
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  flex: 1;
+  font-size: 11px;
+}
+
+.copy strong {
+  color: var(--sudarshan-text, #f4f7ff);
+  font-size: 12px;
+}
+
+.copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.button {
+  flex: none;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(98, 132, 255, 0.8);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.button:hover:not(:disabled) { background: rgba(113, 146, 255, 1); }
+.button:disabled { cursor: wait; opacity: .65; }
+
+@media (max-width: 620px) {
+  .root { align-items: flex-start; }
+  .button { padding-inline: 8px; }
+}

@@ -123,7 +123,10 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       : undefined
     const target = workspaceId ?? currentWorkspaceId ?? recent
     if (target === undefined) {
-      this.sessions.clear()
+      void this.sessions.create().then(
+        (sessionId) => { this.sessions.open(sessionId) },
+        (reason: unknown) => { console.warn('new case session failed:', reason) },
+      )
       return
     }
     void this.connectWorkspace(target).then(

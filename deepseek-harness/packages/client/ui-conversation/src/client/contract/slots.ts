@@ -123,6 +123,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
     /** Agent-preset control staged for a New Session. */
     'conversation.hero.agentPreset': { kind: 'single'; scope: 'root'; owner: HeroAgentPresetOwnerProps }
+    /** Case evidence intake available before or after a Session exists. */
+    'conversation.hero.caseDocuments': { kind: 'single'; scope: 'root'; owner: HeroCaseDocumentsOwnerProps }
     /** Full-width entries above the composer card. */
     'conversation.input.dock': { kind: 'list'; scope: 'session'; owner: InputZone }
     /** Floating entries rendered inside the resident composer card. */
@@ -216,6 +218,8 @@ export type ConvViewProps = PropsRuntime<'conversation.view'>
 export interface ConversationInjected {
   /** Connect and open a blank Session in the selected Workspace. */
   selectWorkspace: (workspaceId: WorkspaceId) => Promise<void>
+  /** Create and open an ungrouped case Session without a filesystem Workspace. */
+  createSession: (draft?: string) => Promise<SessionId>
   /** Session-addressed composer block source, or the stable absent source. */
   hooks: { composerBlock: ObservableSnapshot<ComposerBlock | undefined> }
 }
@@ -251,7 +255,7 @@ export interface ComposerBarOwnerProps {
   /** Whether the shared Workspace picker is expanded. */
   workspacePickerOpen?: boolean
   /** Open the Workspace picker from the inert composer surface. */
-  onRequestWorkspace?: () => void
+  onRequestWorkspace?: (draft?: string) => void
   placeholder?: string
   /** Optional content rendered above the composer surface. */
   accessory?: ReactNode
@@ -314,6 +318,14 @@ export interface HeroBrandMarkOwnerProps {
   className?: string | undefined
 }
 
+/** Owner share for case-scoped document/RAG intake on the landing hero. */
+export interface HeroCaseDocumentsOwnerProps {
+  /** Current case Session, when one is already selected. */
+  sessionId?: SessionId
+  /** Create an ungrouped case before uploading when no Session exists. */
+  createSession: () => Promise<SessionId>
+}
+
 /** Full props of the resident optional-Session Conversation shell. */
 export type ConversationSlotProps =
   PropsRuntime<'conversation'>
@@ -324,6 +336,7 @@ export type ConversationSlotProps =
     | 'conversation.hero.brand.mark'
     | 'conversation.hero.workspace'
     | 'conversation.hero.agentPreset'
+    | 'conversation.hero.caseDocuments'
   >
   & InjectFace<ConversationInjected>
   & PropsLocale<'conversation'>
