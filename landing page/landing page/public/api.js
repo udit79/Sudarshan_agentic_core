@@ -1,6 +1,7 @@
 /* Browser client for the Node/Express gateway. Keep provider credentials out of this file. */
 (function installSudarshanApi(global) {
   let configuredOrigin = global.SUDARSHAN_API_ORIGIN || "http://localhost:8080";
+  const configuredFastApiOrigin = (global.SUDARSHAN_FASTAPI_ORIGIN || "http://localhost:8000").replace(/\/$/, "");
   let activeOrigin = configuredOrigin.replace(/\/$/, "");
   let activeMode = "gateway"; // 'gateway' (8080) or 'fastapi' (8000)
   let refreshPromise = null;
@@ -24,21 +25,21 @@
   }
 
   async function checkHealth() {
-    // 1. Try Node Gateway (Port 8080)
+    // 1. Try the authenticated Node gateway.
     try {
-      const res = await fetch("http://localhost:8080/api/v1/health", { credentials: "include" });
+      const res = await fetch(`${configuredOrigin.replace(/\/$/, "")}/api/v1/health`, { credentials: "include" });
       if (res.ok) {
-        activeOrigin = "http://localhost:8080";
+        activeOrigin = configuredOrigin.replace(/\/$/, "");
         activeMode = "gateway";
         return { ok: true, origin: activeOrigin, mode: "gateway", data: await parseBody(res) };
       }
     } catch { /* Try Python directly */ }
 
-    // 2. Try Python FastAPI (Port 8000)
+    // 2. Fall back to the local/native FastAPI boundary when configured.
     try {
-      const res = await fetch("http://localhost:8000/health");
+      const res = await fetch(`${configuredFastApiOrigin}/health`);
       if (res.ok) {
-        activeOrigin = "http://localhost:8000";
+        activeOrigin = configuredFastApiOrigin;
         activeMode = "fastapi";
         return { ok: true, origin: activeOrigin, mode: "fastapi", data: await parseBody(res) };
       }
@@ -84,9 +85,9 @@
       // Automatic fallback between 8080 and 8000 if network fails
       if (activeMode === "gateway") {
         try {
-          const testFastAPI = await fetch("http://localhost:8000/health");
+          const testFastAPI = await fetch(`${configuredFastApiOrigin}/health`);
           if (testFastAPI.ok) {
-            activeOrigin = "http://localhost:8000";
+            activeOrigin = configuredFastApiOrigin;
             activeMode = "fastapi";
             return request(path, options, false);
           }
@@ -228,7 +229,7 @@
     };
     if (activeMode === "fastapi") {
       const runId = taskToRunMap.get(taskId) || taskId;
-      const source = new EventSource(`http://localhost:8000/runs/${encodeURIComponent(runId)}/events${cursorQuery}`);
+      const source = new EventSource(`${configuredFastApiOrigin}/runs/${encodeURIComponent(runId)}/events${cursorQuery}`);
       source.addEventListener("progress", handleProgress);
       source.addEventListener("error", (err) => {
         source.close();
@@ -256,13 +257,13 @@
     normalizeRunProjection,
     getEventCursor: readEventCursor,
     artifactUrl: (taskId, artifactKey) => activeMode === "fastapi"
-      ? `http://localhost:8000/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(artifactKey)}`
+      ? `${configuredFastApiOrigin}/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(artifactKey)}`
       : apiUrl(`/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactKey)}`),
     artifactManifestUrl: (taskId, artifactKey) => activeMode === "fastapi"
-      ? `http://localhost:8000/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(artifactKey)}/manifest`
+      ? `${configuredFastApiOrigin}/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(artifactKey)}/manifest`
       : apiUrl(`/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactKey)}/manifest`),
     artifactPreviewUrl: (taskId, artifactKey) => activeMode === "fastapi"
-      ? `http://localhost:8000/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(artifactKey)}/preview`
+      ? `${configuredFastApiOrigin}/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(artifactKey)}/preview`
       : apiUrl(`/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactKey)}/preview`),
     configureSession: (openaiApiKey) => {
       if (activeMode === "fastapi") {
