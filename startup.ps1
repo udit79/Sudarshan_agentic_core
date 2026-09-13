@@ -484,6 +484,13 @@ try {
             throw "Harness build tool is missing: $tsdownCommand"
         }
         Invoke-Checked $tsdownCommand @("--env.DSH_BUILD_FACE", "client") $harnessRoot
+        # dsh web serves the application shell from apps/web/dist. The host
+        # and client library builds above do not produce that Vite artifact;
+        # without it, authenticated requests reach the Harness but return 404.
+        Invoke-Checked $pnpmCommand.Source @(
+            "--filter", "@deepseek-ai/dsh-web-frontend",
+            "run", "build"
+        ) $harnessRoot
     }
 
     $pythonPort = Get-Port "SUDARSHAN_API_PORT" 8000
