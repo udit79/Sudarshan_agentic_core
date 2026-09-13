@@ -57,6 +57,14 @@ Paths are internal implementation details. The API exposes stable artifact IDs
 or authorized download routes. Renderer warnings and fallback mode must be
 visible in the quality report and telemetry.
 
+The shared local post-render process is `ArtifactStore.register_checked`:
+resolve the requested renderer through the capability registry, run the
+renderer-specific integrity gate, save a bounded quality report under
+`artifacts/.state/quality_reports/`, and register the manifest with the
+renderer version, quality report ID, issue list, and explicit degraded/fallback
+metadata. A failed candidate may remain registered for diagnostics, but its
+manifest is marked failed and is not a deliverable.
+
 ## 3. PowerPoint pipeline
 
 ### Representation

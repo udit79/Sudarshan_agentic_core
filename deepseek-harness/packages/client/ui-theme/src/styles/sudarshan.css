@@ -355,7 +355,16 @@ textarea:focus-visible,
 [data-sudarshan-brand-mark] {
   display: block;
   overflow: visible;
+  object-fit: contain;
+  mix-blend-mode: screen;
   filter: drop-shadow(0 0 8px rgba(94, 128, 255, 0.76));
+}
+
+/* Sudarshan uses case context rather than a generic Harness workspace picker
+ * on the new-session hero. Keep the underlying workspace contract intact for
+ * now, but remove the duplicate selector from the product-facing shell. */
+[class*='heroWorkspaceRow'] {
+  display: none !important;
 }
 
 [data-sudarshan-brand-mark] .sudarshan-brand-orbit {

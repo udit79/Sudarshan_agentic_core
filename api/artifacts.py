@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,17 @@ class ArtifactPreviewUnavailable(ArtifactNotFound):
     """Raised when a registered artifact has no safe preview representation."""
 
 
+@dataclass(frozen=True, slots=True)
+class CheckedArtifact:
+    """The result of render selection, integrity inspection, and registration."""
+
+    manifest: ArtifactManifest
+    quality_report_id: str
+    renderer_version: str
+    degraded: bool
+    quality_issues: tuple[str, ...]
+
+
 class ArtifactStore:
     """Register files under the controlled artifact root and verify integrity."""
 
@@ -27,8 +39,10 @@ class ArtifactStore:
         self.root = Path(root).resolve()
         self.manifest_root = self.root / ".state" / "manifests"
         self.preview_root = self.root / ".state" / "previews"
+        self.quality_report_root = self.root / ".state" / "quality_reports"
         self.manifest_root.mkdir(parents=True, exist_ok=True)
         self.preview_root.mkdir(parents=True, exist_ok=True)
+        self.quality_report_root.mkdir(parents=True, exist_ok=True)
         self.object_store = object_store or build_object_store_from_env(self.root)
 
     def _safe_source(self, path: str | Path) -> Path:
@@ -94,6 +108,10 @@ class ArtifactStore:
         schema_version: str = "1",
         evidence_ids: list[str] | None = None,
         source_ir_hash: str | None = None,
+        quality_report_id: str | None = None,
+        quality_issues: list[str] | None = None,
+        degraded: bool = False,
+        fallback_renderer: str | None = None,
     ) -> ArtifactManifest:
         source = self._safe_source(path)
         digest = self._sha256(source)
@@ -128,6 +146,10 @@ class ArtifactStore:
             size_bytes=source.stat().st_size,
             classification_level=classification_level,
             quality_status=quality_status,
+            quality_report_id=quality_report_id,
+            quality_issues=list(quality_issues or []),
+            degraded=degraded,
+            fallback_renderer=fallback_renderer,
             source_ir_hash=source_ir_hash,
             renderer_version=renderer_version,
             schema_version=schema_version,
@@ -146,6 +168,67 @@ class ArtifactStore:
             encoding="utf-8",
         )
         return manifest
+
+    def register_checked(
+        self,
+        path: str | Path,
+        *,
+        run_id: str,
+        kind: str,
+        artifact_kind: str,
+        renderer_id: str,
+        classification_level: str,
+        schema_version: str = "1",
+        evidence_ids: list[str] | None = None,
+        source_ir_hash: str | None = None,
+        required_text: tuple[str, ...] = (),
+    ) -> CheckedArtifact:
+        """Resolve a renderer, run its integrity gate, save the QA report, and register.
+
+        This is the common post-render process. A failed gate still registers
+        the candidate for diagnostics, but its manifest is marked failed and
+        cannot be treated as a deliverable.
+        """
+
+        from pipelines.common.renderers import default_renderer_registry
+
+        registry = default_renderer_registry()
+        selection = registry.resolve(renderer_id, artifact_kind, "inspect")
+        report = registry.inspect(selection.selected_renderer_id, path, required_text=required_text)
+        quality_report_id = "quality-" + hashlib.sha256(
+            f"{run_id}:{kind}:{selection.renderer_version}:{source_ir_hash or Path(path).name}".encode("utf-8")
+        ).hexdigest()[:24]
+        report_path = self.quality_report_root / f"{quality_report_id}.json"
+        report_path.write_text(
+            json.dumps(
+                {"quality_report_id": quality_report_id, "report": report.model_dump(mode="json")},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        manifest = self.register(
+            path,
+            run_id=run_id,
+            kind=kind,
+            classification_level=classification_level,
+            quality_status="passed" if report.approved else "failed",
+            renderer_version=selection.renderer_version,
+            schema_version=schema_version,
+            evidence_ids=evidence_ids,
+            source_ir_hash=source_ir_hash,
+            quality_report_id=quality_report_id,
+            quality_issues=report.issues,
+            degraded=selection.degraded,
+            fallback_renderer=selection.selected_renderer_id if selection.degraded else None,
+        )
+        return CheckedArtifact(
+            manifest=manifest,
+            quality_report_id=quality_report_id,
+            renderer_version=selection.renderer_version,
+            degraded=selection.degraded,
+            quality_issues=tuple(report.issues),
+        )
 
     def _read_sidecar(self, path: Path) -> tuple[ArtifactManifest, Path]:
         if not path.is_file():

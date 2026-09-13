@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping, Sequence
@@ -236,7 +237,15 @@ class MemoryManager:
     @classmethod
     def from_env(cls) -> "MemoryManager":
         config = CogneeConfig.from_env()
-        return cls(CogneeHttpAdapter(config), dataset_name=config.dataset_name)
+        event_log_path = os.getenv(
+            "SUDARSHAN_MEMORY_EVENT_LOG",
+            "artifacts/.state/memory_events.jsonl",
+        ).strip()
+        return cls(
+            CogneeHttpAdapter(config),
+            dataset_name=config.dataset_name,
+            event_log=MemoryEventLog(event_log_path or None),
+        )
 
     def remember(self, unit: KnowledgeUnit | Mapping[str, Any] | Any, context: AccessContext,
                  *, scope_type: ScopeType = ScopeType.CASE,
@@ -307,7 +316,12 @@ class MemoryManager:
             scope_type=memory.scope.scope_type.value,
             scope_id=memory.scope.scope_id,
             actor_id=context.user_id,
-            safe_metadata={"memory_type": memory.memory_type.value, "lifecycle": lifecycle.value},
+            safe_metadata={
+                "memory_type": memory.memory_type.value,
+                "lifecycle": lifecycle.value,
+                "case_id": context.case_id,
+                "task_id": context.task_id,
+            },
             created_at=memory.updated_at,
         )
         for superseded_id in superseded_ids:
@@ -324,7 +338,7 @@ class MemoryManager:
                     scope_type=old.scope.scope_type.value,
                     scope_id=old.scope.scope_id,
                     actor_id=context.user_id,
-                    safe_metadata={"superseded_by": memory.id},
+                    safe_metadata={"superseded_by": memory.id, "case_id": context.case_id, "task_id": context.task_id},
                     created_at=old.updated_at,
                 )
         return RememberReceipt(memory, response)
@@ -434,6 +448,13 @@ class MemoryManager:
             results,
         )
 
+    def case_history(self, context: AccessContext) -> list[Any]:
+        """Return the authenticated case's safe memory lifecycle history."""
+
+        if not context.case_id:
+            raise ValueError("case history requires a case context")
+        return self.event_log.case_history(context.case_id, actor_id=context.user_id)
+
     def retract(self, memory_id: str, context: AccessContext) -> Memory:
         """Hide a memory from future recalls while retaining an audit record."""
 
@@ -449,6 +470,7 @@ class MemoryManager:
             scope_type=updated.scope.scope_type.value,
             scope_id=updated.scope.scope_id,
             actor_id=context.user_id,
+            safe_metadata={"case_id": context.case_id, "task_id": context.task_id},
             created_at=updated.updated_at,
         )
         return updated
@@ -484,7 +506,7 @@ class MemoryManager:
             scope_type=retracted.scope.scope_type.value,
             scope_id=retracted.scope.scope_id,
             actor_id=context.user_id,
-            safe_metadata={"purge_backend": purge_backend},
+            safe_metadata={"purge_backend": purge_backend, "case_id": context.case_id, "task_id": context.task_id},
             created_at=retracted.updated_at,
         )
         response: Mapping[str, Any] = {"status": "retracted", "memory_id": retracted.id}

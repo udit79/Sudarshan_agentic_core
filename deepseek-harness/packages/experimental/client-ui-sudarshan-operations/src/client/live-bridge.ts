@@ -130,20 +130,38 @@ function projectionFromPayload(payload: JsonObject, runId: string): OperatorProj
 
   const artifacts: ArtifactProjection[] = rawArtifacts.map((item, index) => {
     const value = (item ?? {}) as JsonObject
+    const metadata = (value.metadata ?? {}) as JsonObject
     const hasArtifactId = typeof value.artifact_id === 'string' || typeof value.id === 'string'
     const artifactId = text(value.artifact_id ?? value.id, `${runId}-artifact-${index + 1}`)
     const previewUri = uri(value.preview_uri)
     const downloadUri = uri(value.download_uri ?? value.uri) ?? (hasArtifactId ? `/artifacts/${artifactId}/download` : undefined)
     const quality = text(value.quality_status, 'ready')
+    const qualityIssues = (value.quality_issues ?? value.issues ?? metadata.quality_issues)
+    const qualityReportId = text(value.quality_report_id ?? metadata.quality_report_id)
+    const fallbackRenderer = text(value.fallback_renderer ?? value.fallback_renderer_id ?? metadata.fallback_renderer ?? metadata.fallback_renderer_id)
+    const previousPreviewUri = uri(value.previous_preview_uri ?? metadata.previous_preview_uri)
+    const previousRenderer = text(value.previous_renderer ?? metadata.previous_renderer)
+    const previousVersion = text(value.previous_renderer_version ?? metadata.previous_renderer_version)
     return {
       id: artifactId,
       name: text(value.name ?? value.filename, artifactId),
       type: artifactType(value.kind ?? value.artifact_type ?? value.type),
-      status: quality === 'blocked' || quality === 'failed' ? 'blocked' : quality === 'partial' ? 'partial' : quality === 'quality-review' || quality === 'pending' ? 'quality-review' : 'ready',
-      renderer: text(value.renderer, 'sudarshan-renderer'),
+      status: quality === 'blocked' || quality === 'failed' ? 'blocked' : quality === 'partial' ? 'partial' : quality === 'quality-review' || quality === 'repairable' || quality === 'pending' ? 'quality-review' : 'ready',
+      renderer: text(value.renderer ?? value.renderer_id, text(value.kind, 'sudarshan-renderer')),
       version: text(value.renderer_version ?? value.version, '1.0'),
       size: size(value.size_bytes ?? value.size),
       classification: text(value.classification_level ?? value.classification, 'INTERNAL'),
+      ...(qualityReportId ? { qualityReportId } : {}),
+      qualityIssues: Array.isArray(qualityIssues) ? qualityIssues.filter((issue): issue is string => typeof issue === 'string' && issue.trim().length > 0).slice(0, 10) : [],
+      degraded: Boolean(value.degraded ?? metadata.degraded ?? fallbackRenderer),
+      ...(fallbackRenderer ? { fallbackRenderer } : {}),
+      ...((previousPreviewUri || previousRenderer || previousVersion) ? {
+        comparison: {
+          ...(previousPreviewUri ? { previousPreviewUri } : {}),
+          ...(previousRenderer ? { previousRenderer } : {}),
+          ...(previousVersion ? { previousVersion } : {}),
+        },
+      } : {}),
       previewAvailable: Boolean(value.preview_available ?? previewUri),
       ...(previewUri ? { previewUri } : {}),
       ...(downloadUri ? { downloadUri } : {}),
@@ -217,9 +235,11 @@ export function createLiveOperationsBridge(config: LiveBridgeConfig = {}): Opera
   const origin = apiOrigin(config)
   const fetcher = config.fetcher ?? globalThis.fetch.bind(globalThis)
   const EventSourceCtor = config.eventSource ?? globalThis.EventSource
+  const runIdsBySession = new Map<string, string>()
+  const taskIdsBySession = new Map<string, string>()
 
   const getProjection = async (sessionId: string): Promise<OperatorProjection> => {
-    const runId = readRunId(sessionId)
+    const runId = runIdsBySession.get(sessionId) ?? readRunId(sessionId)
     const response = await fetcher(`${origin}/runs/${encodeURIComponent(runId)}`)
     if (!response.ok) throw new Error(`Sudarshan status request failed: ${response.status}`)
     const payload = await response.json() as JsonObject
@@ -244,16 +264,20 @@ export function createLiveOperationsBridge(config: LiveBridgeConfig = {}): Opera
         if (current !== undefined) writeCursor(sessionId, current)
       }
     }
-    return projectionFromPayload(payload, runId)
+    const projection = projectionFromPayload(payload, runId)
+    taskIdsBySession.set(sessionId, projection.taskId)
+    return projection
   }
 
   return {
     getProjection,
     bindRun(sessionId, runId) {
       if (!sessionId || !runId) return
-      if (readRunId(sessionId) !== runId) {
+      const previousRunId = runIdsBySession.get(sessionId) ?? readRunId(sessionId)
+      if (previousRunId !== runId) {
         try { globalThis.sessionStorage.removeItem(cursorKey(sessionId)) } catch { /* storage is optional */ }
       }
+      runIdsBySession.set(sessionId, runId)
       writeRunId(sessionId, runId)
     },
     subscribeProjection(sessionId, onProjection) {
@@ -264,7 +288,7 @@ export function createLiveOperationsBridge(config: LiveBridgeConfig = {}): Opera
       const refresh = () => { void getProjection(sessionId).then(onProjection).catch(() => undefined) }
       const connect = (): void => {
         if (disposed) return
-        const runId = readRunId(sessionId)
+        const runId = runIdsBySession.get(sessionId) ?? readRunId(sessionId)
         source = new EventSourceCtor(`${origin}/runs/${encodeURIComponent(runId)}/events?after_sequence=${readCursor(sessionId)}`)
         source.addEventListener('progress', (event: Event) => {
           try {
@@ -291,6 +315,19 @@ export function createLiveOperationsBridge(config: LiveBridgeConfig = {}): Opera
     },
     previewArtifact(artifact) { openArtifact(origin, artifact.previewUri) },
     downloadArtifact(artifact) { openArtifact(origin, artifact.downloadUri) },
+    async reviewArtifact(sessionId, artifact, decision, reason) {
+      const runId = runIdsBySession.get(sessionId) ?? readRunId(sessionId)
+      const taskId = taskIdsBySession.get(sessionId) ?? runId
+      const body: JsonObject = { task_id: taskId, artifact_id: artifact.id, decision }
+      if (reason?.trim()) body.reason = reason.trim()
+      const response = await fetcher(`${origin}/runs/${encodeURIComponent(runId)}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) throw new Error(`Sudarshan artifact review failed: ${response.status}`)
+    },
   }
 }
 

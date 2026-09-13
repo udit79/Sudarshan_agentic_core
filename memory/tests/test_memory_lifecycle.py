@@ -1,6 +1,8 @@
+from datetime import datetime, timezone
+
 import pytest
 
-from memory import AccessContext, MemoryLifecycle, MemoryManager
+from memory import AccessContext, MemoryEventLog, MemoryLifecycle, MemoryManager
 from memory.tests.test_memory_manager import FakeBackend, make_unit
 
 
@@ -51,3 +53,24 @@ def test_forgetting_is_scope_checked_and_retracts_without_backend_purge() -> Non
     assert result["status"] == "retracted"
     assert manager.recall("latency", owner).results == ()
     assert manager.store.get_memory(receipt.memory.id).lifecycle is MemoryLifecycle.RETRACTED
+
+
+def test_case_history_is_persisted_without_persisting_memory_content(tmp_path) -> None:
+    path = tmp_path / "memory-events.jsonl"
+    first = MemoryEventLog(path)
+    context = AccessContext(user_id="user-1", case_id="case-1", task_id="task-1")
+    first.append(
+        "created",
+        memory_id="mem-1",
+        scope_type="case",
+        scope_id="case-1",
+        actor_id="user-1",
+        safe_metadata={"case_id": "case-1", "memory_type": "fact"},
+        created_at=datetime.now(timezone.utc),
+    )
+
+    reopened = MemoryEventLog(path)
+    history = reopened.case_history(context.case_id, actor_id=context.user_id)
+
+    assert [event.memory_id for event in history] == ["mem-1"]
+    assert "content" not in path.read_text(encoding="utf-8")

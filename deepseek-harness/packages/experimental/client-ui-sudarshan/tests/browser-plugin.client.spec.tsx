@@ -45,7 +45,8 @@ describe('Sudarshan browser-brand plugin', () => {
     name.unmount()
 
     const mark = render(<SudarshanBrandMark size={34} />)
-    expect(mark.container.querySelector('svg')?.getAttribute('width')).toBe('34')
+    expect(mark.container.querySelector('img')?.getAttribute('width')).toBe('34')
+    expect(mark.container.querySelector('img')?.getAttribute('src')).toBe('/assets/sudarshan-icon.png')
     const hero = render(<SudarshanHeroBrandMark size={28} className="hero-mark" />)
     expect(hero.container.querySelector('[data-sudarshan-brand-mark]')?.getAttribute('class')).toBe('hero-mark')
   })

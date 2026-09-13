@@ -53,6 +53,16 @@ recall. A replacement can explicitly supersede an older record, while
 scope-checked and retracts by default; irreversible backend purge is opt-in and
 requires an adapter that explicitly supports it.
 
+Case history is created as safe lifecycle events whenever `MemoryManager`
+creates, supersedes, retracts, forgets, or expires a record. The event contains
+the memory ID, scope, actor, case/task IDs, lifecycle, and timestamps—not the
+memory content. `MemoryManager.from_env()` persists this append-only history to
+`artifacts/.state/memory_events.jsonl` by default; set
+`SUDARSHAN_MEMORY_EVENT_LOG` to choose another path or leave it empty to keep
+the event projection in memory. Searchable case content and provenance remain
+in Cognee, while `manager.case_history(AccessContext(...))` returns the
+authenticated case's safe audit history.
+
 ## Example
 
 ```python

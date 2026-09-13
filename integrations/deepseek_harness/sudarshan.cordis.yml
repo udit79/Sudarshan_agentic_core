@@ -48,13 +48,19 @@
     includeUserRoot: false
 
 # Hide generic coding-agent controls from the production product surface. The
-# operations drawer, trajectory, attachments, approvals, and model selector
-# remain available because they are part of the Sudarshan user experience.
+# operations drawer and clarification support remain available. Attachments,
+# generic approvals, trajectory inspection, workspace browsing, model/provider
+# selection, and permission presets are not yet governed by Sudarshan and are
+# tracked by T84-T90 before they may be enabled as product controls.
 - id: ui-agent-preset
   disabled: true
 - id: ui-settings-plugins
   disabled: true
 - id: ui-settings-plugin-inventory
+  disabled: true
+- id: ui-model-selection
+  disabled: true
+- id: ui-permission
   disabled: true
 - id: ui-cordis
   disabled: true

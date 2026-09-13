@@ -167,6 +167,10 @@ class ArtifactManifest(ContractModel):
     size_bytes: int = Field(ge=0)
     classification_level: str = Field(min_length=1)
     quality_status: QualityStatus = "pending"
+    quality_report_id: str | None = None
+    quality_issues: list[str] = Field(default_factory=list)
+    degraded: bool = False
+    fallback_renderer: str | None = None
     source_ir_hash: str | None = None
     renderer_version: str = Field(min_length=1)
     schema_version: str = Field(min_length=1)

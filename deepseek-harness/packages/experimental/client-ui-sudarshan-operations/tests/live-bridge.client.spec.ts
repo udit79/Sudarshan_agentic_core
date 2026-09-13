@@ -43,23 +43,40 @@ describe('Sudarshan live operations bridge', () => {
       if (url.endsWith('/runs/run-1')) {
         return new Response(JSON.stringify({ run_id: 'run-1', task_id: 'task-1', status: 'completed', pipeline: 'ppt', pipelines: ['ppt'] }), { status: 200 })
       }
+      if (url.endsWith('/runs/run-1/resume')) return new Response('{}', { status: 202 })
       expect(url).toContain('/artifacts/run-1/presentation/manifest')
       return new Response(JSON.stringify({
         artifact_id: 'artifact-1', kind: 'presentation', name: 'deck.pptx',
         preview_uri: '/artifacts/artifact-1/preview', uri: '/artifacts/artifact-1/download',
         renderer_version: 'pptx-native@1', size_bytes: 1024, classification_level: 'RESTRICTED',
         quality_status: 'passed',
+        quality_report_id: 'quality-1',
+        issues: ['contrast on slide 4'],
+        previous_preview_uri: '/artifacts/artifact-1/previous-preview',
+        previous_renderer: 'pptx-legacy',
+        previous_renderer_version: '0.9',
+        metadata: { degraded: true, fallback_renderer_id: 'presentation.pptx' },
       }), { status: 200 })
     })
     const bridge = createLiveOperationsBridge({ apiOrigin: 'http://api.test', fetcher })
+    bridge.bindRun?.('session-1', 'run-1')
 
-    const projection = await bridge.getProjection?.('run-1')
+    const projection = await bridge.getProjection?.('session-1')
 
     expect(projection?.status).toBe('succeeded')
     expect(projection?.artifacts[0]).toMatchObject({
       id: 'artifact-1', name: 'deck.pptx', type: 'presentation', previewAvailable: true,
       previewUri: '/artifacts/artifact-1/preview', downloadUri: '/artifacts/artifact-1/download',
+      qualityReportId: 'quality-1', qualityIssues: ['contrast on slide 4'], degraded: true,
+      fallbackRenderer: 'presentation.pptx',
+      comparison: { previousPreviewUri: '/artifacts/artifact-1/previous-preview', previousRenderer: 'pptx-legacy', previousVersion: '0.9' },
     })
+
+    await bridge.reviewArtifact?.('session-1', projection!.artifacts[0], 'reject', 'contrast remains below threshold')
+    const reviewCall = fetcher.mock.calls[fetcher.mock.calls.length - 1]
+    const reviewInit = reviewCall?.[1] as RequestInit | undefined
+    expect(reviewInit?.method).toBe('POST')
+    expect(JSON.parse(String(reviewInit?.body))).toMatchObject({ task_id: 'task-1', artifact_id: 'artifact-1', decision: 'reject', reason: 'contrast remains below threshold' })
   })
 
   it('binds the durable run returned by the native MCP tool to the session', () => {
