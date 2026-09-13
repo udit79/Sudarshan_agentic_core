@@ -101,48 +101,59 @@ def extract_text_from_pdf(
     if not path.exists():
         raise FileNotFoundError(f"Source file not found: {file_path}")
 
+    doc = None
     try:
         import pymupdf
         doc = pymupdf.open(str(path))
         num_pages = len(doc)
     except Exception:
         # Fallback to pypdf if pymupdf fails
-        from pypdf import PdfReader
-        reader = PdfReader(str(path))
-        num_pages = len(reader.pages)
-        doc = None
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(path))
+            num_pages = len(reader.pages)
+            doc = None
+        except Exception as fallback_err:
+            raise ValueError(f"Corrupted or unreadable PDF file '{path.name}': {fallback_err}") from fallback_err
 
     page_results: list[tuple[int, str]] = []
     scanned_tasks: list[tuple[int, bytes]] = []
 
     print(f"   [PDF Processing] Parsing {num_pages} pages from '{path.name}'...", flush=True)
 
-    if doc is not None:
-        for page_idx in range(num_pages):
-            page = doc[page_idx]
-            page_num = page_idx + 1
-            text = page.get_text().strip()
+    try:
+        if doc is not None:
+            for page_idx in range(num_pages):
+                page = doc[page_idx]
+                page_num = page_idx + 1
+                text = page.get_text().strip()
 
-            if len(text) >= 30:
-                # Fast path: Real digital text found
-                page_results.append((page_num, f"--- Page {page_num} ---\n{text}"))
-            else:
-                # Scanned or image-only page: Render to PNG bytes for Vision OCR
-                pix = page.get_pixmap(dpi=150)
-                img_bytes = pix.tobytes("png")
-                scanned_tasks.append((page_num, img_bytes))
-    else:
-        from pypdf import PdfReader
-        reader = PdfReader(str(path))
-        for page_idx, page in enumerate(reader.pages):
-            page_num = page_idx + 1
-            text = (page.extract_text() or "").strip()
-            if len(text) >= 30:
-                page_results.append((page_num, f"--- Page {page_num} ---\n{text}"))
-            elif page.images:
-                scanned_tasks.append((page_num, page.images[0].data))
-            else:
-                page_results.append((page_num, f"--- Page {page_num} ---\n(Empty Page)"))
+                if len(text) >= 30:
+                    # Fast path: Real digital text found
+                    page_results.append((page_num, f"--- Page {page_num} ---\n{text}"))
+                else:
+                    # Scanned or image-only page: Render to PNG bytes for Vision OCR
+                    pix = page.get_pixmap(dpi=150)
+                    img_bytes = pix.tobytes("png")
+                    scanned_tasks.append((page_num, img_bytes))
+        else:
+            from pypdf import PdfReader
+            reader = PdfReader(str(path))
+            for page_idx, page in enumerate(reader.pages):
+                page_num = page_idx + 1
+                text = (page.extract_text() or "").strip()
+                if len(text) >= 30:
+                    page_results.append((page_num, f"--- Page {page_num} ---\n{text}"))
+                elif page.images:
+                    scanned_tasks.append((page_num, page.images[0].data))
+                else:
+                    page_results.append((page_num, f"--- Page {page_num} ---\n(Empty Page)"))
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
 
     # Process scanned pages concurrently if any were found
     if scanned_tasks:

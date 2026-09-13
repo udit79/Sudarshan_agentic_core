@@ -211,54 +211,56 @@ def _extract_visual_frame_events(
         cap.release()
         return []
 
-    effective_duration = min(duration_sec, float(max_duration_seconds))
-    if effective_duration < duration_sec and fallbacks is not None:
-        fallbacks.append("video_duration_capped")
-    sample_times = [
-        min(i * sample_interval_sec, max(0.0, effective_duration - 0.001))
-        for i in range(int(effective_duration // sample_interval_sec) + 1)
-    ]
-    sample_times = list(dict.fromkeys(sample_times))[:max_visual_samples]
+    try:
+        effective_duration = min(duration_sec, float(max_duration_seconds))
+        if effective_duration < duration_sec and fallbacks is not None:
+            fallbacks.append("video_duration_capped")
+        sample_times = [
+            min(i * sample_interval_sec, max(0.0, effective_duration - 0.001))
+            for i in range(int(effective_duration // sample_interval_sec) + 1)
+        ]
+        sample_times = list(dict.fromkeys(sample_times))[:max_visual_samples]
 
-    print(f"   [Video Visual] Sampling {len(sample_times)} keyframes across {duration_sec:.1f}s...", flush=True)
+        print(f"   [Video Visual] Sampling {len(sample_times)} keyframes across {duration_sec:.1f}s...", flush=True)
 
-    events: list[VideoEvent] = []
-    seen_texts: set[str] = set()
+        events: list[VideoEvent] = []
+        seen_texts: set[str] = set()
 
-    for t_sec in sample_times:
-        _check_cancel(cancel_event)
-        frame_idx = int(t_sec * fps)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            continue
+        for t_sec in sample_times:
+            _check_cancel(cancel_event)
+            frame_idx = int(t_sec * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                continue
 
-        temp_frame_file = os.path.join(temp_dir, f"frame_{int(t_sec):04d}.jpg")
-        cv2.imwrite(temp_frame_file, frame)
+            temp_frame_file = os.path.join(temp_dir, f"frame_{int(t_sec):04d}.jpg")
+            cv2.imwrite(temp_frame_file, frame)
 
-        try:
-            extracted_text = extract_text_from_image(
-                temp_frame_file,
-                stage_charger=stage_charger,
-                usage_recorder=usage_recorder,
-            ).strip()
-            # De-duplicate consecutive identical slides/frames
-            if extracted_text and extracted_text not in seen_texts:
-                seen_texts.add(extracted_text)
-                events.append(
-                    VideoEvent(
-                        t_sec,
-                        min(duration_sec, t_sec + sample_interval_sec),
-                        "video_ocr",
-                        extracted_text,
+            try:
+                extracted_text = extract_text_from_image(
+                    temp_frame_file,
+                    stage_charger=stage_charger,
+                    usage_recorder=usage_recorder,
+                ).strip()
+                # De-duplicate consecutive identical slides/frames
+                if extracted_text and extracted_text not in seen_texts:
+                    seen_texts.add(extracted_text)
+                    events.append(
+                        VideoEvent(
+                            t_sec,
+                            min(duration_sec, t_sec + sample_interval_sec),
+                            "video_ocr",
+                            extracted_text,
+                        )
                     )
-                )
-        except Exception:
-            if fallbacks is not None:
-                fallbacks.append("vision_provider_error")
+            except Exception:
+                if fallbacks is not None:
+                    fallbacks.append("vision_provider_error")
 
-    cap.release()
-    return events
+        return events
+    finally:
+        cap.release()
 
 
 def _video_duration_seconds(video_path: str) -> float:

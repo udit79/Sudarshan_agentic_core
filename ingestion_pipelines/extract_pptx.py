@@ -87,7 +87,10 @@ def extract_text_from_pptx(file_path: str) -> str:
             if os.getenv("PPT_MASTER_INTAKE_STRICT", "false").lower() in {"1", "true", "yes"}:
                 raise
 
-    prs = Presentation(str(path))
+    try:
+        prs = Presentation(str(path))
+    except Exception as err:
+        raise ValueError(f"Corrupted or unreadable PowerPoint presentation '{path.name}': {err}") from err
     slide_chunks: list[str] = []
 
     for slide_num, slide in enumerate(prs.slides, start=1):

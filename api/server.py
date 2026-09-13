@@ -336,7 +336,7 @@ async def ingest_source(
                 task_id=resolved_task_id,
                 classification_level=classification,
             )
-        except (FileNotFoundError, ValueError) as exc:
+        except (FileNotFoundError, ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(

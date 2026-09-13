@@ -50,3 +50,62 @@ test("streamRunEvents forwards the replay cursor and classification", async () =
     globalThis.fetch = originalFetch;
   }
 });
+
+test("submitIngestion forwards multipart upload and custom headers to Python API", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedHeaders = {};
+  let requestedMethod = "";
+  try {
+    globalThis.fetch = async (url, options) => {
+      requestedUrl = String(url);
+      requestedHeaders = options.headers;
+      requestedMethod = options.method;
+      return {
+        ok: true,
+        status: 202,
+        text: async () => JSON.stringify({ ingestion_id: "ing-123", status: "staged" }),
+      };
+    };
+
+    const { submitIngestion, getIngestionStatus } = await import("../src/python-client.js");
+    const fakeReq = {
+      headers: { "content-type": "multipart/form-data; boundary=---boundary" },
+    };
+
+    const res = await submitIngestion({
+      request: fakeReq,
+      userId: "user-alpha",
+      caseId: "case-99",
+      taskId: "task-01",
+      classificationLevel: "SECRET",
+      idempotencyKey: "idem-key-1",
+    });
+
+    assert.equal(requestedMethod, "POST");
+    assert.match(requestedUrl, /\/ingestions$/);
+    assert.equal(requestedHeaders["X-Operator-Id"], "user-alpha");
+    assert.equal(requestedHeaders["X-Case-Id"], "case-99");
+    assert.equal(requestedHeaders["X-Task-Id"], "task-01");
+    assert.equal(requestedHeaders["X-Classification-Level"], "SECRET");
+    assert.equal(requestedHeaders["Idempotency-Key"], "idem-key-1");
+    assert.equal(res.ingestion_id, "ing-123");
+
+    // Also test getIngestionStatus
+    globalThis.fetch = async (url, options) => {
+      requestedUrl = String(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ingestion_id: "ing-123", status: "completed" }),
+      };
+    };
+
+    const statusRes = await getIngestionStatus("ing-123", { userId: "user-alpha" });
+    assert.match(requestedUrl, /\/ingestions\/ing-123$/);
+    assert.equal(statusRes.status, "completed");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+

@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { authMiddleware, currentUser, googleCallback, logout, refreshSession, startGoogle } from "./auth.js";
 import { Case, Task, User } from "./models.js";
-import { cancelRun, configureRuntime, getPythonHealth, ingestSource, resumeRun, streamRunEvents } from "./python-client.js";
+import { cancelRun, configureRuntime, getPythonHealth, ingestSource, submitIngestion, getIngestionStatus, resumeRun, streamRunEvents } from "./python-client.js";
 import { createTransformation, getTaskForUser, listArtifactsForUser, listTasksForUser, assertCaseOwnership, safeTask } from "./tasks.js";
 import { caseSchema, parse, resumeSchema, transformSchema } from "./validation.js";
 
@@ -187,6 +187,34 @@ router.post("/ingest", async (req, res, next) => {
       classificationLevel: String(req.get("X-Classification-Level") || "RESTRICTED").trim(),
     });
     return res.status(201).json(result);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post("/ingestions", async (req, res, next) => {
+  try {
+    const caseId = String(req.get("X-Case-Id") || "").trim();
+    if (!caseId) return res.status(422).json({ error: "case_id is required for upload" });
+    await assertCaseOwnership(req.auth.sub, caseId);
+    const result = await submitIngestion({
+      request: req,
+      userId: req.auth.sub,
+      caseId,
+      taskId: String(req.get("X-Task-Id") || "").trim(),
+      classificationLevel: String(req.get("X-Classification-Level") || "RESTRICTED").trim(),
+      idempotencyKey: String(req.get("Idempotency-Key") || "").trim(),
+    });
+    return res.status(202).json(result);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get("/ingestions/:ingestionId", async (req, res, next) => {
+  try {
+    const result = await getIngestionStatus(req.params.ingestionId, { userId: req.auth.sub });
+    return res.json(result);
   } catch (error) {
     return next(error);
   }

@@ -125,6 +125,60 @@ export async function ingestSource({ request: incomingRequest, userId, caseId, t
   }
 }
 
+export async function submitIngestion({ request: incomingRequest, userId, caseId, taskId = "", classificationLevel = "RESTRICTED", idempotencyKey = "" }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const headers = {
+      "X-Operator-Id": userId,
+      "X-Case-Id": caseId,
+      "X-Classification-Level": classificationLevel || "RESTRICTED",
+      "Content-Type": incomingRequest.headers["content-type"] || "multipart/form-data",
+    };
+    if (incomingRequest.headers["content-length"]) {
+      headers["Content-Length"] = incomingRequest.headers["content-length"];
+    }
+    if (taskId) headers["X-Task-Id"] = taskId;
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+
+    const response = await fetch(`${config.pythonApiBaseUrl}/ingestions`, {
+      method: "POST",
+      headers,
+      body: incomingRequest,
+      duplex: "half",
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { error: "Python API returned invalid JSON" }; }
+    if (!response.ok) {
+      const error = new Error(body.detail || body.error || `Python API returned ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return body;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function getIngestionStatus(ingestionId, { userId = "gateway" } = {}) {
+  const response = await fetch(`${config.pythonApiBaseUrl}/ingestions/${encodeURIComponent(ingestionId)}`, {
+    headers: {
+      "X-Operator-Id": userId,
+    },
+  });
+  const text = await response.text();
+  let body = {};
+  try { body = text ? JSON.parse(text) : {}; } catch { body = { error: "Python API returned invalid JSON" }; }
+  if (!response.ok) {
+    const error = new Error(body.detail || body.error || `Python API returned ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
 export async function streamRunEvents(runId, res, { afterSequence = 0, classificationLevel = "RESTRICTED" } = {}) {
   const cursor = Number.isSafeInteger(Number(afterSequence)) && Number(afterSequence) >= 0
     ? Number(afterSequence)

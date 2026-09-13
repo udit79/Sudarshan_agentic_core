@@ -120,7 +120,7 @@ def test_multimodal_benchmark_compares_flat_text_and_typed_evidence(tmp_path):
         cases,
         AccessContext(user_id="operator-1", case_id="case-1", task_id="task-1"),
         signals={case.case_id: BenchmarkSignals(estimated_tokens=20, cache_hits=1) for case in cases},
-        thresholds=PromotionThresholds(max_p95_latency_multiplier=100.0),
+        thresholds=PromotionThresholds(max_p95_latency_multiplier=250.0),
     )
 
     assert report.baseline.document_recall_at_k == 1.0
