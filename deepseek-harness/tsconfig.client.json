@@ -79,6 +79,7 @@
     { "path": "./packages/client/ui-subagent" },
     { "path": "./packages/experimental/client-ui-agent-team" },
     { "path": "./packages/experimental/client-ui-sudarshan" },
+    { "path": "./packages/experimental/client-ui-sudarshan-operations" },
     { "path": "./packages/experimental/client-ui-sudarshan-theme" },
     { "path": "./packages/client/ui-jobs" },
     { "path": "./packages/client/ui-schedule" },
