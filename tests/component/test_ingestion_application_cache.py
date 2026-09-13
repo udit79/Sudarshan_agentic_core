@@ -110,3 +110,28 @@ def test_ingestion_status_projects_safe_usage_and_cache_receipts() -> None:
     assert status["usage"]["estimated_tokens"] == 4096
     assert status["fallbacks"] == ["vision_provider_unavailable"]
     assert status["evidence_count"] == 2
+
+
+def test_memory_projection_failure_returns_partial_status_and_records_fallback(tmp_path) -> None:
+    app = _app(tmp_path)
+
+    class FailingMemoryManager:
+        def remember(self, *args, **kwargs):
+            raise ConnectionError("Simulated Cognee web connection timeout")
+
+    app.orchestrator.memory_manager = FailingMemoryManager()
+    result = app.ingest_path(
+        "sample_data/sample_text.txt",
+        source_reference="brief.txt",
+        operator_id="user-1",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-failing-mem",
+        ingestion_id="ing-failing-mem",
+    )
+    assert result["status"] == "partial"
+    assert result["memory_persisted"] is False
+    assert result["evidence_indexed"] is True
+    assert result["fallback_count"] >= 1
+    assert any("memory_projection_unavailable" in fb for fb in result["fallbacks"])
+

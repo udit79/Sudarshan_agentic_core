@@ -1554,11 +1554,18 @@ class SudarshanApplication:
                 document,
                 classification_level=classification,
             )
-            memory_receipt = self.evidence_index.project_to_memory(
-                document,
-                self.orchestrator.memory_manager,
-                classification_level=classification,
-            )
+            try:
+                memory_receipt = self.evidence_index.project_to_memory(
+                    document,
+                    self.orchestrator.memory_manager,
+                    classification_level=classification,
+                )
+            except Exception as exc:
+                memory_receipt = {
+                    "projected": False,
+                    "memory_id": None,
+                    "error": str(exc),
+                }
             fallback_reasons = sorted(
                 {
                     str(reason)
@@ -1579,6 +1586,9 @@ class SudarshanApplication:
                 len(set(block.metadata.get("fallbacks") or []))
                 for block in document.evidence_blocks
             )
+            if not memory_receipt.get("projected"):
+                fallback_reasons.append(f"memory_projection_unavailable: {type(memory_receipt.get('error')).__name__}")
+                fallback_count += 1
         except Exception as exc:
             audit.log(
                 operator_id=operator_id,

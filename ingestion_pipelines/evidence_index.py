@@ -137,7 +137,7 @@ class EvidenceIndex:
                     object_id = stored.object_id
                 connection.execute(
                     """
-                    INSERT INTO evidence_blocks
+                    INSERT OR REPLACE INTO evidence_blocks
                     (evidence_id, document_id, source_hash, source_reference, modality,
                      content, location_json, metadata_json, confidence, extractor_version,
                      model_version, user_id, case_id, task_id, classification_level, object_id, updated_at)
@@ -166,7 +166,7 @@ class EvidenceIndex:
             for chunk in document.chunks:
                 connection.execute(
                     """
-                    INSERT INTO evidence_chunks
+                    INSERT OR REPLACE INTO evidence_chunks
                     (chunk_id, document_id, content, evidence_ids_json, heading_path_json,
                      source_hash, chunk_index, parent_chunk_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -185,7 +185,7 @@ class EvidenceIndex:
             for relation in document.relationships:
                 connection.execute(
                     """
-                    INSERT INTO evidence_relationships
+                    INSERT OR REPLACE INTO evidence_relationships
                     (relation_id, document_id, source_evidence_id, target_evidence_id,
                      relation_type, confidence, provenance_json)
                     VALUES (?, ?, ?, ?, ?, ?, ?)

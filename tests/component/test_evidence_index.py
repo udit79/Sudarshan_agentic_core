@@ -83,3 +83,27 @@ def test_evidence_index_can_register_opaque_evidence_objects(tmp_path):
     stored = object_store.get(result["object_id"], access_level="RESTRICTED", case_id="case-1")
     assert result["object_id"].startswith("obj-")
     assert stored.path.read_text(encoding="utf-8") == document.evidence_blocks[0].content
+
+
+def test_evidence_index_reindex_idempotent(tmp_path):
+    document1 = ingest_file(
+        "sample_data/sample_text.txt",
+        user_id="operator-1",
+        case_id="case-1",
+        task_id="task-1",
+    )
+    index = EvidenceIndex(tmp_path / "evidence.db")
+    receipt1 = index.index_document(document1)
+    assert receipt1["indexed"] is True
+
+    # Re-uploading or re-indexing same source for a new task/document
+    document2 = ingest_file(
+        "sample_data/sample_text.txt",
+        user_id="operator-1",
+        case_id="case-1",
+        task_id="task-2",
+    )
+    receipt2 = index.index_document(document2)
+    assert receipt2["indexed"] is True
+    assert receipt2["evidence_count"] == receipt1["evidence_count"]
+
