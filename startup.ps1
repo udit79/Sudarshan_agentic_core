@@ -432,7 +432,11 @@ try {
         Write-Host "uv was not found; bootstrapping it with Python..."
         Invoke-Checked $pythonCommand.Source @("-m", "pip", "install", "--user", "uv")
         $scriptsPath = (& $pythonCommand.Source -c "import sysconfig; print(sysconfig.get_path('scripts'))").Trim()
+        $userScriptsPath = (& $pythonCommand.Source -c "import sys, site; import os; print(os.path.join(site.getuserbase(), f'Python{sys.version_info.major}{sys.version_info.minor}', 'Scripts'))").Trim()
         $uvCandidate = Join-Path $scriptsPath "uv.exe"
+        if (-not (Test-Path -LiteralPath $uvCandidate)) {
+            $uvCandidate = Join-Path $userScriptsPath "uv.exe"
+        }
         if (-not (Test-Path -LiteralPath $uvCandidate)) {
             throw "uv was installed but could not be located at $uvCandidate. Restart PowerShell and rerun startup.ps1."
         }
