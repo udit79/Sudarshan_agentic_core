@@ -231,7 +231,11 @@ does not provide gateway authentication, cases, quotas, or task records.
 Confirm the exact GOOGLE_CALLBACK_URL is registered in Google Cloud Console,
 the authorized origin matches FRONTEND_URL, the OAuth client is a Web
 application, and the account has a verified email. Inspect the gateway log and
-/api/v1/health. Never put OAuth secrets in the frontend.
+/api/v1/health. Never put OAuth secrets in the frontend. If Google sign-in
+succeeds but the clean Harness URL returns `dsh web authentication required`,
+verify that the Harness process has `SUDARSHAN_GATEWAY_ACCESS_SECRET` set to the
+same value as the gateway's `JWT_ACCESS_SECRET`, and that both services use the
+same public hostname.
 
 ### Infographic does not render
 

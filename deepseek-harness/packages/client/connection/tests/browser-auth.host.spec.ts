@@ -3,7 +3,7 @@
 import { createHmac } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
-import { BrowserAuth } from '../src/browser-auth.ts'
+import { BrowserAuth, type BrowserAuthOptions } from '../src/browser-auth.ts'
 import type { ConnectionIndexRequest, ConnectionIndexResponse } from '../src/rpc.ts'
 import { RecordCredentials } from './browser-credentials.ts'
 
@@ -55,8 +55,17 @@ function createAuth(
   store: RecordCredentials,
   maxAgeDays = 30,
   processOwner: object = {},
+  options: BrowserAuthOptions = {},
 ): Promise<BrowserAuth> {
-  return BrowserAuth.create(processOwner, credentials(store), maxAgeDays)
+  return BrowserAuth.create(processOwner, credentials(store), maxAgeDays, options)
+}
+
+function gatewayToken(secret: string, claims: Record<string, unknown>): string {
+  const encode = (value: unknown): string => Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')
+  const header = encode({ alg: 'HS256', typ: 'JWT' })
+  const payload = encode(claims)
+  const signature = createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url')
+  return `${header}.${payload}.${signature}`
 }
 
 function request(url: string, authority = '127.0.0.1:3080', init?: {
@@ -165,6 +174,43 @@ describe('BrowserAuth', () => {
         ? undefined
         : 'dsh web authentication required; reopen the URL printed by dsh web.\n')
     }
+  })
+
+  it('accepts a valid gateway access cookie on the clean Harness URL', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-24T00:00:00.000Z'))
+    const secret = 'gateway-access-secret-that-is-long-enough-for-production'
+    const auth = await createAuth(new RecordCredentials(), 30, {}, { gatewayAccessSecret: secret })
+    const token = gatewayToken(secret, {
+      sub: 'user-123',
+      type: 'access',
+      iss: 'sudarshan-gateway',
+      aud: 'sudarshan-api',
+      exp: Math.floor(Date.now() / 1000) + 60,
+    })
+    const cleanRequest = request('/', 'localhost:3080', { cookie: `sudarshan_access=${token}` })
+    expect(auth.isAuthenticated(cleanRequest)).toBe(true)
+
+    const allowed = response()
+    expect(auth.authorizeIndex(request('/', 'localhost:3080', {
+      cookie: `sudarshan_access=${token}`,
+    }), allowed.value)).toBe(true)
+    expect(allowed.state).toEqual({})
+
+    const tampered = `${token.slice(0, -1)}x`
+    expect(auth.isAuthenticated(request('/', 'localhost:3080', {
+      cookie: `sudarshan_access=${tampered}`,
+    }))).toBe(false)
+    const wrongClaims = gatewayToken(secret, {
+      sub: 'user-123',
+      type: 'refresh',
+      iss: 'sudarshan-gateway',
+      aud: 'sudarshan-api',
+      exp: Math.floor(Date.now() / 1000) + 60,
+    })
+    expect(auth.isAuthenticated(request('/', 'localhost:3080', {
+      cookie: `sudarshan_access=${wrongClaims}`,
+    }))).toBe(false)
   })
 
   it('rejects tampering, expiry, future issuance, and a longer lifetime than configured', async () => {

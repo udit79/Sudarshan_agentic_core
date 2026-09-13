@@ -7,7 +7,18 @@ orchestrator/provider cycle during startup.
 
 from typing import Any
 
-__all__ = ["ManualSocialAdapter", "SocialCapabilityBoundary", "SocialReceipt", "SocialRequest"]
+__all__ = [
+    "ManualSocialAdapter",
+    "SocialCapabilityBoundary",
+    "SocialProviderConfig",
+    "SocialReadCache",
+    "SocialReadLayer",
+    "SocialApprovalStore",
+    "SocialReleaseService",
+    "sanitize_social_mapping",
+    "SocialReceipt",
+    "SocialRequest",
+]
 
 
 def __getattr__(name: str) -> Any:
@@ -18,11 +29,22 @@ def __getattr__(name: str) -> Any:
             SocialReceipt,
             SocialRequest,
         )
+        from integrations.providers.social_config import SocialProviderConfig
+        from integrations.providers.social_cache import SocialReadCache
+        from integrations.providers.social_read import SocialReadLayer
+        from integrations.providers.social_cache import sanitize_social_mapping
+        from integrations.providers.social_approval import SocialApprovalStore, SocialReleaseService
 
         return {
             "ManualSocialAdapter": ManualSocialAdapter,
             "SocialCapabilityBoundary": SocialCapabilityBoundary,
             "SocialReceipt": SocialReceipt,
             "SocialRequest": SocialRequest,
+            "SocialProviderConfig": SocialProviderConfig,
+            "SocialReadCache": SocialReadCache,
+            "SocialReadLayer": SocialReadLayer,
+            "sanitize_social_mapping": sanitize_social_mapping,
+            "SocialApprovalStore": SocialApprovalStore,
+            "SocialReleaseService": SocialReleaseService,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

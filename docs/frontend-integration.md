@@ -62,6 +62,31 @@ to a local development mode against port 8000. FastAPI fallback is useful for
 pipeline development, but it does not provide Google OAuth, MongoDB-backed
 cases, gateway quotas, or authenticated remote task history.
 
+The local startup script renders the public origins into the ignored
+`landing page/landing page/public/runtime-config.local.js` file. Set these
+optional values when the services are not on the default local ports:
+
+```dotenv
+SUDARSHAN_FRONTEND_API_ORIGIN=https://api.example.test
+SUDARSHAN_FRONTEND_FASTAPI_ORIGIN=https://orchestrator.example.test
+SUDARSHAN_HARNESS_URL=https://harness.example.test/
+```
+
+These are browser-visible URLs, not credentials. Keep `OPENAI_API_KEY`,
+`COGNEE_API_KEY`, `COGNEE_TENANT_ID`, `MONGODB_URI`, Google OAuth secrets, and
+JWT secrets server-side. The native Harness operations bridge separately reads
+`SUDARSHAN_API_ORIGIN` (or its host-provided global) for the safe `/runs/...`
+projection and should not be pointed at Cognee.
+
+The gateway and Harness share the browser session through the HttpOnly
+`sudarshan_access` cookie. When they run as separate services, set
+`SUDARSHAN_GATEWAY_ACCESS_SECRET` in the Harness environment to the exact same
+value as `JWT_ACCESS_SECRET`; `startup.ps1` does this only for the Harness child
+process. The Harness verifies the JWT locally and never receives OAuth client
+secrets or refresh tokens. In production, expose both services behind one HTTPS
+origin (for example `/api/*` to the gateway and `/` to the Harness), and set
+`SUDARSHAN_HARNESS_URL` to that public origin rather than a localhost port.
+
 The browser flow is:
 
 1. authenticate and select or create a case;

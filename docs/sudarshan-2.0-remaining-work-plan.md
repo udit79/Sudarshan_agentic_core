@@ -507,6 +507,13 @@ Acceptance:
 - Secret values never enter skill context, events, cache metadata, or safe logs.
 - Missing credentials result in an explicit manual/draft fallback.
 
+Implementation status: complete locally. `SocialProviderConfig` validates the
+optional provider, cache, timeout, retry, rate-limit, and connection settings
+without requiring credentials; safe projections expose only credential
+presence. Missing credentials resolve to the manual draft/copy path and the
+social boundary reports an explicit fallback reason. Production secret-manager
+and provider-connection validation remain deployment concerns for T65/T66.
+
 ### T65 — LinkedIn read layer and scoped cache
 
 Owner: backend/provider. Depends on: T40, T41, T42, T63, T64.
@@ -521,6 +528,14 @@ Acceptance:
   version, authorization scope, and policy version.
 - TTL, invalidation, timeout, retry, and rate-limit behavior are tested.
 - Fetched text cannot alter approval, target, tool, or publication decisions.
+
+Implementation status: complete locally. `SocialReadLayer` now exposes
+bounded post/comment/thread reads through the provider boundary and persists
+only scoped, versioned, bounded, credential-filtered responses in a separate
+TTL cache. Every returned read is marked as untrusted data; cache identity
+includes provider, target, request parameters, authorization scope, skill
+version, and policy version. Shared multi-worker cache deployment and live
+provider adapters remain release/integration work.
 
 ### T66 — Durable social approval and release
 
@@ -537,6 +552,15 @@ Acceptance:
 - Timeout, rate-limit, provider-pending, cancellation, and rejection states
   remain visible and resumable.
 - Draft-only mode never invokes a write adapter.
+
+Implementation status: complete locally. `SocialApprovalStore` persists
+approval decisions, payload/scope hashes, actor and policy metadata,
+idempotency keys, provider request IDs, and final receipts. Atomic release
+leases prevent duplicate workers from publishing the same action, while
+provider-pending receipts remain resumable. `SocialReleaseService` exposes
+separate post/comment/reply/reshare/schedule submission seams and keeps the
+manual provider draft-only. Gateway/API projection and live connector
+integration remain follow-on deployment work.
 
 ### T67 — Execute and reconcile LinkedIn child plans
 

@@ -219,6 +219,32 @@ function Get-Port([string]$Name, [int]$Fallback) {
     return $port
 }
 
+function Write-FrontendRuntimeConfig {
+    param(
+        [Parameter(Mandatory = $true)][int]$NodePort,
+        [Parameter(Mandatory = $true)][int]$PythonPort,
+        [Parameter(Mandatory = $true)][int]$HarnessPort
+    )
+    $configPath = Join-Path $landingRoot "public\runtime-config.local.js"
+    $gatewayOrigin = Get-EnvValue "SUDARSHAN_FRONTEND_API_ORIGIN"
+    if ([string]::IsNullOrWhiteSpace($gatewayOrigin)) { $gatewayOrigin = "http://localhost:$NodePort" }
+    $fastApiOrigin = Get-EnvValue "SUDARSHAN_FRONTEND_FASTAPI_ORIGIN"
+    if ([string]::IsNullOrWhiteSpace($fastApiOrigin)) { $fastApiOrigin = "http://localhost:$PythonPort" }
+    $harnessUrl = Get-EnvValue "SUDARSHAN_HARNESS_URL"
+    if ([string]::IsNullOrWhiteSpace($harnessUrl)) { $harnessUrl = "http://localhost:$HarnessPort/" }
+    $config = [ordered]@{
+        apiOrigin = $gatewayOrigin.TrimEnd('/')
+        fastApiOrigin = $fastApiOrigin.TrimEnd('/')
+        harnessUrl = $harnessUrl
+    } | ConvertTo-Json -Compress
+    Set-Content -LiteralPath $configPath -Value @"
+window.SUDARSHAN_RUNTIME_CONFIG = $config;
+window.SUDARSHAN_API_ORIGIN = window.SUDARSHAN_RUNTIME_CONFIG.apiOrigin;
+window.SUDARSHAN_FASTAPI_ORIGIN = window.SUDARSHAN_RUNTIME_CONFIG.fastApiOrigin;
+window.SUDARSHAN_HARNESS_URL = window.SUDARSHAN_RUNTIME_CONFIG.harnessUrl;
+"@ -Encoding utf8
+}
+
 function Assert-PortFree([int]$Port, [string]$Service) {
     $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
     if ($listeners.Count -gt 0) {
@@ -322,12 +348,17 @@ function Wait-Http {
                 $diagnostic = if (Test-Path -LiteralPath $errorLog) { (Get-Content -LiteralPath $errorLog -Tail 20 -ErrorAction SilentlyContinue) -join "`n" } else { "No stderr log was created." }
                 throw "$Service exited before becoming ready (PID $($Process.Id)).`n$diagnostic"
             }
-            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 5
+            # Keep this compatible with Windows PowerShell 5.1 as well as
+            # PowerShell 7; -SkipHttpErrorCheck exists only in newer shells.
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
             if (($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) -or ($AcceptUnauthorized -and $response.StatusCode -eq 401)) {
                 return
             }
         }
         catch {
+            $statusCode = 0
+            try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { }
+            if ($AcceptUnauthorized -and $statusCode -eq 401) { return }
             # The service may still be importing its dependency graph.
         }
         Start-Sleep -Seconds 1
@@ -379,7 +410,13 @@ try {
     $npmCommand = $null
     if ($needsNode) {
         $nodeCommand = Require-Command "node" "Install Node.js 22 LTS or newer from https://nodejs.org/"
-        $npmCommand = Require-Command "npm" "Install Node.js 22 LTS or newer from https://nodejs.org/"
+        # Windows PowerShell resolves `npm` to npm.ps1, which cannot be
+        # launched by Start-Process. Prefer the native npm.cmd shim so both
+        # dependency commands and the Vite child process work in PS 5.1.
+        $npmCommand = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
+        if ($null -eq $npmCommand) {
+            $npmCommand = Require-Command "npm" "Install Node.js 22 LTS or newer from https://nodejs.org/"
+        }
         Assert-NodeVersion $nodeCommand.Source
     }
     if ($useHarness) {
@@ -421,29 +458,39 @@ try {
             Write-Host "Installing the locked Node gateway dependencies..."
             Invoke-Checked $npmCommand.Source @("ci", "--ignore-scripts", "--no-audit", "--no-fund") $nodeGatewayRoot
         }
+        Write-Host "Installing the locked landing frontend dependencies..."
+        Invoke-Checked $npmCommand.Source @("ci", "--no-audit", "--no-fund") $landingRoot
     }
 
     if ($useHarness) {
-        Write-Host "Building the Sudarshan Harness UI plugin bundles..."
+        Write-Host "Building the complete Sudarshan Harness client bundles..."
+        # The Harness client packages consume generated remote contracts from
+        # the host library build. Build the complete client graph because the
+        # runtime loader composes every registered client package, not only the
+        # three Sudarshan packages customized by this repository.
+        Invoke-Checked $npmCommand.Source @("run", "build:lib:host") $harnessRoot
+        # The aggregate client tsconfig currently includes browser tests and
+        # source-linked workspace edges that fail its type-only validation in
+        # this checkout. Startup needs the emitted project-reference artifacts
+        # for tsdown; the normal typecheck remains a separate CI concern.
         Invoke-Checked $nodeCommand.Source @(
             "node_modules/typescript/bin/tsc",
             "-b",
-            "packages/experimental/client-ui-sudarshan/tsconfig.json",
-            "packages/experimental/client-ui-sudarshan-theme/tsconfig.json",
-            "packages/experimental/client-ui-sudarshan-operations/tsconfig.json"
+            "tsconfig.client.json",
+            "--noCheck"
         ) $harnessRoot
-        Invoke-Checked $pnpmCommand.Source @(
-            "--filter", "@deepseek-ai/dsh-experimental-client-ui-sudarshan",
-            "--filter", "@deepseek-ai/dsh-experimental-client-ui-sudarshan-theme",
-            "--filter", "@deepseek-ai/dsh-experimental-client-ui-sudarshan-operations",
-            "run", "bundle"
-        ) $harnessRoot
+        $tsdownCommand = Join-Path $harnessRoot "node_modules\.bin\tsdown.cmd"
+        if (-not (Test-Path -LiteralPath $tsdownCommand -PathType Leaf)) {
+            throw "Harness build tool is missing: $tsdownCommand"
+        }
+        Invoke-Checked $tsdownCommand @("--env.DSH_BUILD_FACE", "client") $harnessRoot
     }
 
     $pythonPort = Get-Port "SUDARSHAN_API_PORT" 8000
     $nodePort = Get-Port "PORT" 8080
     $landingPort = Get-Port "SUDARSHAN_FRONTEND_PORT" 4173
     $harnessPort = Get-Port "SUDARSHAN_HARNESS_PORT" 3080
+    Write-FrontendRuntimeConfig -NodePort $nodePort -PythonPort $pythonPort -HarnessPort $harnessPort
     if (-not $NoStart) {
         Assert-PortFree $pythonPort "Python orchestrator/pipelines API"
         if (-not $SkipNodeGateway) { Assert-PortFree $nodePort "Node gateway" }
@@ -462,6 +509,11 @@ try {
         exit 0
     }
 
+    $viteShim = Join-Path $landingRoot "node_modules\.bin\vite.cmd"
+    if (-not (Test-Path -LiteralPath $viteShim -PathType Leaf)) {
+        throw "Landing dependencies are missing. Rerun startup.ps1 without -SkipInstall so the landing package can run npm ci."
+    }
+
     $env:SUDARSHAN_API_PORT = [string]$pythonPort
     $env:PORT = [string]$nodePort
     $env:SUDARSHAN_FRONTEND_PORT = [string]$landingPort
@@ -475,7 +527,31 @@ try {
     }
 
     if ($useHarness) {
-        $harnessProcess = Start-LocalService "deepseek-harness" $nodeCommand.Source @("--import", "tsx/esm", "apps/cli/src/bin.ts", "web", "--no-open", "--port", [string]$harnessPort) $harnessRoot -Port $harnessPort
+        # The gateway and Harness intentionally share the gateway access-token
+        # verification boundary. Pass the secret only to the Harness child so
+        # its clean URL can honor the authenticated Google session; do not leak
+        # the secret into the landing or gateway process environment.
+        $previousHarnessGatewaySecret = [Environment]::GetEnvironmentVariable("SUDARSHAN_GATEWAY_ACCESS_SECRET", "Process")
+        $jwtAccessSecret = Get-EnvValue "JWT_ACCESS_SECRET"
+        $configuredHarnessGatewaySecret = Get-EnvValue "SUDARSHAN_GATEWAY_ACCESS_SECRET"
+        if (-not [string]::IsNullOrWhiteSpace($configuredHarnessGatewaySecret) -and $configuredHarnessGatewaySecret -ne $jwtAccessSecret) {
+            throw "SUDARSHAN_GATEWAY_ACCESS_SECRET must exactly match JWT_ACCESS_SECRET because the Harness validates the gateway access JWT."
+        }
+        if ([string]::IsNullOrWhiteSpace($jwtAccessSecret)) {
+            throw "JWT_ACCESS_SECRET is required when the DeepSeek Harness is enabled."
+        }
+        $env:SUDARSHAN_GATEWAY_ACCESS_SECRET = $jwtAccessSecret
+        try {
+            $harnessProcess = Start-LocalService "deepseek-harness" $nodeCommand.Source @("--import", "tsx/esm", "apps/cli/src/bin.ts", "web", "--no-open", "--port", [string]$harnessPort) $harnessRoot -Port $harnessPort
+        }
+        finally {
+            if ($null -eq $previousHarnessGatewaySecret) {
+                Remove-Item Env:SUDARSHAN_GATEWAY_ACCESS_SECRET -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:SUDARSHAN_GATEWAY_ACCESS_SECRET = $previousHarnessGatewaySecret
+            }
+        }
         Wait-Http "http://127.0.0.1:$harnessPort/" "deepseek-harness" -Process $harnessProcess -AcceptUnauthorized
     }
 

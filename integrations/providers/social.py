@@ -13,6 +13,7 @@ from typing import Any, Literal, Mapping, Protocol
 from uuid import uuid4
 
 from integrations.providers.receipts import classify_provider_error
+from integrations.providers.social_config import SocialProviderConfig
 
 
 SocialOperation = Literal[
@@ -22,6 +23,8 @@ SocialOperation = Literal[
     "create_post",
     "create_comment",
     "create_reply",
+    "create_reshare",
+    "schedule_post",
 ]
 SocialStatus = Literal[
     "draft_only",
@@ -33,7 +36,7 @@ SocialStatus = Literal[
 ]
 
 READ_OPERATIONS = frozenset({"fetch_post", "fetch_comments", "fetch_thread"})
-WRITE_OPERATIONS = frozenset({"create_post", "create_comment", "create_reply"})
+WRITE_OPERATIONS = frozenset({"create_post", "create_comment", "create_reply", "create_reshare", "schedule_post"})
 
 
 class SocialCapabilityError(RuntimeError):
@@ -62,7 +65,7 @@ class SocialRequest:
             raise ValueError(f"unsupported social operation: {self.operation}")
         if self.timeout_seconds <= 0 or self.timeout_seconds > 900:
             raise ValueError("timeout_seconds must be between 0 and 900")
-        if self.operation in WRITE_OPERATIONS and not self.target_ref and self.operation != "create_post":
+        if self.operation in WRITE_OPERATIONS and not self.target_ref and self.operation not in {"create_post", "schedule_post"}:
             raise ValueError("write operations require target_ref except create_post")
 
     @property
@@ -141,12 +144,24 @@ class ManualSocialAdapter:
 class SocialCapabilityBoundary:
     """Validate policy, dispatch an adapter, and return a safe receipt."""
 
-    def __init__(self, adapters: Mapping[str, SocialAdapter] | None = None) -> None:
+    def __init__(
+        self,
+        adapters: Mapping[str, SocialAdapter] | None = None,
+        *,
+        config: SocialProviderConfig | None = None,
+    ) -> None:
+        self.config = config or SocialProviderConfig.from_env()
         self._adapters: dict[str, SocialAdapter] = {"manual": ManualSocialAdapter()}
         for name, adapter in (adapters or {}).items():
             if not str(name).strip():
                 raise ValueError("social adapter name must be non-empty")
             self._adapters[str(name).strip().lower()] = adapter
+
+    @classmethod
+    def from_env(cls, adapters: Mapping[str, SocialAdapter] | None = None) -> "SocialCapabilityBoundary":
+        """Build a boundary using validated, secret-free environment settings."""
+
+        return cls(adapters, config=SocialProviderConfig.from_env())
 
     def register(self, adapter: SocialAdapter, *, replace: bool = False) -> None:
         provider = str(adapter.provider).strip().lower()
@@ -184,6 +199,9 @@ class SocialCapabilityBoundary:
                 audit_ref=audit_ref,
                 error_code="SOCIAL_PROVIDER_UNAVAILABLE",
                 manual_required=True,
+                metadata={
+                    "fallback_reason": self.config.fallback_reason or "provider_adapter_unavailable",
+                },
             )
 
         started = monotonic()
@@ -216,6 +234,8 @@ class SocialCapabilityBoundary:
                 manual_required=request.is_write,
             )
 
+        raw_data = result.pop("data", {})
+        data = dict(raw_data) if isinstance(raw_data, Mapping) else {}
         status = str(result.pop("status", "succeeded"))
         if status not in {"draft_only", "pending", "succeeded", "failed", "cancelled"}:
             status = "failed"
@@ -227,8 +247,11 @@ class SocialCapabilityBoundary:
             request_id=_safe_string(result.pop("request_id", None)),
             provider_request_id=_safe_string(result.pop("provider_request_id", None)),
             manual_required=bool(result.pop("manual_required", False)),
-            data=result.pop("data", {}) if isinstance(result.get("data", {}), Mapping) else {},
-            metadata={key: value for key, value in result.items() if key in {"source", "provenance", "retry_after_seconds", "scope"}},
+            data=data,
+            metadata={
+                **{key: value for key, value in result.items() if key in {"source", "provenance", "retry_after_seconds", "scope"}},
+                **({"untrusted_data": True} if request.operation in READ_OPERATIONS else {}),
+            },
         )
 
     @staticmethod

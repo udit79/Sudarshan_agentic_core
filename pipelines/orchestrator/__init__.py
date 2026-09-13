@@ -1,10 +1,9 @@
 """Central LangGraph orchestration for Sudarshan application pipelines."""
 
-from pipelines.orchestrator.graph import (
-    PipelineOrchestrator,
-    build_default_pipeline_registry,
-    create_sqlite_checkpointer,
-)
+# Keep the graph module lazy. Pipeline implementations import ArtifactStore,
+# while api.artifacts imports the transport-neutral contracts from this package;
+# importing the graph eagerly here creates an api.artifacts <-> ppt.vertical
+# cycle during API startup.
 from pipelines.orchestrator.contracts import (
     ArtifactManifest,
     ChildTaskOutcome,
@@ -81,6 +80,24 @@ from pipelines.orchestrator.understanding import (
     default_intent_resolver,
     resolve_requested_pipelines,
 )
+
+
+def __getattr__(name: str):
+    """Load graph exports only when an orchestration caller requests them."""
+
+    if name in {"PipelineOrchestrator", "build_default_pipeline_registry", "create_sqlite_checkpointer"}:
+        from pipelines.orchestrator.graph import (
+            PipelineOrchestrator,
+            build_default_pipeline_registry,
+            create_sqlite_checkpointer,
+        )
+
+        return {
+            "PipelineOrchestrator": PipelineOrchestrator,
+            "build_default_pipeline_registry": build_default_pipeline_registry,
+            "create_sqlite_checkpointer": create_sqlite_checkpointer,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "ArtifactManifest",

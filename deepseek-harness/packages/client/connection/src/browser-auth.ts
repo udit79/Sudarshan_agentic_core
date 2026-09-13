@@ -18,6 +18,12 @@ const COOKIE_PAYLOAD_VERSION = 1
 const STORED_SECRET_VERSION = 1
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]*$/
 const PROCESS_LAUNCH_TOKENS = new WeakMap<object, string>()
+const GATEWAY_ACCESS_SECRET_ENV = 'SUDARSHAN_GATEWAY_ACCESS_SECRET'
+const GATEWAY_ACCESS_COOKIE_ENV = 'SUDARSHAN_GATEWAY_ACCESS_COOKIE'
+const DEFAULT_GATEWAY_ACCESS_COOKIE = 'sudarshan_access'
+const GATEWAY_ISSUER = 'sudarshan-gateway'
+const GATEWAY_AUDIENCE = 'sudarshan-api'
+const CLOCK_SKEW_SECONDS = 5
 
 interface StoredSecretPayload {
   readonly version: typeof STORED_SECRET_VERSION
@@ -29,6 +35,13 @@ interface BrowserCookiePayload {
   readonly authority: string
   readonly issuedAt: number
   readonly expiresAt: number
+}
+
+export interface BrowserAuthOptions {
+  /** Shared HS256 secret used to validate an upstream gateway access cookie. */
+  readonly gatewayAccessSecret?: string
+  /** Name of the upstream access cookie. Defaults to `sudarshan_access`. */
+  readonly gatewayAccessCookie?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,6 +60,49 @@ function decodeBase64Url(value: string): Buffer | undefined {
   const padding = '='.repeat((4 - value.length % 4) % 4)
   const decoded = Buffer.from(value.replaceAll('-', '+').replaceAll('_', '/') + padding, 'base64')
   return encodeBase64Url(decoded) === value ? decoded : undefined
+}
+
+function jsonObject(value: Buffer): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value.toString('utf8'))
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Verify the gateway's access JWT without adding a runtime dependency to the Harness. */
+function gatewayTokenIsValid(token: string, secret: Buffer): boolean {
+  const parts = token.split('.')
+  if (parts.length !== 3) return false
+  const [encodedHeader, encodedPayload, encodedSignature] = parts
+  if (encodedHeader === undefined || encodedPayload === undefined || encodedSignature === undefined) {
+    return false
+  }
+  const headerBytes = decodeBase64Url(encodedHeader)
+  const payloadBytes = decodeBase64Url(encodedPayload)
+  const actualSignature = decodeBase64Url(encodedSignature)
+  if (headerBytes === undefined || payloadBytes === undefined || actualSignature === undefined) return false
+  const tokenHeader = jsonObject(headerBytes)
+  const claims = jsonObject(payloadBytes)
+  if (tokenHeader?.alg !== 'HS256' || claims === undefined) return false
+  const expectedSignature = signature(secret, `${encodedHeader}.${encodedPayload}`)
+  if (actualSignature.byteLength !== expectedSignature.byteLength
+    || !timingSafeEqual(actualSignature, expectedSignature)) return false
+
+  const now = Math.floor(Date.now() / 1000)
+  const exp = claims.exp
+  const nbf = claims.nbf
+  return claims.iss === GATEWAY_ISSUER
+    && claims.aud === GATEWAY_AUDIENCE
+    && claims.type === 'access'
+    && typeof claims.sub === 'string'
+    && claims.sub.length > 0
+    && typeof exp === 'number'
+    && Number.isFinite(exp)
+    && exp > now - CLOCK_SKEW_SECONDS
+    && (nbf === undefined
+      || (typeof nbf === 'number' && Number.isFinite(nbf) && nbf <= now + CLOCK_SKEW_SECONDS))
 }
 
 function processLaunchToken(owner: object): string {
@@ -185,14 +241,25 @@ async function initializeSecret(credentials: CredentialProvider): Promise<Buffer
 export class BrowserAuth {
   private readonly launchToken: string
   private readonly maxAgeMilliseconds: number
+  private readonly gatewayAccessSecret: Buffer | undefined
+  private readonly gatewayAccessCookie: string
 
   private constructor(
     processOwner: object,
     private readonly secret: Buffer,
     maxAgeDays: number,
+    options: BrowserAuthOptions,
   ) {
     this.launchToken = processLaunchToken(processOwner)
     this.maxAgeMilliseconds = maxAgeDays * DAY_MILLISECONDS
+    const gatewaySecret = options.gatewayAccessSecret?.trim()
+    this.gatewayAccessSecret = gatewaySecret === undefined || gatewaySecret === ''
+      ? undefined
+      : Buffer.from(gatewaySecret, 'utf8')
+    this.gatewayAccessCookie = options.gatewayAccessCookie?.trim() || DEFAULT_GATEWAY_ACCESS_COOKIE
+    if (this.gatewayAccessCookie.includes('=') || this.gatewayAccessCookie.includes(';')) {
+      throw new Error('client-connection: gatewayAccessCookie contains invalid cookie-name characters')
+    }
     if (!Number.isSafeInteger(this.maxAgeMilliseconds)
       || !Number.isSafeInteger(Date.now() + this.maxAgeMilliseconds)) {
       throw new Error('client-connection: cookieMaxAgeDays exceeds the safe timestamp range')
@@ -211,8 +278,19 @@ export class BrowserAuth {
     processOwner: object,
     credentials: CredentialProvider,
     maxAgeDays: number,
+    options: BrowserAuthOptions = {},
   ): Promise<BrowserAuth> {
-    return new BrowserAuth(processOwner, await initializeSecret(credentials), maxAgeDays)
+    const gatewayAccessSecret = options.gatewayAccessSecret ?? process.env[GATEWAY_ACCESS_SECRET_ENV]
+    const gatewayAccessCookie = options.gatewayAccessCookie ?? process.env[GATEWAY_ACCESS_COOKIE_ENV]
+    return new BrowserAuth(
+      processOwner,
+      await initializeSecret(credentials),
+      maxAgeDays,
+      {
+        ...(gatewayAccessSecret === undefined ? {} : { gatewayAccessSecret }),
+        ...(gatewayAccessCookie === undefined ? {} : { gatewayAccessCookie }),
+      },
+    )
   }
 
   /**
@@ -289,7 +367,12 @@ export class BrowserAuth {
   isAuthenticated(request: ConnectionTrustRequest): boolean {
     const authority = requestAuthority(request.headers)
     const rawCookie = header(request.headers, 'cookie')
-    if (authority === undefined || rawCookie === undefined) return false
+    if (rawCookie === undefined) return false
+    if (this.gatewayAccessSecret !== undefined
+      && gatewayTokenIsValid(cookieValue(rawCookie, this.gatewayAccessCookie) ?? '', this.gatewayAccessSecret)) {
+      return true
+    }
+    if (authority === undefined) return false
     const value = cookieValue(rawCookie, cookieName(authority))
     if (value === undefined) return false
     const payload = decodeCookie(value, this.secret)

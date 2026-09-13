@@ -47,9 +47,9 @@ function Monitor({ projection, t }: { projection: OperatorProjection; t: (key: O
     </div>
     <div className={css.metricGrid} aria-label={t('telemetry')}>
       <Metric label={t('queueWait')} value={`${usage.queueWaitMs} ${t('milliseconds')}`} />
-      <Metric label={t('usage')} value={`${totalTokens.toLocaleString()} ${t('tokens')}`} detail={usage.usageIsEstimate ? t('estimated') : undefined} />
+      <Metric label={t('usage')} value={`${totalTokens.toLocaleString()} ${t('tokens')}`} {...(usage.usageIsEstimate ? { detail: t('estimated') } : {})} />
       <Metric label={t('cache')} value={`${usage.cacheHits} ${t('cacheHit')} · ${usage.cacheWaits} ${t('cacheWait')}`} />
-      <Metric label={t('quality')} value={projection.qualityStatus} detail={usage.fallbackCount ? `${usage.fallbackCount} ${t('fallback')}` : undefined} />
+      <Metric label={t('quality')} value={projection.qualityStatus} {...(usage.fallbackCount ? { detail: `${usage.fallbackCount} ${t('fallback')}` } : {})} />
     </div>
     {projection.fallbacks.length > 0 && <div className={css.fallback} role="status"><strong>{t('fallbacks')}</strong>{projection.fallbacks.join(' · ')}</div>}
     <div className={css.sectionTitle}>Child lanes</div>
