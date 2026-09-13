@@ -36,9 +36,13 @@ def test_real_final_output_shape_compiles_to_semantic_ir() -> None:
 
 def test_infographic_template_and_theme_selection_is_allow_listed() -> None:
     registry = infographic_template_registry()
-    assert set(registry) == {"list-grid-simple"}
+    assert set(registry) == {
+        "list-grid-simple",
+        "list-row-simple-horizontal-arrow",
+        "sequence-steps-simple",
+    }
     selection = select_infographic_template("timeline")
-    assert selection.template.template_id == "list-grid-simple"
+    assert selection.template.template_id == "list-row-simple-horizontal-arrow"
     assert selection.used_fallback is False
     assert selection.template.external_dependencies == ()
     assert get_infographic_theme()["accent"].startswith("#")
@@ -64,6 +68,7 @@ def test_real_final_output_renders_through_node_boundary(tmp_path) -> None:
     assert "Source review" in svg or "E-1" in svg
     assert "Synthetic case process" in svg
     assert renderer.last_render_mode in {"antv", "fallback"}
+    assert "#1e3a8a" in svg.lower() or "#0f766e" in svg.lower()
     report = inspect_svg(
         artifact,
         required_text=("Synthetic case process",),

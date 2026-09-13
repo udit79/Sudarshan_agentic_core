@@ -29,6 +29,7 @@ def _renderer_safe_syntax(
     *,
     title: str,
     caveats: list[str],
+    query: str = "",
 ) -> str:
     """Build a compact AntV template from the validated structured fields.
 
@@ -38,8 +39,41 @@ def _renderer_safe_syntax(
     verified item a visible evidence ID instead of silently dropping content.
     """
 
-    items: list[tuple[str, str]] = [("Brief", title)]
+    is_process = output.visual_type in {"process", "flow", "timeline"}
+    directive = "list-row-simple-horizontal-arrow" if is_process else "list-grid-simple"
+    stage_labels = _requested_stage_labels(output, query) if is_process else []
+    if stage_labels:
+        items: list[tuple[str, str | None]] = []
+        for label in stage_labels:
+            matching_evidence = [
+                item
+                for item in output.evidence
+                if label.lower() in f"{item.claim} {item.evidence_summary}".lower()
+            ]
+            evidence_id = (
+                sorted(
+                    matching_evidence,
+                    key=lambda item: (
+                        0 if "stage" in item.claim.lower() or "step" in item.claim.lower() else 1,
+                        len(item.claim),
+                    ),
+                )[0].evidence_id
+                if matching_evidence
+                else None
+            )
+            visible_label = f"[{evidence_id}] {label}" if evidence_id else label
+            items.append((visible_label, None))
+        # The horizontal-arrow item has a fixed 140px width and a fixed
+        # single-line label box in AntV 0.2.x. Long labels therefore escape
+        # into the title or neighbouring stage. Use AntV's wider sequence
+        # template when the compact row cannot safely contain the labels.
+        if any(len(label) > 24 for label, _ in items):
+            directive = "sequence-steps-simple"
+    else:
+        items: list[tuple[str, str | None]] = [("Brief", title)]
     for evidence in output.evidence:
+        if stage_labels:
+            continue
         label = f"[{evidence.evidence_id}] {_syntax_value(evidence.claim, 120)}"
         detail = _syntax_value(evidence.evidence_summary or evidence.claim)
         if evidence.source_reference:
@@ -47,16 +81,45 @@ def _renderer_safe_syntax(
         if evidence.limitations:
             detail = f"{detail} | Gap: {_syntax_value('; '.join(evidence.limitations), 80)}"
         items.append((label, detail))
-    if caveats:
+    if caveats and not stage_labels:
         items.append(("Caveat", _syntax_value(caveats[0], 220)))
 
-    lines = ["infographic list-grid-simple", "data", "  lists"]
+    lines = [f"infographic {directive}", "data"]
+    if is_process:
+        lines.append(f"  title {_syntax_value(title, 180)}")
+    lines.append("  lists")
     for label, detail in items:
-        lines.extend([
-            f"    - label {_syntax_value(label)}",
-            f"      desc {_syntax_value(detail)}",
-        ])
+        lines.append(f"    - label {_syntax_value(label)}")
+        if detail is not None:
+            lines.append(f"      desc {_syntax_value(detail)}")
     return "\n".join(lines)
+
+
+def _requested_stage_labels(output: InfographicOutput, query: str) -> list[str]:
+    """Recover explicit stage labels without inventing process semantics."""
+
+    numbered = re.findall(
+        r"\b\d+\.\s*([^,.;\n]+?)(?=\s*(?:,\s*(?:and\s+)?\d+\.|;\s*(?:and\s+)?\d+\.|\.\s*(?:Caveat|This|Connectors|Three|Header)\b|\.\s*$|$))",
+        output.alt_text,
+        flags=re.IGNORECASE,
+    )
+    labels = [item.strip(" '") for item in numbered if item.strip()]
+    if len(labels) >= 2:
+        return list(dict.fromkeys(labels))[:12]
+
+    if not re.search(r"\b(?:six|6)\s+labeled\s+stages?\b", query, flags=re.IGNORECASE):
+        return []
+    match = re.search(r"\b(?:pipeline|stages?|steps?)\s*:\s*(.+)", query, flags=re.IGNORECASE)
+    if not match:
+        return []
+    clause = re.split(
+        r"\.\s*(?:Use|Show|Create|Make)\b",
+        match.group(1),
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    labels = [item.strip(" '") for item in re.split(r",|\band\b", clause, flags=re.IGNORECASE)]
+    return list(dict.fromkeys(item for item in labels if 1 < len(item) <= 80))[:12]
 
 
 def _has_unsupported_flood_word(output: InfographicOutput) -> bool:
@@ -154,8 +217,23 @@ def normalize_infographic_output(
     # inconsistently. Convert that form to a built-in template with all
     # structured evidence retained. This is deterministic and costs no LLM
     # call; the richer source fields remain available beside the syntax.
-    if syntax.lstrip().startswith("infographic {") or len(syntax) > 12000:
-        syntax = _renderer_safe_syntax(output, title=title, caveats=caveats)
+    process_visual = output.visual_type in {"process", "flow", "timeline"}
+    supported_process_syntax = re.match(
+        r"^\s*infographic\s+(?:list-row-simple-horizontal-arrow|sequence-steps(?:-[^\s]+)?)\b",
+        syntax,
+        flags=re.IGNORECASE,
+    )
+    if process_visual and not supported_process_syntax:
+        syntax = _renderer_safe_syntax(output, title=title, caveats=caveats, query=query)
+        labels = _requested_stage_labels(output, query)
+        if labels:
+            alt_text = (
+                f"Infographic titled '{title}'. A horizontal {len(labels)}-stage process lists: "
+                + ", ".join(f"{index}. {label}" for index, label in enumerate(labels, start=1))
+                + ". Arrows show presentation order only; the source does not independently verify process semantics."
+            )
+    elif syntax.lstrip().startswith("infographic {") or len(syntax) > 12000:
+        syntax = _renderer_safe_syntax(output, title=title, caveats=caveats, query=query)
 
     # Replace dominant saffron/green blocks with a restrained navy/teal slate
     # palette. This is a style correction only; it does not change claims.

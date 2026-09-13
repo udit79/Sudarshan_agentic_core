@@ -1,9 +1,9 @@
 """Allow-listed infographic templates and themes.
 
-The registry is intentionally small. It describes only the stable AntV
-directive currently used by the native bridge; unsupported visual intents use
-that explicit fallback rather than allowing model-produced template names or
-remote assets to cross the renderer boundary.
+The registry is intentionally small. It describes only stable AntV directives
+used by the native bridge; unsupported visual intents use that explicit
+fallback rather than allowing model-produced template names or remote assets
+to cross the renderer boundary.
 """
 
 from __future__ import annotations
@@ -51,7 +51,19 @@ _TEMPLATES: dict[str, InfographicTemplate] = {
     "list-grid-simple": InfographicTemplate(
         template_id="list-grid-simple",
         directive="list-grid-simple",
-        visual_types=("list", "process", "timeline", "comparison", "hierarchy", "flow", "mind-map", "other"),
+        visual_types=("list", "comparison", "hierarchy", "other"),
+        supported_modes=("svg", "fallback"),
+    ),
+    "list-row-simple-horizontal-arrow": InfographicTemplate(
+        template_id="list-row-simple-horizontal-arrow",
+        directive="list-row-simple-horizontal-arrow",
+        visual_types=("process", "timeline", "flow"),
+        supported_modes=("svg", "fallback"),
+    ),
+    "sequence-steps-simple": InfographicTemplate(
+        template_id="sequence-steps-simple",
+        directive="sequence-steps-simple",
+        visual_types=("process", "timeline", "flow"),
         supported_modes=("svg", "fallback"),
     ),
 }
@@ -72,7 +84,12 @@ def select_infographic_template(
     """Select a safe template by typed visual intent and render mode."""
 
     normalized_type = str(visual_type).strip().lower()
-    template_id = (requested_template or "list-grid-simple").strip().lower()
+    default_template = (
+        "list-row-simple-horizontal-arrow"
+        if normalized_type in {"process", "timeline", "flow"}
+        else "list-grid-simple"
+    )
+    template_id = (requested_template or default_template).strip().lower()
     template = _TEMPLATES.get(template_id)
     if template is None:
         raise ValueError(f"unknown infographic template: {requested_template}")

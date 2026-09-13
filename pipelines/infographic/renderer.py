@@ -31,7 +31,10 @@ class AntVInfographicRenderer:
         self.output_dir = Path(output_dir)
         self.width = width
         self.height = height
-        self.ssr_timeout_ms = ssr_timeout_ms or int(os.getenv("ANTV_SSR_TIMEOUT_MS", "5000"))
+        # AntV documents a materially slower cold start on Windows. Keep the
+        # outer process deadline bounded, but do not force normal cold starts
+        # into the fallback renderer.
+        self.ssr_timeout_ms = ssr_timeout_ms or int(os.getenv("ANTV_SSR_TIMEOUT_MS", "30000"))
         if self.ssr_timeout_ms < 100:
             raise ValueError("ssr_timeout_ms must be at least 100 milliseconds")
         self.last_render_mode = "unknown"

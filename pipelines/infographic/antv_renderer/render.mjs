@@ -15,6 +15,17 @@ const outputDir = payload.outputDir;
 const artifactName = String(payload.artifactName || 'infographic').replace(/[^A-Za-z0-9._-]/g, '-');
 await mkdir(outputDir, { recursive: true });
 
+const defaultThemeConfig = {
+  colorBg: '#F8FAFC',
+  colorPrimary: '#1E3A8A',
+  palette: ['#1E3A8A', '#0F766E', '#475569'],
+  base: {
+    text: { fill: '#0F172A' },
+  },
+  title: { fill: '#0F172A' },
+  desc: { fill: '#475569' },
+};
+
 function escapeXml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -91,12 +102,13 @@ function runAntvWorker(workerPayload, timeoutMs) {
 let svg;
 let renderer = 'antv';
 let warning = null;
-const ssrTimeoutMs = Number(payload.ssrTimeoutMs || 5000);
+const ssrTimeoutMs = Number(payload.ssrTimeoutMs || 30000);
 try {
   svg = await runAntvWorker({
     syntax: payload.syntax,
     width: payload.width || 1200,
     height: payload.height || 675,
+    themeConfig: payload.themeConfig || defaultThemeConfig,
   }, ssrTimeoutMs);
 } catch (error) {
   // A separate child process makes this fallback a real cancellation boundary:

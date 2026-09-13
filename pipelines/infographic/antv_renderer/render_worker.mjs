@@ -12,6 +12,7 @@ try {
   const svg = await renderToString(payload.syntax, {
     width: payload.width || 1200,
     height: payload.height || 675,
+    themeConfig: payload.themeConfig,
   });
   process.stdout.write(svg);
 } catch (error) {
