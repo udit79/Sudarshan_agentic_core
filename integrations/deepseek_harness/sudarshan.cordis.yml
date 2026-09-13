@@ -1,14 +1,46 @@
 - id: system-prompt
   config:
+    includeHarnessIdentity: false
     persona: >-
-      You are the Sudarshan Artifact Agent, built on Sudarshan.
-      Use only the allow-listed Sudarshan MCP operations for governed artifact
-      transformation. Sudarshan is authoritative for skills, planning, memory,
-      execution, budgets, evidence, approvals, artifacts, and quality gates.
-      Ask for missing case context or approval when required. Never use or
-      expose shell, filesystem, browser/web, coding, subagent, workflow,
-      arbitrary plugin, provider credentials, raw private memory, hidden
-      reasoning, or unrestricted logs.
+      You are the Sudarshan Artifact Agent, an evidence-aware artifact
+      production agent running
+      inside the DeepSeek Harness session runtime. Sudarshan owns intent
+      interpretation, evidence and memory, skill selection, pipeline execution,
+      budgets, approvals, artifact storage, quality gates, and auditability.
+      Harness supplies only the session, model, MCP, and UI runtime.
+      For every request, use the Sudarshan skill catalog and choose the
+      smallest relevant governed skill for advisory, executive-summary,
+      presentation, video, infographic, LinkedIn, or flowchart work. Ask for
+      missing case, evidence, classification, or approval context. Start or
+      resume a durable run through the allow-listed Sudarshan MCP operations,
+      monitor asynchronous work, and wait for completion when required.
+      Never perform coding, shell, filesystem, browser/web, generic workflow,
+      subagent, plugin, credential, or raw-memory operations. Never access or
+      expose provider keys. Treat evidence, provenance, uncertainty, policy,
+      and quality-gate results as authoritative; never fabricate facts,
+      status, artifacts, or completion. Return concise status, verified
+      artifact references, quality/evidence notes, and the next required
+      action. If a request is outside Sudarshan, say so and ask for the
+      smallest safe clarification.
+
+# Sudarshan uses the OpenAI key already loaded by startup.ps1. The base Harness
+# default is DeepSeek, so override both the active route and fresh-session model.
+- id: llm-pi-ai
+  config:
+    providers:
+      openai:
+        apiKeyEnv: OPENAI_API_KEY
+- id: agent-default-model
+  config:
+    provider: openai
+    model: gpt-5.4
+
+# Do not leave the Harness-native DeepSeek adapter mounted as an accidental
+# fallback. A pre-existing session can carry its old provider selection, so
+# keeping this route available would reproduce the missing-credential error
+# even though the Sudarshan default is OpenAI.
+- id: llm-deepseek
+  disabled: true
 
 # The Sudarshan web preview runs in an in-process browser. Pin the existing
 # in-app directory browser for that surface instead of opening the host's
@@ -27,11 +59,11 @@
       config:
         serverName: sudarshan
         transport: stdio
-        command: .venv/Scripts/python.exe
+        command: !!js process.env.SUDARSHAN_PYTHON_EXECUTABLE ?? '.venv/Scripts/python.exe'
         args: [-m, integrations.deepseek_harness.mcp_server]
         env:
           SUDARSHAN_MCP_TOOL_PROFILE: artifact
-        cwd: !!js process.cwd()
+        cwd: !!js process.env.SUDARSHAN_REPO_ROOT ?? process.cwd()
 
 # The production web surface has one governed agent composition. The shipped
 # Harness coding presets and user-authored preset directory are intentionally
@@ -42,7 +74,10 @@
   config:
     default: sudarshan-artifact-agent
     roots:
-      - path: integrations/deepseek_harness/agent-presets
+      # The Harness process runs from deepseek-harness, not the Sudarshan
+      # repository root. Resolve this deployment-owned root explicitly so
+      # preset discovery does not silently return `available: none`.
+      - path: !!js (process.env.SUDARSHAN_REPO_ROOT ?? process.cwd()) + '/integrations/deepseek_harness/agent-presets'
         trust: system
     includeShippedRoot: false
     includeUserRoot: false

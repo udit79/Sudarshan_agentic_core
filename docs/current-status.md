@@ -60,6 +60,8 @@ A2A client.
   boundary; it does not forcibly stop a provider thread.
 - Artifact manifest, preview, open, and download behavior. Videos and images
   are previewed; PPTX, Markdown, SVG, and other files can be opened/downloaded.
+- Authenticated artifact approve/reject review through the live Harness bridge,
+  using the configured `SUDARSHAN_OPERATOR_ID` and the backend resume boundary.
 - Quality status, failure notices, wait reasons, classification, and safe
   telemetry such as tokens, latency, cache, wait, artifact, and quality
   counters.
@@ -157,6 +159,8 @@ A2A client.
   theme plugins; generated preview credentials and session state are ignored.
   The native dashboard remains usable when the optional Harness checkout or
   port 3080 is unavailable.
+- Offline social provider fixtures cover manual, MCP, success, timeout, quota,
+  rate-limit, and authorization-failure receipts without provider credentials.
 - Current source upload and extraction compatibility path for text, PDF, PPTX,
   image, and video. T31 contracts, T32 source safety, and the T33 local
   asynchronous admission slice, and T34 typed-evidence adapters for text,
@@ -265,7 +269,7 @@ sequenceDiagram
 The current local verification snapshot is:
 
 ```text
-Python: 290 passed, 7 skipped, 32 warnings
+Python: 364 passed, 7 skipped, 33 warnings
 T28 reliability focus: 21 passed
 Video/media focused tests: 30 passed
 PPT Master adapter/quality focused tests: 11 passed; PPT lint: passed
@@ -275,6 +279,12 @@ Offline native FFmpeg smoke: rendered one scene; manifest order verified;
 quality was `partial` because ffprobe was unavailable in that environment
 Ruff (video, ingestion, Harness, related tests): passed
 Frontend projection/cursor tests: 3 passed
+Harness Sudarshan operations bridge/panel tests: 7 passed
+Offline social boundary fixtures: 18 passed
+PPT bounded repair patch tests: 6 passed
+PPT SVG/template/child-artifact contract tests: 5 passed
+Infographic registry/theme/export/structure tests included in the focused pipeline run
+Social monitor lifecycle tests: 4 passed
 Node gateway tests: 9 passed
 JavaScript syntax checks: passed
 git diff --check: passed

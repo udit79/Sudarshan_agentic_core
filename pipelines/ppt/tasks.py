@@ -14,7 +14,7 @@ from pipelines.ppt.schemas import DeckPlan, PresentationOutput, PresentationQual
 def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str, Task]:
     """Build a sequential, typed crew with deterministic task callbacks."""
 
-    if os.getenv("SUDARSHAN_PPT_FLOW", "legacy").strip().lower() == "staged":
+    if os.getenv("SUDARSHAN_PPT_FLOW", "staged").strip().lower() == "staged":
         return build_staged_tasks(agents, writer)
 
     analysis = Task(

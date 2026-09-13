@@ -15,6 +15,14 @@ __all__ = [
     "SocialReadLayer",
     "SocialApprovalStore",
     "SocialReleaseService",
+    "SocialScheduleConflict",
+    "SocialScheduleRecord",
+    "SocialScheduleService",
+    "SocialScheduleStore",
+    "SocialMonitorConflict",
+    "SocialMonitorRecord",
+    "SocialMonitorStore",
+    "SocialThreadMonitorService",
     "sanitize_social_mapping",
     "SocialReceipt",
     "SocialRequest",
@@ -34,6 +42,18 @@ def __getattr__(name: str) -> Any:
         from integrations.providers.social_read import SocialReadLayer
         from integrations.providers.social_cache import sanitize_social_mapping
         from integrations.providers.social_approval import SocialApprovalStore, SocialReleaseService
+        from integrations.providers.social_schedule import (
+            SocialScheduleConflict,
+            SocialScheduleRecord,
+            SocialScheduleService,
+            SocialScheduleStore,
+        )
+        from integrations.providers.social_monitor import (
+            SocialMonitorConflict,
+            SocialMonitorRecord,
+            SocialMonitorStore,
+            SocialThreadMonitorService,
+        )
 
         return {
             "ManualSocialAdapter": ManualSocialAdapter,
@@ -46,5 +66,13 @@ def __getattr__(name: str) -> Any:
             "sanitize_social_mapping": sanitize_social_mapping,
             "SocialApprovalStore": SocialApprovalStore,
             "SocialReleaseService": SocialReleaseService,
+            "SocialScheduleConflict": SocialScheduleConflict,
+            "SocialScheduleRecord": SocialScheduleRecord,
+            "SocialScheduleService": SocialScheduleService,
+            "SocialScheduleStore": SocialScheduleStore,
+            "SocialMonitorConflict": SocialMonitorConflict,
+            "SocialMonitorRecord": SocialMonitorRecord,
+            "SocialMonitorStore": SocialMonitorStore,
+            "SocialThreadMonitorService": SocialThreadMonitorService,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

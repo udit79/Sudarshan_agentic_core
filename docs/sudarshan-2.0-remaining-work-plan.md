@@ -645,6 +645,11 @@ Acceptance:
 - Retries consume the existing budget ledger.
 - A replayed job does not duplicate a successful external action.
 
+Local slice now available: provider boundary receipts preserve a normalized
+`retry_after_seconds` hint, and deterministic offline fixtures cover the
+classified provider outcomes. Durable retry state, budget consumption, and
+replay-safe external writes remain open.
+
 ### T73 — Durable LinkedIn scheduling
 
 Owner: backend. Depends on: T39, T66, T72.
@@ -658,6 +663,12 @@ Acceptance:
 - Scheduled work survives process restart.
 - Past schedules, cancellation, provider-pending, and failed states are safe.
 - Scheduling remains approval-gated.
+
+Local slice now available: a SQLite-backed schedule queue validates timezone
+aware timestamps, persists typed requests, survives reopen, claims due work
+atomically, supports approval/cancellation, and retries provider-pending work
+using bounded retry hints. Application/MCP admission, calendar UI wiring,
+distributed scheduling, and release evidence remain open.
 
 ### T74 — LinkedIn frontend workspace
 
@@ -686,6 +697,13 @@ Acceptance:
 - Monitoring is rate-limited, cached, cancellable, and scope-aware.
 - Old or deleted threads are reported as non-actionable.
 - Suggested replies remain separate from publishing.
+
+Local slice now available: opt-in monitor state is durable in SQLite, polling
+is bounded and scope-checked, pause/resume/cancel transitions are explicit,
+the existing scoped read/cache boundary is reused, retry-after is respected,
+and deleted or non-actionable threads pause safely. External connector
+polling, suggestion generation, approval UX, and retention/release evidence
+remain open.
 
 ### T76 — Offline social provider test doubles
 
@@ -753,6 +771,11 @@ Acceptance:
 - SVG, PNG, and fallback modes remain explicit.
 - No template can introduce external network dependencies silently.
 
+Local slice now available: an allow-listed typed registry selects the stable
+`list-grid-simple` directive and exposes explicit SVG/fallback modes without
+network or arbitrary template loading. PNG export, richer theme tokens,
+frontend preview, and promotion evidence remain open.
+
 ### T81 — Video asset fingerprint cache
 
 Owner: video/backend. Depends on: T40, T41, T59.
@@ -778,6 +801,11 @@ Acceptance:
 - Repairs cannot alter evidence bindings without revalidation.
 - A failed repair remains an explicit quality failure.
 - Preview and editable PPTX continue to use the same layout source.
+
+Local slice now available: bounded slide text/geometry/alt-text repair patches
+are validated and applied fail-closed, including evidence-preservation and
+duplicate-issue checks. Visual QA integration, rerendering, and frontend
+apply/reject flow remain open.
 
 ### T83 — Reference provenance and license ledger
 
@@ -940,6 +968,14 @@ Completed locally with focused and full-suite verification:
   requests/receipts, manual fallback, approval gating, cooperative
   cancellation, bounded timeouts, and classified adapter failures without
   exposing provider SDKs or credentials to skills.
+- T64: LinkedIn/social configuration validates provider shape, timeout, retry,
+  rate-limit, cache, connection, and credential-presence metadata without
+  retaining secret values.
+- T65: Bounded social reads use scoped versioned cache entries, provenance, and
+  untrusted-content marking; cache invalidation is explicit.
+- T66: Durable social approvals use payload/scope hashes, actor and policy
+  records, idempotency keys, release leases, and provider receipts; manual mode
+  never publishes.
 - T67: LinkedIn visual child plans execute through `SkillRuntime`; successful
   artifact and quality references reconcile into the parent `visual_child`
   projection, while failure remains typed and draft-only.
@@ -955,17 +991,24 @@ Completed locally with focused and full-suite verification:
   are available; hook failures are isolated from the main run.
 - T78: Stable `sudarshan://context/.../L0|L1|L2` references are attached to
   memory/context projections and preserve scope and source identity.
+- T76: Deterministic offline social fixtures cover manual, MCP, success,
+  timeout, quota, rate-limit, and authorization-failure adapter behavior with
+  the same boundary receipt shape and no provider credentials.
 - T74: The native frontend now renders typed connector, approval, scheduling,
   receipt, and humanizer projections, supports approval/resume decisions, and
   preserves safe manual copy/export behavior without exposing raw prompts or
   provider credentials.
 
-Still open and intentionally not marked complete in this pass: T64–T66,
-T72–T73 and T75–T76 (durable scheduling, monitoring, and provider-test
-infrastructure), and
-T79–T83 (renderer hardening, video/PPT repair, and
-release/license ledger). Those require backend/frontend/rendering/release
-ownership beyond the agentic slice.
+Still open and intentionally not marked complete: the remaining T72/T73
+application/UI wiring and distributed release evidence, the remaining T75
+suggestion workflow, the remaining T79 promotion evidence, the unfinished
+portions of T80 (richer themes and frontend preview; the local SVG/PNG
+boundary is now present), and the unfinished portions of T82 (frontend
+apply/reject and full rerender loop). T47, T50, T52, T81, T83, and the
+completed local slices still retain their documented benchmark, staging,
+visual, provider, legal, or release gates. These gates require the
+corresponding backend, frontend, rendering, security, and release owners;
+changing a status label cannot create the required external evidence.
 
 ### Video adaptation track — V84–V95
 
@@ -1006,12 +1049,12 @@ quality promotion, or artifact delivery.
 | --- | --- | --- |
 | PM-1 | Define a replaceable `presentation.ppt-master` adapter and capability registry entry; preserve the native renderer fallback | Complete locally |
 | PM-2 | Add a bounded, non-shell PPT Master export command with workspace/output path checks, timeout, cooperative cancellation, and quality-report discovery | Complete locally |
-| PM-3 | Compile authorized typed evidence into a PPT Master source workspace with evidence/source manifests | Open |
-| PM-4 | Extend `DeckPlan` with design tokens, template identity, renderer capabilities, and declared slide dependencies | Open |
-| PM-5 | Add the canonical SVG project contract and native export quality gate to the presentation pipeline | Open |
-| PM-6 | Add versioned brand/style/layout/deck template workspaces and Master/Layout validation | Open |
-| PM-7 | Replace implicit slide serialization with dependency-aware bounded parallel slide jobs | Open |
-| PM-8 | Reconcile chart, table, flowchart, infographic, and image child artifacts into the final deck | Open |
+| PM-3 | Compile authorized typed evidence into a PPT Master source workspace with evidence/source manifests | Partial locally: typed manifests are written without raw evidence; external exporter consumption remains gated |
+| PM-4 | Extend `DeckPlan` with design tokens, template identity, renderer capabilities, and declared slide dependencies | Complete locally for the contract; template/editor validation remains a release concern |
+| PM-5 | Add the canonical SVG project contract and native export quality gate to the presentation pipeline | Complete locally; human visual promotion remains a release gate |
+| PM-6 | Add versioned brand/style/layout/deck template workspaces and Master/Layout validation | Complete locally for typed workspace validation; native Master/Layout fixture validation remains a release gate |
+| PM-7 | Replace implicit slide serialization with dependency-aware bounded parallel slide jobs | Partial locally: declared dependency graph and bounded job projection are implemented; external worker execution remains open |
+| PM-8 | Reconcile chart, table, flowchart, infographic, and image child artifacts into the final deck | Partial locally: typed quality-passed child-artifact reconciliation is implemented; final deck embedding remains open |
 | PM-9 | Run sanitized visual regression, renderer promotion, MCP/A2A, rollback, and human-approval gates | Open |
 
 PM-1 and PM-2 are intentionally adapter-only. No PPT Master code is copied
@@ -1029,11 +1072,11 @@ than introducing a second renderer or copying the reference editor.
 | IF-1 | Record the MIT license/adaptation boundary and map reference capabilities to Sudarshan contracts | Complete locally |
 | IF-2 | Version the AntV renderer, add cooperative cancellation, and keep the Node boundary non-shell and time-bounded | Complete locally |
 | IF-3 | Make SVG structural/visible-text QA a mandatory promotion gate after rendering | Complete locally |
-| IF-4 | Compile authorized `InfographicIR` into an allow-listed template registry | Open |
-| IF-5 | Add versioned NTRO themes/design tokens with contrast, bilingual, and density validation | Open |
-| IF-6 | Add typed chart, hierarchy, comparison, timeline, and mind-map structure compilers | Open |
-| IF-7 | Add sanitized SVG/PNG export and visual regression fixtures | Open |
-| IF-8 | Expose streaming preview/editor behavior through the custom frontend/plugin boundary | Open |
+| IF-4 | Compile authorized `InfographicIR` into an allow-listed template registry | Partial locally: allow-listed registry is wired to the semantic IR; renderer template breadth remains open |
+| IF-5 | Add versioned NTRO themes/design tokens with contrast, bilingual, and density validation | Partial locally: versioned local theme manifest and contrast validation are implemented; bilingual/density UI validation remains open |
+| IF-6 | Add typed chart, hierarchy, comparison, timeline, and mind-map structure compilers | Complete locally for deterministic structure contracts; renderer-specific layout/export remains open |
+| IF-7 | Add sanitized SVG/PNG export and visual regression fixtures | Partial locally: fail-closed SVG export, explicit optional PNG converter boundary, and structural SVG fixtures are implemented; browser visual regression/PNG environment evidence remains open |
+| IF-8 | Expose streaming preview/editor behavior through the custom frontend/plugin boundary | Partial locally: live event/cursor and artifact preview projection are wired; full infographic editor remains open |
 | IF-9 | Run renderer promotion, rollback, cache, MCP/A2A, and human-approval gates | Open |
 
 IF-1–IF-3 keep the current AntV path authoritative. The renderer must not

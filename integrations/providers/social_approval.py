@@ -157,6 +157,26 @@ class SocialApprovalStore:
             self._connection.commit()
             return self._get_locked(approval_id)  # type: ignore[return-value]
 
+    def cancel(self, approval_id: str, *, actor_id: str) -> SocialApprovalRecord:
+        """Cancel an approval before provider release is claimed."""
+
+        actor = _required_text(actor_id, "actor_id", 200)
+        with self._lock:
+            record = self._get_locked(approval_id)
+            if record is None:
+                raise SocialApprovalConflict("approval not found")
+            if record.status == "cancelled":
+                return record
+            if record.status not in {"pending", "approved"}:
+                raise SocialApprovalConflict(f"approval cannot be cancelled from {record.status}")
+            now = time()
+            self._connection.execute(
+                "UPDATE social_approvals SET actor_id = ?, policy_decision = 'cancelled', status = 'cancelled', updated_at = ? WHERE approval_id = ?",
+                (actor, now, approval_id),
+            )
+            self._connection.commit()
+            return self._get_locked(approval_id)  # type: ignore[return-value]
+
     def claim_release(self, approval_id: str, *, worker_id: str, lease_seconds: float = 300.0) -> SocialApprovalRecord | None:
         worker = _required_text(worker_id, "worker_id", 200)
         if lease_seconds <= 0:
@@ -278,6 +298,8 @@ class SocialReleaseService:
             return _release_error(request, "SOCIAL_APPROVAL_PAYLOAD_MISMATCH", str(error))
         if record.status == "rejected":
             return _release_error(request, "SOCIAL_APPROVAL_REJECTED", approval_id)
+        if record.status == "cancelled":
+            return _release_error(request, "SOCIAL_APPROVAL_CANCELLED", approval_id)
         if record.status in {"succeeded", "failed", "cancelled", "draft_only"} and record.receipt:
             return _receipt_from_dict(record.receipt)
         if record.status == "releasing":
@@ -290,7 +312,10 @@ class SocialReleaseService:
             if current and current.receipt:
                 return _receipt_from_dict(current.receipt)
             return _release_error(request, "SOCIAL_PROVIDER_PENDING", approval_id)
-        if claimed.receipt:
+        # A provider_pending record keeps its last receipt for projection, but
+        # that receipt is not terminal: the new release lease must retry the
+        # provider. Terminal records return their stored receipt above.
+        if claimed.receipt and record.status != "provider_pending":
             return _receipt_from_dict(claimed.receipt)
         receipt = self.boundary.execute(
             replace(request, approval_id=approval_id), cancel_event=cancel_event
@@ -313,6 +338,7 @@ def _request_payload_hash(request: SocialRequest) -> str:
     return _hash({
         "operation": request.operation, "provider": request.provider,
         "target_ref": request.target_ref, "payload": request.payload,
+        "scheduled_for": request.scheduled_for.isoformat() if request.scheduled_for else None,
     })
 
 

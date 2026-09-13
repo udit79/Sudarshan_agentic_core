@@ -13,6 +13,7 @@ from pipelines.orchestrator.cache import stable_hash
 from pipelines.ppt.flowchart import flowchart_from_visual_ir, layout_flowchart, render_flowchart_pptx, render_flowchart_svg
 from pipelines.ppt.quality import inspect_flowchart
 from pipelines.ppt.schemas import LayoutBox, VisualIR
+from pipelines.ppt.svg_contract import write_canonical_svg
 
 
 def run_visual_flowchart(request: AdvisoryRequest, *, cancel_event: Event | None = None) -> PipelineResponse:
@@ -46,7 +47,13 @@ def run_visual_flowchart(request: AdvisoryRequest, *, cancel_event: Event | None
     output_dir.mkdir(parents=True, exist_ok=True)
     svg_path = output_dir / "flowchart.svg"
     pptx_path = output_dir / "flowchart.pptx"
-    svg_path.write_text(render_flowchart_svg(spec, layout=layout), encoding="utf-8")
+    write_canonical_svg(
+        svg_path,
+        render_flowchart_svg(spec, layout=layout),
+        source_ir=spec,
+        renderer_version=os.getenv("SUDARSHAN_PPT_RENDERER_VERSION", "sudarshan-flowchart@1"),
+        required_text=tuple(node.label for node in spec.nodes),
+    )
     render_flowchart_pptx(spec, pptx_path, layout=layout, title=visual.alt_text)
     graph_quality = inspect_flowchart(layout)
     quality_id = "quality-" + stable_hash({"run_id": request.task_id, "visual": visual.model_dump(mode="json")})[:24]

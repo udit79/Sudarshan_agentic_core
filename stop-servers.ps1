@@ -8,6 +8,55 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $manifestPath = Join-Path $repoRoot "artifacts\.state\sudarshan-processes.json"
 
+function Stop-ProcessTree([int]$ProcessId) {
+    if ($ProcessId -le 0) { return }
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return }
+    & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-ListeningProcessIds([int]$Port) {
+    $ids = @()
+    try {
+        $ids = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+    }
+    catch {
+        $ids = @()
+    }
+    if ($ids.Count -gt 0) { return @($ids | ForEach-Object { [int]$_ }) }
+
+    $fallback = [System.Collections.Generic.List[int]]::new()
+    foreach ($line in @(netstat.exe -ano -p tcp 2>$null)) {
+        $parts = ([string]$line).Trim() -split '\s+'
+        if ($parts.Count -lt 5 -or $parts[3] -ne 'LISTENING') { continue }
+        $local = $parts[1]
+        $colon = $local.LastIndexOf(':')
+        if ($colon -lt 0) { continue }
+        $localPort = 0
+        $owner = 0
+        if ([int]::TryParse($local.Substring($colon + 1), [ref]$localPort) -and
+            $localPort -eq $Port -and [int]::TryParse($parts[4], [ref]$owner) -and $owner -gt 0 -and
+            -not $fallback.Contains($owner)) {
+            $fallback.Add($owner)
+        }
+    }
+    return @($fallback.ToArray())
+}
+
+function Get-ListeningPorts([int[]]$Ports) {
+    $owners = [System.Collections.Generic.List[object]]::new()
+    foreach ($port in $Ports) {
+        foreach ($processId in @(Get-ListeningProcessIds $port)) {
+            $owners.Add([pscustomobject]@{LocalPort=$port;OwningProcess=$processId})
+        }
+    }
+    return @($owners.ToArray())
+}
+
 function Stop-ManifestServices {
     param([Parameter(Mandatory = $true)]$Manifest)
 
@@ -25,7 +74,7 @@ function Stop-ManifestServices {
         }
         $description = "$($service.name) (PID $processId)"
         if ($PSCmdlet.ShouldProcess($description, "Stop")) {
-            Stop-Process -Id $processId -Force -ErrorAction Stop
+            Stop-ProcessTree $processId
             $stopped++
             Write-Host "Stopped $description."
         }
@@ -65,8 +114,7 @@ if ($null -ne $manifest -and @($manifest.services).Count -gt 0) {
     Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 300
     $manifestPorts = Get-ManifestPorts $manifest
-    $remaining = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-        Where-Object { $_.LocalPort -in $manifestPorts })
+    $remaining = @(Get-ListeningPorts $manifestPorts)
     if ($remaining.Count -gt 0) {
         $owners = ($remaining | Select-Object -ExpandProperty OwningProcess -Unique) -join ", "
         throw "Manifest services stopped, but port(s) remain in use by process(es): $owners. Use -ByPort only after verifying those processes belong to Sudarshan."
@@ -75,10 +123,10 @@ if ($null -ne $manifest -and @($manifest.services).Count -gt 0) {
     exit 0
 }
 
-$listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-    Where-Object { $_.LocalPort -in $validPorts })
+$listeners = @(Get-ListeningPorts $validPorts)
 
 if ($listeners.Count -eq 0) {
+    Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
     Write-Host "No listening services found on port(s): $($validPorts -join ', ')."
     exit 0
 }
@@ -99,17 +147,17 @@ foreach ($processId in $processIds) {
 
     $description = "$($process.ProcessName) (PID $processId) on port(s) $($boundPorts -join ', ')"
     if ($PSCmdlet.ShouldProcess($description, "Stop")) {
-        Stop-Process -Id $processId -Force -ErrorAction Stop
+        Stop-ProcessTree $processId
         Write-Host "Stopped $description."
     }
 }
 
 Start-Sleep -Milliseconds 300
-$remaining = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-    Where-Object { $_.LocalPort -in $validPorts })
+$remaining = @(Get-ListeningPorts $validPorts)
 if ($remaining.Count -gt 0) {
     $owners = ($remaining | Select-Object -ExpandProperty OwningProcess -Unique) -join ", "
     throw "Some requested ports are still in use by process(es): $owners"
 }
 
+Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
 Write-Host "Sudarshan service ports are clear."

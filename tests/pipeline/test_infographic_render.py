@@ -10,6 +10,7 @@ from pipelines.infographic.normalization import normalize_infographic_output
 from pipelines.infographic.renderer import AntVInfographicRenderer
 from pipelines.infographic.quality import inspect_svg
 from pipelines.infographic.schemas import InfographicOutput
+from pipelines.infographic.templates import get_infographic_theme, infographic_template_registry, select_infographic_template
 
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "infographic-final-output.json"
@@ -31,6 +32,23 @@ def test_real_final_output_shape_compiles_to_semantic_ir() -> None:
     assert "[E-1]" in compiled
     assert len(diagram.nodes) == 2
     assert diagram.edges[0].source == "E-1"
+
+
+def test_infographic_template_and_theme_selection_is_allow_listed() -> None:
+    registry = infographic_template_registry()
+    assert set(registry) == {"list-grid-simple"}
+    selection = select_infographic_template("timeline")
+    assert selection.template.template_id == "list-grid-simple"
+    assert selection.used_fallback is False
+    assert selection.template.external_dependencies == ()
+    assert get_infographic_theme()["accent"].startswith("#")
+
+    try:
+        select_infographic_template("timeline", requested_template="remote-template")
+    except ValueError as exc:
+        assert "unknown infographic template" in str(exc)
+    else:
+        raise AssertionError("unapproved template was accepted")
 
 
 def test_real_final_output_renders_through_node_boundary(tmp_path) -> None:

@@ -10,6 +10,7 @@ from pipelines.infographic.schemas import (
     InfographicIR,
     InfographicOutput,
 )
+from pipelines.infographic.templates import select_infographic_template
 
 
 def infographic_ir_from_output(output: InfographicOutput) -> InfographicIR:
@@ -39,7 +40,8 @@ def infographic_ir_from_output(output: InfographicOutput) -> InfographicIR:
 def infographic_ir_to_syntax(ir: InfographicIR) -> str:
     """Compile semantic IR into the current renderer's stable AntV DSL."""
 
-    lines = ["infographic list-grid-simple", "data", "  lists"]
+    selection = select_infographic_template(ir.visual_type)
+    lines = [f"infographic {selection.template.directive}", "data", "  lists"]
     lines.extend(["    - label Brief", f"      desc {_safe(ir.title)}"])
     for block in ir.blocks:
         label = f"[{block.block_id}] {_safe(block.label)}"

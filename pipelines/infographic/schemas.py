@@ -79,7 +79,9 @@ class InfographicIR(BaseModel):
 
     infographic_id: str = Field(min_length=1)
     title: str = Field(min_length=1, max_length=300)
-    visual_type: Literal["process", "timeline", "list", "comparison", "flow", "other"] = "list"
+    visual_type: Literal[
+        "process", "timeline", "list", "comparison", "hierarchy", "flow", "mind-map", "other"
+    ] = "list"
     alt_text: str = Field(min_length=1, max_length=2000)
     blocks: list[InfographicBlock] = Field(min_length=1, max_length=30)
     evidence_ids: list[str] = Field(default_factory=list, max_length=100)

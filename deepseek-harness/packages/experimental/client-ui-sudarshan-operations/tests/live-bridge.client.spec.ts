@@ -76,7 +76,19 @@ describe('Sudarshan live operations bridge', () => {
     const reviewCall = fetcher.mock.calls[fetcher.mock.calls.length - 1]
     const reviewInit = reviewCall?.[1] as RequestInit | undefined
     expect(reviewInit?.method).toBe('POST')
+    expect(reviewInit?.headers).toMatchObject({ 'x-operator-id': 'local-operator' })
     expect(JSON.parse(String(reviewInit?.body))).toMatchObject({ task_id: 'task-1', artifact_id: 'artifact-1', decision: 'reject', reason: 'contrast remains below threshold' })
+  })
+
+  it('uses the configured operator identity for authenticated reviews', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ run_id: 'run-1', task_id: 'task-1', status: 'running' }), { status: 200 }))
+    const bridge = createLiveOperationsBridge({ apiOrigin: 'http://api.test', operatorId: 'reviewer-7', fetcher })
+    bridge.bindRun?.('session-1', 'run-1')
+
+    await bridge.reviewArtifact?.('session-1', { id: 'artifact-1' } as never, 'approve')
+
+    const reviewInit = fetcher.mock.calls[fetcher.mock.calls.length - 1]?.[1] as RequestInit | undefined
+    expect(reviewInit?.headers).toMatchObject({ 'x-operator-id': 'reviewer-7' })
   })
 
   it('binds the durable run returned by the native MCP tool to the session', () => {

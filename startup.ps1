@@ -16,6 +16,7 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $nodeGatewayRoot = Join-Path $repoRoot "backend-node"
 $antvRoot = Join-Path $repoRoot "pipelines\infographic\antv_renderer"
 $harnessRoot = Join-Path $repoRoot "deepseek-harness"
+$harnessOverlayPath = Join-Path $repoRoot "integrations\deepseek_harness\sudarshan.cordis.yml"
 $useHarness = -not $SkipHarness
 $landingRoot = Join-Path $repoRoot "landing page\landing page"
 $stateRoot = Join-Path $repoRoot "artifacts\.state"
@@ -219,6 +220,48 @@ function Get-Port([string]$Name, [int]$Fallback) {
     return $port
 }
 
+function Get-ListeningProcessIds([int]$Port) {
+    $ids = @()
+    try {
+        $ids = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+    }
+    catch {
+        $ids = @()
+    }
+    if ($ids.Count -gt 0) { return @($ids | ForEach-Object { [int]$_ }) }
+
+    # Get-NetTCPConnection can be empty on Windows when the TCP provider is
+    # stale; netstat is the supported fallback and is still port-scoped.
+    $fallback = [System.Collections.Generic.List[int]]::new()
+    foreach ($line in @(netstat.exe -ano -p tcp 2>$null)) {
+        $parts = ([string]$line).Trim() -split '\s+'
+        if ($parts.Count -lt 5 -or $parts[3] -ne 'LISTENING') { continue }
+        $local = $parts[1]
+        $colon = $local.LastIndexOf(':')
+        if ($colon -lt 0) { continue }
+        $localPort = 0
+        $owner = 0
+        if ([int]::TryParse($local.Substring($colon + 1), [ref]$localPort) -and
+            $localPort -eq $Port -and [int]::TryParse($parts[4], [ref]$owner) -and $owner -gt 0 -and
+            -not $fallback.Contains($owner)) {
+            $fallback.Add($owner)
+        }
+    }
+    return @($fallback.ToArray())
+}
+
+function Sync-StartedServicePid([string]$Name, [int]$Port) {
+    if ($Port -le 0) { return }
+    $owners = @(Get-ListeningProcessIds $Port)
+    if ($owners.Count -ne 1) { return }
+    $entry = @($startedServices | Where-Object { $_.name -eq $Name } | Select-Object -Last 1)
+    if ($entry.Count -eq 1 -and [int]$entry[0].pid -ne $owners[0]) {
+        $entry[0]["pid"] = $owners[0]
+        Write-Host "$Name listener recorded (PID $($owners[0]), launcher PID retained only for diagnostics)."
+    }
+}
+
 function Write-FrontendRuntimeConfig {
     param(
         [Parameter(Mandatory = $true)][int]$NodePort,
@@ -246,10 +289,20 @@ window.SUDARSHAN_HARNESS_URL = window.SUDARSHAN_RUNTIME_CONFIG.harnessUrl;
 }
 
 function Assert-PortFree([int]$Port, [string]$Service) {
-    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-    if ($listeners.Count -gt 0) {
-        $owners = ($listeners | Select-Object -ExpandProperty OwningProcess -Unique) -join ", "
-        throw "$Service cannot start because port $Port is already in use by process $owners."
+    $owners = @(Get-ListeningProcessIds $Port)
+    if ($owners.Count -gt 0) {
+        $ownerText = $owners -join ", "
+        throw "$Service cannot start because port $Port is already in use by process $ownerText."
+    }
+}
+
+function Stop-ProcessTree([int]$ProcessId) {
+    if ($ProcessId -le 0) { return }
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return }
+    & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -274,7 +327,7 @@ function Stop-ExistingManifestServices {
         $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
         if ($null -eq $process) { continue }
         Write-Host "Stopping existing $($service.name) (PID $processId) for restart..."
-        Stop-Process -Id $processId -Force -ErrorAction Stop
+        Stop-ProcessTree $processId
     }
     Remove-Item -LiteralPath $processManifestPath -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 400
@@ -312,12 +365,23 @@ function Stop-StartedServices {
     foreach ($process in $startedProcesses) {
         try {
             if (-not $process.HasExited) {
-                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                Stop-ProcessTree $process.Id
             }
         }
         catch { }
     }
-    if (Test-Path -LiteralPath $processManifestPath -PathType Leaf) {
+    # uv and npm can leave a detached child behind after their launcher exits;
+    # clean up the actual listener owner as well, but only on ports this run
+    # started.
+    foreach ($service in $startedServices) {
+        $port = 0
+        if ([int]::TryParse([string]$service.port, [ref]$port) -and $port -gt 0) {
+            foreach ($owner in @(Get-ListeningProcessIds $port)) {
+                Stop-ProcessTree $owner
+            }
+        }
+    }
+    if ($startedServices.Count -gt 0 -and (Test-Path -LiteralPath $processManifestPath -PathType Leaf)) {
         Remove-Item -LiteralPath $processManifestPath -Force -ErrorAction SilentlyContinue
     }
 }
@@ -376,6 +440,15 @@ try {
     if ($useHarness -and -not (Test-Path -LiteralPath $harnessRoot -PathType Container)) {
         throw "DeepSeek Harness directory is missing: $harnessRoot"
     }
+    if ($useHarness -and -not (Test-Path -LiteralPath $harnessOverlayPath -PathType Leaf)) {
+        throw "Sudarshan Harness overlay is missing: $harnessOverlayPath"
+    }
+    if ($useHarness) {
+        $sudarshanPresetComposition = Join-Path $repoRoot "integrations\deepseek_harness\agent-presets\sudarshan-artifact-agent\agent.cordis.yml"
+        if (-not (Test-Path -LiteralPath $sudarshanPresetComposition -PathType Leaf)) {
+            throw "Sudarshan Harness agent preset is missing: $sudarshanPresetComposition"
+        }
+    }
     New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
     if ($ForceRestart) {
@@ -402,6 +475,24 @@ try {
     Import-DotEnv $envFile
     if (-not $SkipNodeGateway) {
         Assert-LocalConfiguration
+    }
+
+    # Do not mutate node_modules while a service may still have a native
+    # binary open (notably Vite/Rolldown on Windows). Require an explicit
+    # restart when any configured service port is occupied.
+    if (-not $ForceRestart) {
+        $preflightPorts = @(
+            (Get-Port "SUDARSHAN_API_PORT" 8000),
+            (Get-Port "SUDARSHAN_FRONTEND_PORT" 4173)
+        )
+        if (-not $SkipNodeGateway) { $preflightPorts += Get-Port "PORT" 8080 }
+        if ($useHarness) { $preflightPorts += Get-Port "SUDARSHAN_HARNESS_PORT" 3080 }
+        $occupied = @($preflightPorts | Select-Object -Unique | Where-Object {
+            @(Get-ListeningProcessIds ([int]$_)).Count -gt 0
+        })
+        if ($occupied.Count -gt 0) {
+            throw "Sudarshan service port(s) $($occupied -join ', ') are already in use. Use .\startup.ps1 -ForceRestart, or stop first with .\stop-servers.ps1; dependencies were not modified."
+        }
     }
 
     $pythonCommand = Resolve-Python
@@ -466,7 +557,7 @@ try {
         Invoke-Checked $npmCommand.Source @("ci", "--no-audit", "--no-fund") $landingRoot
     }
 
-    if ($useHarness) {
+    if ($useHarness -and -not $SkipInstall) {
         Write-Host "Building the complete Sudarshan Harness client bundles..."
         # The Harness client packages consume generated remote contracts from
         # the host library build. Build the complete client graph because the
@@ -509,10 +600,12 @@ try {
         if ($useHarness) { Assert-PortFree $harnessPort "DeepSeek Harness" }
     }
 
-    if (-not $SkipNodeGateway -and -not $SkipDatabaseInit) {
+    if (-not $SkipNodeGateway) {
         Resolve-MongoSrvUriForWindows
-        Write-Host "Building MongoDB Atlas collections and indexes..."
-        Invoke-Checked $npmCommand.Source @("run", "db:init", "--silent") $nodeGatewayRoot
+        if (-not $SkipDatabaseInit) {
+            Write-Host "Building MongoDB Atlas collections and indexes..."
+            Invoke-Checked $npmCommand.Source @("run", "db:init", "--silent") $nodeGatewayRoot
+        }
     }
 
     if ($NoStart) {
@@ -531,10 +624,12 @@ try {
     $env:SUDARSHAN_HARNESS_PORT = [string]$harnessPort
     $pythonProcess = Start-LocalService "python-api" $uvExecutable @("run", "python", "-m", "api.server") $repoRoot -Port $pythonPort
     Wait-Http "http://127.0.0.1:$pythonPort/health" "python-api" -Process $pythonProcess
+    Sync-StartedServicePid "python-api" $pythonPort
 
     if (-not $SkipNodeGateway) {
         $nodeProcess = Start-LocalService "node-gateway" $nodeCommand.Source @("src/server.js") $nodeGatewayRoot -Port $nodePort
         Wait-Http "http://127.0.0.1:$nodePort/readyz" "node-gateway" -Process $nodeProcess
+        Sync-StartedServicePid "node-gateway" $nodePort
     }
 
     if ($useHarness) {
@@ -552,8 +647,12 @@ try {
             throw "JWT_ACCESS_SECRET is required when the DeepSeek Harness is enabled."
         }
         $env:SUDARSHAN_GATEWAY_ACCESS_SECRET = $jwtAccessSecret
+        $previousSudarshanRepoRoot = [Environment]::GetEnvironmentVariable("SUDARSHAN_REPO_ROOT", "Process")
+        $previousSudarshanPythonExecutable = [Environment]::GetEnvironmentVariable("SUDARSHAN_PYTHON_EXECUTABLE", "Process")
+        $env:SUDARSHAN_REPO_ROOT = $repoRoot
+        $env:SUDARSHAN_PYTHON_EXECUTABLE = Join-Path $repoRoot ".venv\Scripts\python.exe"
         try {
-            $harnessProcess = Start-LocalService "deepseek-harness" $nodeCommand.Source @("--import", "tsx/esm", "apps/cli/src/bin.ts", "web", "--no-open", "--port", [string]$harnessPort) $harnessRoot -Port $harnessPort
+            $harnessProcess = Start-LocalService "deepseek-harness" $nodeCommand.Source @("--import", "tsx/esm", "apps/cli/src/bin.ts", "web", "--patch", $harnessOverlayPath, "--no-open", "--port", [string]$harnessPort) $harnessRoot -Port $harnessPort
         }
         finally {
             if ($null -eq $previousHarnessGatewaySecret) {
@@ -562,14 +661,28 @@ try {
             else {
                 $env:SUDARSHAN_GATEWAY_ACCESS_SECRET = $previousHarnessGatewaySecret
             }
+            if ($null -eq $previousSudarshanRepoRoot) {
+                Remove-Item Env:SUDARSHAN_REPO_ROOT -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:SUDARSHAN_REPO_ROOT = $previousSudarshanRepoRoot
+            }
+            if ($null -eq $previousSudarshanPythonExecutable) {
+                Remove-Item Env:SUDARSHAN_PYTHON_EXECUTABLE -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:SUDARSHAN_PYTHON_EXECUTABLE = $previousSudarshanPythonExecutable
+            }
         }
         Wait-Http "http://127.0.0.1:$harnessPort/" "deepseek-harness" -Process $harnessProcess -AcceptUnauthorized
+        Sync-StartedServicePid "deepseek-harness" $harnessPort
     }
 
     $landingHost = Get-EnvValue "SUDARSHAN_FRONTEND_HOST"
     if ([string]::IsNullOrWhiteSpace($landingHost)) { $landingHost = "127.0.0.1" }
     $landingProcess = Start-LocalService "landing" $npmCommand.Source @("run", "dev", "--", "--host", $landingHost, "--port", [string]$landingPort) $landingRoot -Port $landingPort
     Wait-Http "http://127.0.0.1:$landingPort/login.html" "landing" -Process $landingProcess
+    Sync-StartedServicePid "landing" $landingPort
 
     $landingUrl = "http://localhost:$landingPort/"
     $harnessUrl = "http://localhost:$harnessPort/"

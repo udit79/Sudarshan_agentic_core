@@ -142,6 +142,7 @@ class SlideSpec(BaseModel):
     content: SlideContentIR
     speaker_notes: str = ""
     evidence: list[EvidenceBinding] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list, max_length=12)
 
 
 class SlideTask(BaseModel):
@@ -154,6 +155,7 @@ class SlideTask(BaseModel):
     required_skills: list[str] = Field(default_factory=list)
     input_refs: list[str] = Field(default_factory=list)
     output_type: Literal["slide-content-ir", "visual-ir", "rendered-slide"]
+    dependencies: list[str] = Field(default_factory=list, max_length=12)
 
 
 class DeckPlan(BaseModel):
@@ -164,9 +166,56 @@ class DeckPlan(BaseModel):
     presentation_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     theme_id: str = Field(min_length=1)
+    template_id: str = Field(default="native-default", min_length=1, max_length=120)
+    design_tokens: dict[str, str] = Field(default_factory=dict, max_length=32)
+    renderer_capabilities: list[str] = Field(default_factory=list, max_length=24)
     slides: list[SlideSpec] = Field(min_length=1, max_length=30)
     tasks: list[SlideTask] = Field(default_factory=list)
     evidence: list[EvidenceBinding] = Field(default_factory=list)
+    slide_dependencies: dict[str, list[str]] = Field(default_factory=dict, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_declared_dependencies(self) -> "DeckPlan":
+        slide_ids = [slide.slide_id for slide in self.slides]
+        if len(slide_ids) != len(set(slide_ids)):
+            raise ValueError("deck slide IDs must be unique")
+        known_slides = set(slide_ids)
+        task_ids = [task.task_id for task in self.tasks]
+        if len(task_ids) != len(set(task_ids)):
+            raise ValueError("deck task IDs must be unique")
+        unknown_task_slides = {task.slide_id for task in self.tasks} - known_slides
+        if unknown_task_slides:
+            raise ValueError(f"deck tasks reference unknown slides: {sorted(unknown_task_slides)}")
+        declared = {slide.slide_id: list(slide.dependencies) for slide in self.slides}
+        for slide_id, dependencies in self.slide_dependencies.items():
+            if slide_id not in known_slides:
+                raise ValueError(f"deck dependency declaration references unknown slide: {slide_id}")
+            declared[slide_id] = list(dependencies)
+        for slide_id, dependencies in declared.items():
+            if len(dependencies) != len(set(dependencies)):
+                raise ValueError(f"duplicate slide dependency in {slide_id}")
+            unknown = set(dependencies) - known_slides
+            if unknown:
+                raise ValueError(f"slide {slide_id} depends on unknown slides: {sorted(unknown)}")
+            if slide_id in dependencies:
+                raise ValueError(f"slide {slide_id} cannot depend on itself")
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(slide_id: str) -> None:
+            if slide_id in visiting:
+                raise ValueError("deck slide dependencies must be acyclic")
+            if slide_id in visited:
+                return
+            visiting.add(slide_id)
+            for dependency in declared.get(slide_id, []):
+                visit(dependency)
+            visiting.remove(slide_id)
+            visited.add(slide_id)
+
+        for slide_id in slide_ids:
+            visit(slide_id)
+        return self
 
 
 class RepairPatch(BaseModel):

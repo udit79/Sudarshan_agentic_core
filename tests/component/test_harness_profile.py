@@ -18,7 +18,8 @@ def test_native_profile_mounts_one_governed_artifact_agent():
 
     assert "name: Sudarshan Artifact Agent" in metadata
     assert "default: sudarshan-artifact-agent" in profile
-    assert "path: integrations/deepseek_harness/agent-presets" in profile
+    assert "path: !!js (process.env.SUDARSHAN_REPO_ROOT ?? process.cwd()) + '/integrations/deepseek_harness/agent-presets'" in profile
+    assert (PRESET_ROOT / "agent.cordis.yml").is_file()
     assert "includeShippedRoot: false" in profile
     assert "includeUserRoot: false" in profile
     assert "name: '@deepseek-ai/dsh-mcp-client'" in profile

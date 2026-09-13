@@ -7,6 +7,7 @@ credentials, publish directly, or bypass approval and audit policy.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from threading import Event
 from time import monotonic
 from typing import Any, Literal, Mapping, Protocol
@@ -59,12 +60,20 @@ class SocialRequest:
     approval_id: str | None = None
     idempotency_key: str = ""
     timeout_seconds: float = 30.0
+    scheduled_for: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.operation not in READ_OPERATIONS | WRITE_OPERATIONS:
             raise ValueError(f"unsupported social operation: {self.operation}")
         if self.timeout_seconds <= 0 or self.timeout_seconds > 900:
             raise ValueError("timeout_seconds must be between 0 and 900")
+        if self.operation == "schedule_post":
+            if self.scheduled_for is None:
+                raise ValueError("schedule_post requires scheduled_for")
+            if self.scheduled_for.tzinfo is None or self.scheduled_for.utcoffset() is None:
+                raise ValueError("scheduled_for must include a timezone")
+        elif self.scheduled_for is not None:
+            raise ValueError("scheduled_for is only valid for schedule_post")
         if self.operation in WRITE_OPERATIONS and not self.target_ref and self.operation not in {"create_post", "schedule_post"}:
             raise ValueError("write operations require target_ref except create_post")
 
@@ -209,6 +218,14 @@ class SocialCapabilityBoundary:
             result = dict(adapter.execute(request, cancel_event=cancel_event) or {})
         except Exception as error:  # adapters are untrusted provider boundaries
             failure_class = classify_provider_error(error)
+            retry_after_seconds = _safe_number(
+                {"retry_after_seconds": getattr(error, "retry_after_seconds", None)},
+                "retry_after_seconds",
+            )
+            if retry_after_seconds is None:
+                retry_after_seconds = _safe_number(
+                    {"retry_after": getattr(error, "retry_after", None)}, "retry_after"
+                )
             return self._receipt(
                 request,
                 receipt_id,
@@ -216,7 +233,7 @@ class SocialCapabilityBoundary:
                 audit_ref=audit_ref,
                 error_code=f"SOCIAL_{failure_class.upper()}",
                 failure_class=failure_class,
-                retry_after_seconds=None,
+                retry_after_seconds=retry_after_seconds,
                 manual_required=request.is_write,
             )
 
@@ -239,6 +256,7 @@ class SocialCapabilityBoundary:
         status = str(result.pop("status", "succeeded"))
         if status not in {"draft_only", "pending", "succeeded", "failed", "cancelled"}:
             status = "failed"
+        retry_after_seconds = _safe_number(result, "retry_after_seconds")
         return self._receipt(
             request,
             receipt_id,
@@ -246,6 +264,7 @@ class SocialCapabilityBoundary:
             audit_ref=audit_ref,
             request_id=_safe_string(result.pop("request_id", None)),
             provider_request_id=_safe_string(result.pop("provider_request_id", None)),
+            retry_after_seconds=retry_after_seconds,
             manual_required=bool(result.pop("manual_required", False)),
             data=data,
             metadata={

@@ -44,19 +44,38 @@ class PresentationQualityReport(BaseModel):
 
 
 def build_slide_jobs(deck: DeckPlan) -> list[SlideJob]:
-    """Create bounded slide-level jobs while preserving presentation order."""
+    """Create bounded dependency-aware slide jobs.
+
+    Explicit plan dependencies are preserved. The legacy sequential chain is
+    retained only when a slide has no declared dependencies.
+    """
 
     task_by_slide = {task.slide_id: task for task in deck.tasks}
     jobs: list[SlideJob] = []
+    job_ids = {
+        slide.slide_id: (
+            task_by_slide[slide.slide_id].task_id
+            if slide.slide_id in task_by_slide
+            else f"slide:{slide.slide_id}"
+        )
+        for slide in deck.slides
+    }
     previous: str | None = None
     for slide in sorted(deck.slides, key=lambda item: item.sequence):
         task = task_by_slide.get(slide.slide_id)
-        job_id = task.task_id if task else f"slide:{slide.slide_id}"
+        job_id = job_ids[slide.slide_id]
+        dependencies = list(slide.dependencies)
+        if slide.slide_id in deck.slide_dependencies:
+            dependencies = list(deck.slide_dependencies[slide.slide_id])
+        if task and task.dependencies:
+            dependencies.extend(task.dependencies)
+        if not dependencies and previous:
+            dependencies = [previous]
         jobs.append(SlideJob(
             job_id=job_id,
             slide_id=slide.slide_id,
             sequence=slide.sequence,
-            dependencies=[previous] if previous else [],
+            dependencies=[job_ids.get(item, item) for item in dict.fromkeys(dependencies)],
             required_skills=list(task.required_skills) if task else [],
             evidence_ids=[binding.evidence_id for binding in [*slide.evidence, *slide.content.evidence]],
         ))

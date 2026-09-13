@@ -73,3 +73,34 @@ def test_ir_rejects_overflow_placeholders_and_renderer_payloads() -> None:
             data={"pptx_xml": "<xml>"},
         )
 
+
+def test_deck_plan_validates_template_tokens_and_declared_dependencies() -> None:
+    first = flowchart_slide()
+    second = first.model_copy(update={
+        "slide_id": "slide-2",
+        "sequence": 2,
+        "content": first.content.model_copy(update={"slide_id": "slide-2"}),
+        "dependencies": ["slide-1"],
+    })
+    deck = DeckPlan(
+        presentation_id="deck-2",
+        title="Case brief",
+        theme_id="ntro-dark",
+        template_id="ntro-master",
+        design_tokens={"accent": "#38BDF8"},
+        renderer_capabilities=["svg", "pptx"],
+        slides=[first, second],
+    )
+    assert deck.slides[1].dependencies == ["slide-1"]
+
+    with pytest.raises(ValidationError, match="acyclic"):
+        DeckPlan(
+            presentation_id="cycle",
+            title="Cycle",
+            theme_id="theme",
+            slides=[
+                first.model_copy(update={"dependencies": ["slide-2"]}),
+                second,
+            ],
+        )
+

@@ -13,11 +13,11 @@ class CallbackOnlyWriter:
         return identity_callback
 
 
-def test_legacy_ppt_tasks_remain_the_default(monkeypatch) -> None:
+def test_staged_ppt_tasks_are_the_default(monkeypatch) -> None:
     monkeypatch.delenv("SUDARSHAN_PPT_FLOW", raising=False)
     agents = build_agents([])
     tasks = build_tasks(agents, CallbackOnlyWriter())
-    assert list(tasks) == ["analysis", "output", "quality"]
+    assert list(tasks) == ["grounding", "plan", "visual_routing", "output", "quality"]
 
 
 def test_staged_ppt_tasks_have_typed_plan_and_visual_routing(monkeypatch) -> None:

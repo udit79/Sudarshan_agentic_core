@@ -9,6 +9,7 @@ import type {
 
 export interface LiveBridgeConfig {
   apiOrigin?: string
+  operatorId?: string
   fetcher?: typeof globalThis.fetch
   eventSource?: typeof globalThis.EventSource
 }
@@ -19,6 +20,12 @@ const DEFAULT_API_ORIGIN = 'http://localhost:8000'
 const RUN_KEY_PREFIX = 'sudarshan.operations.run.'
 const CURSOR_KEY_PREFIX = 'sudarshan.operations.cursor.'
 const toolNamesBySession = new Map<string, Map<string, string>>()
+
+function operatorId(config: LiveBridgeConfig): string {
+  return config.operatorId?.trim()
+    || (globalThis as typeof globalThis & { SUDARSHAN_OPERATOR_ID?: string }).SUDARSHAN_OPERATOR_ID?.trim()
+    || 'local-operator'
+}
 
 function apiOrigin(config: LiveBridgeConfig): string {
   const configured = config.apiOrigin
@@ -233,6 +240,7 @@ function openArtifact(origin: string, path: string | undefined): void {
 
 export function createLiveOperationsBridge(config: LiveBridgeConfig = {}): OperationsBridge {
   const origin = apiOrigin(config)
+  const authenticatedOperatorId = operatorId(config)
   const fetcher = config.fetcher ?? globalThis.fetch.bind(globalThis)
   const EventSourceCtor = config.eventSource ?? globalThis.EventSource
   const runIdsBySession = new Map<string, string>()
@@ -322,7 +330,10 @@ export function createLiveOperationsBridge(config: LiveBridgeConfig = {}): Opera
       if (reason?.trim()) body.reason = reason.trim()
       const response = await fetcher(`${origin}/runs/${encodeURIComponent(runId)}/resume`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-operator-id': authenticatedOperatorId,
+        },
         credentials: 'include',
         body: JSON.stringify(body),
       })

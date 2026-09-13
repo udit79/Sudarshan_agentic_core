@@ -6,6 +6,24 @@ from pipelines.infographic.schemas import DiagramEdge, DiagramIR, DiagramNode, I
 from pipelines.infographic.normalization import normalize_infographic_output
 from pipelines.infographic.ir import diagram_ir_from_output, infographic_ir_from_output, infographic_ir_to_syntax
 from pipelines.infographic.quality import SVGQualityReport, inspect_svg
+from pipelines.infographic.templates import (
+    InfographicTemplate,
+    InfographicTemplateSelection,
+    InfographicTheme,
+    get_infographic_theme,
+    infographic_theme_manifest,
+    infographic_template_registry,
+    infographic_theme_registry,
+    select_infographic_template,
+)
+from pipelines.infographic.structures import (
+    InfographicStructure,
+    StructureEdge,
+    StructureNode,
+    compile_infographic_structure,
+)
+from pipelines.infographic.export import InfographicExportArtifact, InfographicExportRequest, export_infographic_artifact
+from pipelines.infographic.visual_regression import SVGRegressionResult, compare_svg_fixture, svg_regression_hash
 
 __all__ = [
     "AntVInfographicRenderer",
@@ -22,6 +40,24 @@ __all__ = [
     "infographic_ir_to_syntax",
     "SVGQualityReport",
     "inspect_svg",
+    "InfographicTemplate",
+    "InfographicTemplateSelection",
+    "InfographicTheme",
+    "get_infographic_theme",
+    "infographic_theme_manifest",
+    "infographic_template_registry",
+    "infographic_theme_registry",
+    "select_infographic_template",
+    "InfographicStructure",
+    "StructureEdge",
+    "StructureNode",
+    "compile_infographic_structure",
+    "InfographicExportArtifact",
+    "InfographicExportRequest",
+    "export_infographic_artifact",
+    "SVGRegressionResult",
+    "compare_svg_fixture",
+    "svg_regression_hash",
 ]
 
 

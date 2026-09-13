@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from threading import Event
 
 import pytest
 
-from integrations.providers.social import SocialCapabilityBoundary, SocialRequest
+from integrations.providers.social import SocialCapabilityBoundary, SocialReceipt, SocialRequest
 from integrations.providers.social_approval import SocialApprovalConflict, SocialApprovalStore, SocialReleaseService
 from integrations.providers.social_cache import SocialReadCache, build_social_read_fingerprint
 from integrations.providers.social_config import SocialConfigurationError, SocialProviderConfig
+from integrations.providers.social_fixtures import build_social_fixture_adapters
 from integrations.providers.social_read import SocialReadLayer
+from integrations.providers.social_schedule import SocialScheduleConflict, SocialScheduleService, SocialScheduleStore
 
 
 def test_linkedin_config_defaults_to_safe_manual_mode_without_credentials() -> None:
@@ -296,3 +299,243 @@ def test_cancelled_social_operation_never_calls_provider() -> None:
     )
 
     assert receipt.status == "cancelled"
+
+
+def test_schedule_requires_timezone_and_survives_store_restart(tmp_path) -> None:
+    naive = datetime.now()
+    with pytest.raises(ValueError, match="timezone"):
+        SocialRequest(
+            operation="schedule_post",
+            provider="manual",
+            payload={"text": "scheduled"},
+            idempotency_key="schedule-naive",
+            scheduled_for=naive,
+        )
+
+    scope = {"user_id": "user-1", "case_id": "case-1"}
+    request = SocialRequest(
+        operation="schedule_post",
+        provider="manual",
+        payload={"text": "scheduled"},
+        idempotency_key="schedule-restart",
+        scheduled_for=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    approval_store = SocialApprovalStore(str(tmp_path / "approvals.db"))
+    schedule_path = str(tmp_path / "schedules.db")
+    service = SocialScheduleService(
+        SocialReleaseService(SocialCapabilityBoundary(), approval_store),
+        SocialScheduleStore(schedule_path),
+    )
+    created = service.submit(request, authorization_scope=scope, actor_id="author")
+    assert created.status == "pending_approval"
+    service.store.close()
+
+    restarted_store = SocialScheduleStore(schedule_path)
+    restarted = restarted_store.get(created.schedule_id)
+    assert restarted is not None
+    assert restarted.approval_id == created.approval_id
+    assert restarted.status == "pending_approval"
+    restarted_store.close()
+    approval_store.close()
+
+
+def test_schedule_approval_due_release_is_idempotent_and_restart_safe(tmp_path) -> None:
+    calls = []
+
+    class ScheduleAdapter:
+        provider = "test"
+
+        def execute(self, request, *, cancel_event=None):
+            calls.append(request)
+            return {"status": "succeeded", "provider_request_id": "scheduled-provider-1"}
+
+    scope = {"user_id": "user-1", "case_id": "case-1"}
+    request = SocialRequest(
+        operation="schedule_post",
+        provider="test",
+        payload={"text": "publish later"},
+        idempotency_key="schedule-publish-1",
+        scheduled_for=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    approval_store = SocialApprovalStore(str(tmp_path / "approvals.db"))
+    schedule_path = str(tmp_path / "schedules.db")
+    release = SocialReleaseService(SocialCapabilityBoundary({"test": ScheduleAdapter()}), approval_store)
+    store = SocialScheduleStore(schedule_path)
+    service = SocialScheduleService(release, store)
+    created = service.submit(request, authorization_scope=scope, actor_id="author")
+    service.approve(created.schedule_id, actor_id="reviewer")
+
+    store.close()
+    restarted = SocialScheduleStore(schedule_path)
+    restarted_service = SocialScheduleService(release, restarted)
+    result = restarted_service.release_due(authorization_scope=scope, worker_id="worker-1")
+    assert result is not None
+    assert result.status == "succeeded"
+    assert result.receipt["provider_request_id"] == "scheduled-provider-1"
+    assert restarted_service.release_due(authorization_scope=scope, worker_id="worker-2") is None
+    assert len(calls) == 1
+    restarted.close()
+    approval_store.close()
+
+
+def test_schedule_cancel_blocks_provider_release(tmp_path) -> None:
+    class NeverCalledAdapter:
+        provider = "test"
+
+        def execute(self, request, *, cancel_event=None):
+            raise AssertionError("cancelled schedule reached provider")
+
+    scope = {"user_id": "user-1", "case_id": "case-1"}
+    request = SocialRequest(
+        operation="schedule_post",
+        provider="test",
+        payload={"text": "cancel me"},
+        idempotency_key="schedule-cancel-1",
+        scheduled_for=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    approvals = SocialApprovalStore(str(tmp_path / "approvals.db"))
+    store = SocialScheduleStore(str(tmp_path / "schedules.db"))
+    service = SocialScheduleService(
+        SocialReleaseService(SocialCapabilityBoundary({"test": NeverCalledAdapter()}), approvals), store
+    )
+    created = service.submit(request, authorization_scope=scope, actor_id="author")
+    cancelled = service.cancel(created.schedule_id, actor_id="operator")
+    assert cancelled.status == "cancelled"
+    with pytest.raises(SocialApprovalConflict, match="cancelled"):
+        service.approve(created.schedule_id, actor_id="reviewer")
+    assert service.release_due(authorization_scope=scope, worker_id="worker-1") is None
+    store.close()
+    approvals.close()
+
+
+def test_schedule_retries_provider_pending_after_retry_hint(tmp_path) -> None:
+    class PendingThenSuccessAdapter:
+        provider = "test"
+
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self, request, *, cancel_event=None):
+            self.calls += 1
+            if self.calls == 1:
+                return {"status": "pending", "retry_after_seconds": 5, "request_id": "pending-1"}
+            return {"status": "succeeded", "provider_request_id": "provider-2"}
+
+    adapter = PendingThenSuccessAdapter()
+    scope = {"user_id": "user-1", "case_id": "case-1"}
+    request = SocialRequest(
+        operation="schedule_post",
+        provider="test",
+        payload={"text": "retry me"},
+        idempotency_key="schedule-retry-1",
+        scheduled_for=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    approvals = SocialApprovalStore(str(tmp_path / "approvals.db"))
+    store = SocialScheduleStore(str(tmp_path / "schedules.db"))
+    service = SocialScheduleService(
+        SocialReleaseService(SocialCapabilityBoundary({"test": adapter}), approvals), store
+    )
+    created = service.submit(request, authorization_scope=scope, actor_id="author")
+    service.approve(created.schedule_id, actor_id="reviewer")
+    pending = service.release_due(authorization_scope=scope, worker_id="worker-1")
+    assert pending is not None
+    assert pending.status == "provider_pending"
+    assert pending.next_attempt_at is not None
+    assert pending.receipt["retry_after_seconds"] == 5.0
+    finished = service.release_due(
+        authorization_scope=scope, worker_id="worker-1", now=pending.next_attempt_at + 1
+    )
+    assert finished is not None
+    assert finished.status == "succeeded"
+    assert adapter.calls == 2
+    store.close()
+    approvals.close()
+
+
+def test_schedule_reclaims_expired_worker_lease_after_crash(tmp_path) -> None:
+    approvals = SocialApprovalStore(str(tmp_path / "approvals.db"))
+    store = SocialScheduleStore(str(tmp_path / "schedules.db"))
+    scope = {"user_id": "user-1", "case_id": "case-1"}
+    request = SocialRequest(
+        operation="schedule_post", provider="manual", payload={"text": "recover me"},
+        idempotency_key="schedule-reclaim-1",
+        scheduled_for=datetime.fromtimestamp(900, tz=timezone.utc),
+    )
+    service = SocialScheduleService(
+        SocialReleaseService(SocialCapabilityBoundary(), approvals), store
+    )
+    created = service.submit(request, authorization_scope=scope, actor_id="author")
+    service.approve(created.schedule_id, actor_id="reviewer")
+
+    first_claim = store.claim_due(worker_id="crashed-worker", lease_seconds=1, now=1000)
+    assert first_claim is not None
+    assert first_claim.status == "running"
+    assert first_claim.attempts == 1
+    recovered = store.claim_due(worker_id="recovery-worker", lease_seconds=30, now=1002)
+    assert recovered is not None
+    assert recovered.schedule_id == created.schedule_id
+    assert recovered.attempts == 2
+    receipt = SocialReceipt(
+        receipt_id="recovered", provider="manual", operation="schedule_post",
+        status="draft_only", target_ref="", manual_required=True,
+    )
+    finished = store.finish(
+        created.schedule_id, worker_id="recovery-worker", status="draft_only", receipt=receipt,
+    )
+    assert finished.status == "draft_only"
+    store.close()
+    approvals.close()
+
+
+def test_offline_social_fixture_set_emits_boundary_receipts_without_credentials() -> None:
+    adapters = build_social_fixture_adapters()
+    assert set(adapters) == {"manual", "mcp", "success", "retry", "timeout", "quota", "rate_limit", "authorization"}
+
+    success = SocialCapabilityBoundary({"success": adapters["success"]}).execute(
+        SocialRequest(operation="fetch_post", provider="success", target_ref="urn:post:1")
+    )
+    assert success.status == "succeeded"
+    assert success.provider_request_id == "provider-1"
+    assert adapters["success"].calls == 1
+
+    pending = SocialCapabilityBoundary({"mcp": adapters["mcp"]}).execute(
+        SocialRequest(operation="fetch_post", provider="mcp", target_ref="urn:post:1")
+    )
+    assert pending.status == "pending"
+    assert pending.request_id == "mcp-request-1"
+
+    rate_limited = SocialCapabilityBoundary({"retry": build_social_fixture_adapters()["retry"]}).execute(
+        SocialRequest(operation="fetch_post", provider="retry", target_ref="urn:post:1")
+    )
+    assert rate_limited.retry_after_seconds == 30
+
+    timeout = SocialCapabilityBoundary({"timeout": adapters["timeout"]}).execute(
+        SocialRequest(operation="fetch_post", provider="timeout", target_ref="urn:post:1", timeout_seconds=0.001)
+    )
+    assert timeout.error_code == "SOCIAL_TIMEOUT"
+    assert timeout.failure_class == "timeout"
+
+    for name, expected in (("quota", "quota_exhausted"), ("rate_limit", "rate_limit"), ("authorization", "auth")):
+        receipt = SocialCapabilityBoundary({name: adapters[name]}).execute(
+            SocialRequest(operation="fetch_post", provider=name, target_ref="urn:post:1")
+        )
+        assert receipt.failure_class == expected
+        assert receipt.status == "failed"
+
+
+def test_social_boundary_preserves_retry_hint_from_provider_exception() -> None:
+    class RateLimitError(RuntimeError):
+        retry_after_seconds = 12
+
+    class FailingAdapter:
+        provider = "test"
+
+        def execute(self, request, *, cancel_event=None):
+            raise RateLimitError("429 rate limit")
+
+    receipt = SocialCapabilityBoundary({"test": FailingAdapter()}).execute(
+        SocialRequest(operation="fetch_thread", provider="test", target_ref="urn:thread:1")
+    )
+    assert receipt.status == "failed"
+    assert receipt.failure_class == "rate_limit"
+    assert receipt.retry_after_seconds == 12.0
