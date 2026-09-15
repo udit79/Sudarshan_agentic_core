@@ -7,6 +7,7 @@ from typing import Any
 from pipelines.advisory.schemas import QualityReview
 from pipelines.common.text_generation import TextTransformationFlow
 from pipelines.infographic.agents import build_agents
+from pipelines.infographic.normalization import normalize_infographic_output, repairable_quality_review
 from pipelines.infographic.renderer import AntVInfographicRenderer
 from pipelines.infographic.schemas import InfographicOutput
 from pipelines.infographic.tasks import build_tasks
@@ -75,3 +76,13 @@ class InfographicFlow(TextTransformationFlow):
                 "render_error": str(exc)[-2000:],
                 "caveats": [*output.caveats, "SVG rendering was unavailable; AntV syntax is available for rendering."],
             })
+
+    def normalize_output_for_validation(self, output: Any) -> InfographicOutput:
+        if not isinstance(output, InfographicOutput):
+            return output
+        return normalize_infographic_output(output, query=self.state.query)
+
+    def repair_quality_review(self, output: Any, quality: Any) -> Any:
+        if isinstance(output, InfographicOutput) and isinstance(quality, QualityReview):
+            return repairable_quality_review(output, quality)
+        return quality

@@ -1,6 +1,118 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import process from 'node:process';
 import { renderToString } from '@antv/infographic/ssr';
+import {
+  FlexLayout,
+  Group,
+  Rect,
+  Text,
+  getElementBounds,
+  jsxs,
+  jsx,
+  registerItem,
+  registerStructure,
+  registerTemplate,
+} from '@antv/infographic';
+
+const READABLE_CARD_WIDTH = 360;
+const READABLE_CARD_GAP = 24;
+const READABLE_ROW_GAP = 18;
+
+function wrapText(value, width, fontSize, fontWeight = 'normal') {
+  const words = String(value || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    const measured = getElementBounds(jsx(Text, { children: candidate, fontSize, fontWeight }));
+    if (current && measured.width > width) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines.join('\n') : ' ';
+}
+
+function readableCard(props) {
+  const { datum = {}, width = READABLE_CARD_WIDTH, themeColors = {} } = props;
+  const padding = 16;
+  const contentWidth = width - padding * 2;
+  const label = wrapText(datum.label, contentWidth, 13, 'bold');
+  const desc = wrapText(datum.desc, contentWidth, 12);
+  const labelHeight = label.split('\n').length * 18;
+  const descHeight = desc.split('\n').length * 16;
+  const height = padding * 2 + labelHeight + 6 + descHeight;
+  const background = themeColors.colorBgElevated || '#FFFFFF';
+  const border = themeColors.colorBorder || '#CBD5E1';
+  const primary = themeColors.colorPrimary || '#1E3A8A';
+  const text = themeColors.colorText || '#0F172A';
+  const secondary = themeColors.colorTextSecondary || '#475569';
+  return jsxs(Group, {
+    x: props.x,
+    y: props.y,
+    children: [
+      jsx(Rect, { x: 0, y: 0, width, height, fill: background, stroke: border, strokeWidth: 1, rx: 10 }),
+      jsx(Rect, { x: 0, y: 0, width: 4, height, fill: primary, rx: 2 }),
+      jsx(Text, { x: padding, y: padding, width: contentWidth, height: labelHeight, fill: text, fontSize: 13, fontWeight: 'bold', lineHeight: 18, wordWrap: true, children: label }),
+      jsx(Text, { x: padding, y: padding + labelHeight + 6, width: contentWidth, height: descHeight, fill: secondary, fontSize: 12, lineHeight: 16, wordWrap: true, children: desc }),
+    ],
+  });
+}
+
+function readableGrid({ Title, Item, data }) {
+  const items = data.items || [];
+  const columns = 2;
+  const title = Title ? jsx(Title, { title: data.title, desc: data.desc }) : null;
+  const titleHeight = title ? getElementBounds(title).height : 0;
+  const bounds = items.map((datum, index) => getElementBounds(jsx(Item, {
+    indexes: [index],
+    data,
+    datum,
+    width: READABLE_CARD_WIDTH,
+  })));
+  const rowHeights = [];
+  bounds.forEach((bound, index) => {
+    const row = Math.floor(index / columns);
+    rowHeights[row] = Math.max(rowHeights[row] || 0, bound.height);
+  });
+  const elements = [];
+  let y = 0;
+  items.forEach((datum, index) => {
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+    let rowY = 0;
+    for (let prior = 0; prior < row; prior += 1) rowY += rowHeights[prior] + READABLE_ROW_GAP;
+    elements.push(jsx(Item, {
+      indexes: [index],
+      data,
+      datum,
+      x: column * (READABLE_CARD_WIDTH + READABLE_CARD_GAP),
+      y: rowY,
+      width: READABLE_CARD_WIDTH,
+    }));
+    y = Math.max(y, rowY + bounds[index].height);
+  });
+  const grid = jsx(Group, { children: elements });
+  return jsx(FlexLayout, {
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: titleHeight ? 24 : 0,
+    children: [title, grid].filter(Boolean),
+  });
+}
+
+registerItem('sudarshan-readable-card', { component: readableCard, composites: ['label', 'desc'] });
+registerStructure('sudarshan-readable-grid', { component: readableGrid, composites: ['title', 'item'] });
+registerTemplate('sudarshan-readable-list', {
+  design: {
+    title: 'default',
+    structure: { type: 'sudarshan-readable-grid' },
+    items: [{ type: 'sudarshan-readable-card' }],
+  },
+});
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);

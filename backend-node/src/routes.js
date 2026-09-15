@@ -59,29 +59,96 @@ function safeSyntaxText(value, limit = 220) {
     .replace(/[ ,;:]+$/, "");
 }
 
+function rendererThemeLines() {
+  return [
+    "theme",
+    "  type default",
+    "  colorBg #F8FAFC",
+    "  colorPrimary #1E3A8A",
+    "  palette #1E3A8A,#0F766E,#475569",
+    "  title",
+    "    fill #0F172A",
+    "  desc",
+    "    fill #475569",
+    "  shape",
+    "    fill #FFFFFF",
+    "    stroke #CBD5E1",
+    "  item",
+    "    label",
+    "      fill #0F172A",
+    "    desc",
+    "      fill #475569",
+  ];
+}
+
+function rendererVisualType(output, evidence) {
+  const visualType = output?.visual_type || "auto";
+  if (visualType === "flow" || visualType === "process") {
+    const claims = evidence.map((item) => safeSyntaxText(item.claim || "").toLowerCase());
+    if (claims.some((claim) => claim.startsWith("recommended analytical focus") || claim.startsWith("information gaps"))) {
+      return "list";
+    }
+  }
+  return visualType === "auto" ? "list" : visualType;
+}
+
+function needsRendererSafeRewrite(syntax, visualType = "") {
+  if (/^\s*infographic\s*\{/i.test(syntax) || syntax.length > 12000) return true;
+  const match = syntax.match(/^\s*infographic\s+([^\s{]+)/i);
+  const template = match ? match[1].toLowerCase() : "";
+  return /^\s*infographic\b/i.test(syntax);
+}
+
 function rendererSafeInfographicSyntax(output) {
   const original = typeof output?.syntax === "string" ? output.syntax : "";
   const evidence = Array.isArray(output?.evidence) ? output.evidence : [];
-  const complexLayout = /^\s*infographic\s*\{/i.test(original) || original.length > 12000;
-  if (!complexLayout || !evidence.length) return original;
+  if (!needsRendererSafeRewrite(original, output?.visual_type) || !evidence.length) return original;
 
-  const items = [["Brief", safeSyntaxText(output.title || "Sudarshan Infographic")]];
+  const items = [];
   for (const item of evidence) {
     const id = safeSyntaxText(item.evidence_id || "Evidence", 40);
-    const claim = safeSyntaxText(item.claim || "Verified observation", 120);
-    let detail = safeSyntaxText(item.evidence_summary || item.claim || "Verified observation");
-    if (item.source_reference) detail += ` | Source: ${safeSyntaxText(item.source_reference, 80)}`;
-    if (Array.isArray(item.limitations) && item.limitations.length) {
-      detail += ` | Gap: ${safeSyntaxText(item.limitations.join("; "), 80)}`;
-    }
-    items.push([`[${id}] ${claim}`, detail]);
+    const rawClaim = safeSyntaxText(item.claim || "Verified observation", 1000);
+    const claimLower = rawClaim.toLowerCase();
+    const category = claimLower.startsWith("recommended analytical focus")
+      ? "Recommendation"
+      : claimLower.startsWith("information gaps") ? "Information gap" : "Verified observation";
+    const detail = rawClaim;
+    items.push([`[${id}] ${category}`, detail]);
   }
   const caveat = Array.isArray(output?.caveats) ? output.caveats[0] : "";
-  if (caveat) items.push(["Caveat", safeSyntaxText(caveat)]);
+  if (caveat) items.push(["Caveat", safeSyntaxText(caveat, 1000)]);
+  const source = evidence[0]?.source_reference;
+  if (source) items.push(["Source", safeSyntaxText(source, 1000)]);
+  const visualType = rendererVisualType(output, evidence);
+  if (visualType === "hierarchy" && evidence.length <= 6) {
+    return [
+      "infographic hierarchy-tree-tech-style-compact-card",
+      ...rendererThemeLines(),
+      "data",
+      `  title ${safeSyntaxText(output.title || "Sudarshan Infographic")}`,
+      "  root",
+      `    label ${safeSyntaxText(output.title || "Sudarshan Infographic", 72)}`,
+      "    children",
+      ...items.flatMap(([label, desc]) => [
+        `      - label ${safeSyntaxText(label)}`,
+        `        desc ${safeSyntaxText(desc)}`,
+      ]),
+    ].join("\n");
+  }
+  let template = "sudarshan-readable-list";
+  let dataKey = "lists";
+  if (visualType === "timeline" && evidence.length <= 6) [template, dataKey] = ["sequence-timeline-simple", "sequences"];
+  if (visualType === "process" || visualType === "flow") {
+    if (evidence.length <= 5) [template, dataKey] = ["sequence-steps-simple", "sequences"];
+    else if (evidence.length <= 10) [template, dataKey] = ["sequence-snake-steps-simple", "sequences"];
+  }
+  if (visualType === "comparison" && evidence.length <= 4) [template, dataKey] = ["compare-hierarchy-row-letter-card-compact-card", "compares"];
   return [
-    "infographic list-grid-simple",
+    `infographic ${template}`,
+    ...rendererThemeLines(),
     "data",
-    "  lists",
+    `  title ${safeSyntaxText(output.title || "Sudarshan Infographic")}`,
+    `  ${dataKey}`,
     ...items.flatMap(([label, desc]) => [
       `    - label ${safeSyntaxText(label)}`,
       `      desc ${safeSyntaxText(desc)}`,

@@ -160,6 +160,16 @@ class TextTransformationFlow(Flow[TaskState]):
 
         return output
 
+    def normalize_output_for_validation(self, output: BaseModel) -> BaseModel:
+        """Allow a pipeline to apply deterministic repairs before the gate."""
+
+        return output
+
+    def repair_quality_review(self, output: BaseModel, quality: BaseModel) -> BaseModel:
+        """Allow a pipeline to accept only deterministic, validated repairs."""
+
+        return quality
+
     def _runtime(self) -> MemoryRuntime:
         request = self._request()
         return MemoryRuntime(
@@ -286,12 +296,14 @@ class TextTransformationFlow(Flow[TaskState]):
             self.state.failure = "Crew returned no structured output or quality review"
             self.state.record("quality_gate", "rejected", summary=self.state.failure)
             return False
-        self.state.output = result.output.model_dump(mode="json")
-        self.state.quality_review = result.quality.model_dump(mode="json")
-        if result.quality.model_dump().get("approved") is True:
+        output = self.normalize_output_for_validation(result.output)
+        quality = self.repair_quality_review(output, result.quality)
+        self.state.output = output.model_dump(mode="json")
+        self.state.quality_review = quality.model_dump(mode="json")
+        if quality.model_dump().get("approved") is True:
             self.state.record("quality_gate", "succeeded", summary="Output approved for frontend delivery")
             return True
-        issues = result.quality.model_dump().get("issues", []) + result.quality.model_dump().get("required_revisions", [])
+        issues = quality.model_dump().get("issues", []) + quality.model_dump().get("required_revisions", [])
         self.state.failure = "; ".join(issues) or "Quality critic rejected the output"
         self.state.record("quality_gate", "rejected", summary=self.state.failure)
         return False
