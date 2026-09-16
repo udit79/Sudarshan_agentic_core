@@ -207,7 +207,7 @@ Every frontend/backend ticket is complete only when:
 - Python, Node, frontend, Harness, MCP, A2A, renderer, and failure-injection
   tests pass for the affected ticket;
 - the ticket is marked complete in
-  `docs/sudarshan-2.0-remaining-work-plan.md` and any new assumption is added
+  `docs/next-plan.md` and any new assumption is added
   to `docs/sudarshan-2.0-assumptions.md`.
 
 ## Current recommendation

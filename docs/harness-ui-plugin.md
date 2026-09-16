@@ -39,7 +39,7 @@ Generic Harness attachments, workspace browsing, model/provider settings,
 permission presets, approval panels, trajectory inspectors, and deliverable
 rows are not assumed to be compatible merely because the web bundle exposes
 them. They require the governed adapters and browser evidence tracked by
-T84-T90 in the remaining-work plan. Until then, only the Sudarshan operations
+NP-02 and NP-11/NP-12 in the next execution plan. Until then, only the Sudarshan operations
 projection, clarification flow, and manifest-backed artifact actions should
 be treated as product-compatible.
 

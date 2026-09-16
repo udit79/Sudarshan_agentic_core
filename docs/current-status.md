@@ -318,4 +318,4 @@ multi-host behavior.
 - [Operations and deployment guide](operations.md)
 - [Harness integration](../integrations/deepseek_harness/README.md)
 - [Harness UI composition](harness-ui-plugin.md)
-- [Remaining-work execution plan](sudarshan-2.0-remaining-work-plan.md)
+- [Next execution plan](next-plan.md)

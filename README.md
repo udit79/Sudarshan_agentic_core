@@ -101,11 +101,10 @@ Use these files in this order:
 1. [Full 2.0 execution plan](docs/archive/sudarshan-2.0-full-execution-plan.md) —
    research-backed architecture, HLD/LLD, original T00–T52 plan, constraints,
    sources, and release principles.
-2. [Remaining-work plan](docs/sudarshan-2.0-remaining-work-plan.md) — the
-   active ticket ledger after T38. Each ticket has an ID, owner, dependencies,
-   implementation requirements, and acceptance criteria. Its
-   **Agentic ticket status** and track tables record what is complete locally,
-   what is partial, and what remains open.
+2. [Next execution plan](docs/next-plan.md) — the active audit-derived ticket
+   ledger with current priorities, dependencies, acceptance criteria, and
+   release gates. The former T39–T90 backlog is preserved only as history in
+   `docs/archive/`.
 3. [Team-parallel guide](docs/archive/sudarshan-2.0-team-parallel-guide.md) — ownership,
    branch boundaries, shared contracts, fixtures, and parallel execution order.
 4. [Current status](docs/current-status.md) — honest implementation and

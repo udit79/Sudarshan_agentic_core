@@ -7,7 +7,7 @@ Use the active documents first:
 
 - [Human documentation index](../human/README.md)
 - [Current status](../current-status.md)
-- [Remaining-work plan](../sudarshan-2.0-remaining-work-plan.md)
+- [Legacy remaining-work plan](sudarshan-2.0-remaining-work-plan-legacy-2026-09-16.md)
 - [Assumptions](../sudarshan-2.0-assumptions.md)
 - [Agent map](../../AGENT_MAP.md)
 
