@@ -17,7 +17,7 @@ maintainers. Agent navigation lives separately in the root
 ## Status, planning, and review
 
 - [Current status](../current-status.md)
-- [Remaining work](../sudarshan-2.0-remaining-work-plan.md)
+- [Next execution plan](../next-plan.md)
 - [Assumptions](../sudarshan-2.0-assumptions.md)
 - [Frontend/backend feature matrix](../frontend-backend-feature-matrix.md)
 - [Design review archive](../archive/design-review.md)

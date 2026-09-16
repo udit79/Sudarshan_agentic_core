@@ -43,9 +43,8 @@ runtime truth.
    contracts and native media behavior.
 12. Read [Harness UI composition](harness-ui-plugin.md) for the native
    DeepSeek web plugin boundary and white-label replacement path.
-13. Read the [remaining-work execution plan](sudarshan-2.0-remaining-work-plan.md)
-   for the post-T38 production, interoperability, frontend, security, and
-   release backlog.
+13. Read the [next execution plan](next-plan.md) for the audit-derived
+   reliability, artifact, memory, interoperability, and release backlog.
 14. Read the [diagram-design adoption plan](diagram-design-adoption-plan.md)
    before extending diagram types, imports, visual QA, or diagram delivery.
 15. Read the [tools, prompts, and Cognee map audit](agent/tools-and-prompts-audit.md)
@@ -73,7 +72,7 @@ documents should link to those sources instead of copying reference lists.
 | How does Harness connect? | [Harness integration](../integrations/deepseek_harness/README.md) | [Harness UI plugin](harness-ui-plugin.md) |
 | How do I deploy and troubleshoot? | [Operations](operations.md) | [Assumptions](sudarshan-2.0-assumptions.md) |
 | What is actually complete? | [Current status](current-status.md) | [Assumptions](sudarshan-2.0-assumptions.md) |
-| What remains before production? | [Remaining-work plan](sudarshan-2.0-remaining-work-plan.md) | [Current status](current-status.md) |
+| What remains before production? | [Next execution plan](next-plan.md) | [Current status](current-status.md) |
 | What did the external references actually provide? | [Reference adaptation ledgers](reference-adaptations/README.md) | [Third-party notices](../THIRD_PARTY_NOTICES.md) |
 
 For machine-facing work, use [`docs/agent/README.md`](agent/README.md) and
@@ -145,8 +144,8 @@ context, not current status.
   across backend, agentic, frontend, rendering, and evaluation teams.
 - [Assumption ledger](sudarshan-2.0-assumptions.md) records deployment risks and
   evidence still required.
-- [Remaining-work plan](sudarshan-2.0-remaining-work-plan.md) is the active
-  post-T38 execution backlog and release checklist.
+- [Next execution plan](next-plan.md) is the active audit-derived execution
+  backlog and release checklist. The former T39–T90 plan is archived.
 
 ## Verification baseline
 
