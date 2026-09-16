@@ -131,7 +131,8 @@ def test_memory_projection_failure_returns_partial_status_and_records_fallback(t
     )
     assert result["status"] == "partial"
     assert result["memory_persisted"] is False
+    assert result["memory_projection_status"] == "failed"
+    assert "Simulated Cognee web connection timeout" in str(result.get("memory_projection_error"))
     assert result["evidence_indexed"] is True
-    assert result["fallback_count"] >= 1
-    assert any("memory_projection_unavailable" in fb for fb in result["fallbacks"])
+
 

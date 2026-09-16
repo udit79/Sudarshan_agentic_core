@@ -9,9 +9,10 @@ from typing import Any, Literal
 HarnessOperation = Literal[
     "run", "resume", "cancel", "status", "get_artifact", "submit", "wait",
     "health", "cleanup_lifecycle", "usage", "list_skills", "get_skill",
-    "invoke_skill", "submit_skill", "list_pipelines", "remember_context",
+    "invoke_skill", "invoke_a2a", "submit_skill", "list_pipelines", "remember_context",
     "recall_session_context", "search_text_evidence", "search_visual_evidence",
     "search_table_evidence", "search_video_segment_evidence", "get_evidence",
+    "observability_events", "trajectory", "prepare"
 ]
 
 _ALLOWED_OPERATIONS = frozenset(HarnessOperation.__args__)

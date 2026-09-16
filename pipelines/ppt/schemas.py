@@ -7,7 +7,8 @@ scoped source memory by the operator.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import re
+from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -19,6 +20,66 @@ class EvidenceBinding(BaseModel):
 
     evidence_id: str = Field(min_length=1)
     role: Literal["supports", "contradicts", "context", "uncertain"] = "supports"
+
+
+class PresentationTheme(BaseModel):
+    """Canonical visual tokens applied to native PPT objects and QA."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    theme_id: str = Field(default="ntro-briefing", min_length=1, max_length=80)
+    version: str = Field(default="1", min_length=1, max_length=40)
+    background: str = "#0B1220"
+    foreground: str = "#F8FAFC"
+    accent: str = "#38BDF8"
+    muted: str = "#94A3B8"
+    border: str = "#334155"
+    title_font: str = "Aptos Display"
+    body_font: str = "Aptos"
+
+    @field_validator("background", "foreground", "accent", "muted", "border")
+    @classmethod
+    def validate_color(cls, value: str) -> str:
+        value = str(value).strip().upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}", value):
+            raise ValueError("presentation theme colors must be six-digit hex values")
+        return value
+
+    def palette(self) -> tuple[str, ...]:
+        return (self.background, self.foreground, self.accent, self.muted, self.border)
+
+    def hash(self) -> str:
+        import hashlib
+        import json
+
+        payload = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def resolve_presentation_theme(constraints: Any = None) -> PresentationTheme:
+    """Resolve one deterministic theme without letting a model invent tokens."""
+
+    data: Mapping[str, Any]
+    if hasattr(constraints, "model_dump"):
+        data = constraints.model_dump(mode="json")
+    elif isinstance(constraints, Mapping):
+        data = constraints
+    else:
+        data = {}
+    tokens = dict(data.get("theme_tokens") or {})
+    palette = [str(item).strip() for item in data.get("color_palette") or [] if str(item).strip()]
+    if palette:
+        tokens.setdefault("accent", palette[0])
+        if len(palette) > 1:
+            tokens.setdefault("muted", palette[1])
+        if len(palette) > 2:
+            tokens.setdefault("border", palette[2])
+    allowed = {"background", "foreground", "accent", "muted", "border", "title_font", "body_font"}
+    selected = {key: value for key, value in tokens.items() if key in allowed}
+    return PresentationTheme(
+        theme_id=str(data.get("theme_id") or "ntro-briefing"),
+        **selected,
+    )
 
 
 class FlowchartNode(BaseModel):
@@ -235,11 +296,27 @@ class SlideContent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    slide_number: int = Field(ge=1)
+    slide_id: str = Field(min_length=1)
+    order: int = Field(ge=1)
     title: str = Field(min_length=1)
-    bullets: list[str] = Field(min_length=1, max_length=8)
+    bullets: list[str] = Field(default_factory=list, max_length=8)
     speaker_notes: str = Field(default="", description="Presenter notes for this slide.")
-    layout: Literal["title", "content", "two_column", "conclusion"] = "content"
+    layout: Literal["cover", "agenda", "content", "two_column", "conclusion", "closing"] = "content"
+
+class SlidePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    slide_id: str = Field(min_length=1)
+    operation: Literal["replace_content", "replace_visual", "rewrite_notes"]
+    content: dict[str, Any] = Field(default_factory=dict)
+
+class IncrementalDeckEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_artifact_id: str = Field(min_length=1)
+    base_manifest_id: str = Field(min_length=1)
+    base_manifest_version: int = Field(ge=1)
+    edits: list[SlidePatch] = Field(default_factory=list)
+    requested_scope: list[str] = Field(default_factory=list)
+    idempotency_key: str = Field(min_length=1)
 
 
 class PresentationOutput(BaseModel):
@@ -249,24 +326,28 @@ class PresentationOutput(BaseModel):
 
     presentation_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
-    subtitle: str = Field(min_length=1)
+    template_id: str = Field(default="native-default", min_length=1, max_length=120)
+    template_version: str | None = Field(default=None, max_length=40)
     classification_level: str = Field(min_length=1)
     distribution: str = Field(min_length=1)
-    agenda: list[str] = Field(min_length=2, max_length=10)
     slides: list[SlideContent] = Field(min_length=2, max_length=15)
-    conclusion_summary: str = Field(min_length=1)
-    key_takeaways: list[str] = Field(min_length=1, max_length=5)
-    references: list[str] = Field(default_factory=list)
-    confidence_statement: str = Field(min_length=1)
-    intelligence_gaps: list[str] = Field(default_factory=list)
-
-    @field_validator("title", "subtitle", "conclusion_summary")
+    @field_validator("title")
     @classmethod
     def reject_placeholder_text(cls, value: str) -> str:
         lowered = value.lower()
         if "[insert" in lowered or "tbd" in lowered:
             raise ValueError("presentation narrative cannot contain unresolved placeholders")
         return value.strip()
+
+    @model_validator(mode="after")
+    def validate_slide_identity(self) -> "PresentationOutput":
+        slide_ids = [slide.slide_id for slide in self.slides]
+        if len(slide_ids) != len(set(slide_ids)):
+            raise ValueError("presentation slide IDs must be unique")
+        orders = [slide.order for slide in self.slides]
+        if len(orders) != len(set(orders)):
+            raise ValueError("presentation slide orders must be unique")
+        return self
 
 
 class PresentationQualityReview(BaseModel):
@@ -277,3 +358,38 @@ class PresentationQualityReview(BaseModel):
     approved: bool
     issues: list[str] = Field(default_factory=list)
     required_revisions: list[str] = Field(default_factory=list)
+
+
+class SlideManifest(BaseModel):
+    """Manifest for a single incrementally generated slide."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slide_id: str = Field(min_length=1)
+    order: int = Field(ge=1)
+    source_ir_hash: str | None = None
+    rendered_part_hash: str | None = None
+    dependencies: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    asset_refs: list[str] = Field(default_factory=list)
+    layout_id: str | None = None
+    status: Literal["pending", "rendered", "failed", "unchanged", "invalidated"] = "pending"
+
+
+class DeckManifest(BaseModel):
+    """Authoritative server-side manifest for an incremental presentation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deck_id: str = Field(min_length=1)
+    version: int = Field(default=1, ge=1)
+    base_artifact_id: str | None = None
+    template_id: str = Field(min_length=1)
+    template_version: str | None = None
+    theme_id: str = Field(min_length=1)
+    theme_hash: str | None = None
+    theme_tokens: dict[str, Any] = Field(default_factory=dict)
+    master_id: str | None = None
+    slide_order: list[str] = Field(default_factory=list)
+    slides: list[SlideManifest] = Field(default_factory=list)
+    manifest_version: str = "1.0"

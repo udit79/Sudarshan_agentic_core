@@ -231,6 +231,12 @@ class IngestionQualityReport(IngestionContractModel):
     block_counts: dict[str, int] = Field(default_factory=dict)
     low_confidence_count: int = Field(default=0, ge=0)
     fallback_count: int = Field(default=0, ge=0)
+    fallbacks: list[str] = Field(default_factory=list)
+    evidence_count: int = Field(default=0, ge=0)
+    chunk_count: int = Field(default=0, ge=0)
+    relationship_count: int = Field(default=0, ge=0)
+    memory_projection_status: str = Field(default="pending")
+    review_state: str = Field(default="unreviewed")
     warnings: list[str] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     source_map_complete: bool = False
@@ -242,3 +248,4 @@ class IngestionQualityReport(IngestionContractModel):
 
 # Compatibility name used by the ticket and by ingestion-facing callers.
 QualityReport = IngestionQualityReport
+

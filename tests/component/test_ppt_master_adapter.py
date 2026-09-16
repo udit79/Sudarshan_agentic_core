@@ -2,7 +2,9 @@ import sys
 from pathlib import Path
 from threading import Event
 
-from pipelines.ppt.ppt_master_adapter import PptMasterAdapter, PptMasterConfig
+import pytest
+
+from pipelines.ppt.ppt_master_adapter import PptMasterAdapter, PptMasterAdapterError, PptMasterConfig
 
 
 def _workspace(tmp_path: Path) -> tuple[Path, Path]:
@@ -13,6 +15,15 @@ def _workspace(tmp_path: Path) -> tuple[Path, Path]:
     project = tmp_path / "project"
     (project / "svg_output").mkdir(parents=True)
     return root, project
+
+
+def test_ppt_master_requires_user_managed_local_runtime(tmp_path):
+    adapter = PptMasterAdapter(PptMasterConfig(root=None))
+
+    assert adapter.available is False
+    assert "not hosted" in (adapter.availability_reason or "")
+    with pytest.raises(PptMasterAdapterError, match="self-host|SUDARSHAN_PPT_MASTER_ROOT"):
+        adapter.build_command(tmp_path, tmp_path / "deck.pptx")
 
 
 def test_ppt_master_command_is_bounded_to_project_output(tmp_path):
@@ -40,11 +51,14 @@ def test_ppt_master_export_requires_quality_reports(tmp_path):
     script.write_text(
         "import sys\n"
         "from pathlib import Path\n"
+        "from pptx import Presentation\n"
         "args = sys.argv\n"
         "project = Path(args[1])\n"
         "output = Path(args[args.index('-o') + 1])\n"
         "output.parent.mkdir(parents=True, exist_ok=True)\n"
-        "output.write_bytes(b'pptx')\n"
+        "prs = Presentation()\n"
+        "prs.slides.add_slide(prs.slide_layouts[6])\n"
+        "prs.save(output)\n"
         "validation = project / 'validation'\n"
         "validation.mkdir(exist_ok=True)\n"
         "(validation / 'svg_quality_report.json').write_text('{}')\n"

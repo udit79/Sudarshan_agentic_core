@@ -194,6 +194,11 @@ class ControlPlane(Protocol):
     def state(self, resource_key: str) -> dict[str, Any] | None:
         ...
 
+    def preparation_create_if_absent(self, idempotency_key: str, fingerprint: str, record: Mapping[str, Any]) -> dict[str, Any]:
+        ...
+
+    def preparation_get(self, idempotency_key: str) -> dict[str, Any] | None:
+        ...
 
 _ADMIT_SCRIPT = """
 local existing = redis.call('HGET', KEYS[1], 'request_hash')
@@ -207,6 +212,16 @@ redis.call('HSET', KEYS[1],
 redis.call('XADD', KEYS[2], '*', 'event_type', 'admitted', 'status', 'queued', 'message', 'admitted')
 redis.call('XADD', KEYS[3], '*', 'resource_key', ARGV[4])
 return {'created', 'queued'}
+"""
+
+_PREPARATION_CREATE_SCRIPT = """
+local existing_fingerprint = redis.call('HGET', KEYS[1], 'request_fingerprint')
+if existing_fingerprint then
+  if existing_fingerprint ~= ARGV[1] then return {'conflict'} end
+  return {'replay', redis.call('HGET', KEYS[1], 'payload')}
+end
+redis.call('HSET', KEYS[1], 'request_fingerprint', ARGV[1], 'payload', ARGV[2])
+return {'created', ARGV[2]}
 """
 
 _CLAIM_SCRIPT = """
@@ -530,6 +545,34 @@ class RedisControlPlane:
         if not value:
             raise ValueError("run_id must not be empty")
         return f"{self.prefix}:dag:{value}"
+
+    def _preparation_key(self, idempotency_key: str) -> str:
+        value = str(idempotency_key).strip()
+        if not value:
+            raise ValueError("idempotency_key must not be empty")
+        return f"{self.prefix}:preparation:{value}"
+
+    def preparation_create_if_absent(self, idempotency_key: str, fingerprint: str, record: Mapping[str, Any]) -> dict[str, Any]:
+        prep_key = self._preparation_key(idempotency_key)
+        result = self.client.eval(
+            _PREPARATION_CREATE_SCRIPT,
+            1,
+            prep_key,
+            str(fingerprint),
+            json.dumps(dict(record), sort_keys=True, ensure_ascii=False, default=str),
+        )
+        marker = _text(result[0])
+        if marker == "conflict":
+            raise ControlPlaneConflict("preparation key was already admitted with a different request fingerprint")
+        payload = _text(result[1])
+        return json.loads(payload)
+
+    def preparation_get(self, idempotency_key: str) -> dict[str, Any] | None:
+        prep_key = self._preparation_key(idempotency_key)
+        payload = self.client.hget(prep_key, "payload")
+        if not payload:
+            return None
+        return json.loads(_text(payload))
 
     def _group_name(self, queue: str) -> str:
         return f"{self.prefix}:workers:{queue}"

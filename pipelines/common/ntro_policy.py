@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 # ---------------------------------------------------------------------------
-# Classification levels (metadata only, NOT routing)
+# Classification levels (metadata only, NOT routing).
+#
+# RESTRICTED is the safe internal default for sensitive, non-public case
+# material. It is an application handling label, not proof of a government
+# clearance, encryption, need-to-know, or production authorization.
 # ---------------------------------------------------------------------------
 
 CLASSIFICATION_LEVELS: tuple[str, ...] = (

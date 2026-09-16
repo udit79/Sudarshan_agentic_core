@@ -58,7 +58,7 @@ def test_bridge_runs_independent_nodes_concurrently_then_admits_dependents(tmp_p
         )
         assert state["status"] in {"queued", "running"}
         completed = wait_for(bridge, "run-bridge", {"succeeded"})
-        assert started[:2] == ["source", "visual"]
+        assert set(started[:2]) == {"source", "visual"}
         assert started[-1] == "assemble"
         assert completed["completed_count"] == 3
         assert all(node["status"] == "succeeded" for node in completed["nodes"])

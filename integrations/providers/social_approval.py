@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 from threading import Lock
 from time import time
-from typing import Any, Mapping
+from typing import Any, Callable, Literal, Mapping
 from uuid import uuid4
 
 from integrations.providers.social import WRITE_OPERATIONS, SocialCapabilityBoundary, SocialReceipt, SocialRequest
@@ -214,7 +214,7 @@ class SocialApprovalStore:
             record = self._get_locked(approval_id)
             if record is None:
                 raise SocialApprovalConflict("approval not found")
-            if record.status in {"succeeded", "failed", "cancelled", "draft_only", "provider_pending"}:
+            if record.status in {"succeeded", "failed", "cancelled", "draft_only"}:
                 return record
             if record.status != "releasing":
                 raise SocialApprovalConflict(f"approval is not being released: {record.status}")
@@ -227,6 +227,56 @@ class SocialApprovalStore:
             self._connection.execute(
                 "UPDATE social_approvals SET status = ?, provider_request_id = ?, receipt_json = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE approval_id = ?",
                 (status, receipt.provider_request_id, json.dumps(safe, sort_keys=True), now, approval_id),
+            )
+            self._connection.commit()
+            return self._get_locked(approval_id)  # type: ignore[return-value]
+
+    def reconcile_pending(
+        self,
+        approval_id: str,
+        *,
+        status: Literal["pending", "succeeded", "failed"],
+        receipt: SocialReceipt | None = None,
+        next_check_delay: float = 30.0,
+    ) -> SocialApprovalRecord:
+        with self._lock:
+            record = self._get_locked(approval_id)
+            if record is None:
+                raise SocialApprovalConflict("approval not found")
+            if record.status != "provider_pending":
+                return record
+            now = time()
+            target_status = "provider_pending" if status == "pending" else status
+            receipt_json = record.receipt
+            provider_req_id = record.provider_request_id
+            if receipt is not None:
+                safe = receipt.to_dict()
+                safe["data"] = sanitize_social_mapping(receipt.data)
+                safe["metadata"] = sanitize_social_mapping(receipt.metadata)
+                receipt_json = safe
+                if receipt.provider_request_id:
+                    provider_req_id = receipt.provider_request_id
+
+            lease_expires = (now + next_check_delay) if status == "pending" else None
+            self._connection.execute(
+                """
+                UPDATE social_approvals
+                SET status = ?,
+                    provider_request_id = ?,
+                    receipt_json = ?,
+                    lease_owner = NULL,
+                    lease_expires_at = ?,
+                    updated_at = ?
+                WHERE approval_id = ?
+                """,
+                (
+                    target_status,
+                    provider_req_id,
+                    json.dumps(receipt_json, sort_keys=True) if receipt_json is not None else None,
+                    lease_expires,
+                    now,
+                    approval_id,
+                ),
             )
             self._connection.commit()
             return self._get_locked(approval_id)  # type: ignore[return-value]
@@ -322,6 +372,29 @@ class SocialReleaseService:
         )
         self.store.save_receipt(approval_id, worker_id=worker_id, receipt=receipt)
         return receipt
+
+    def reconcile_provider_pending(
+        self,
+        approval_id: str,
+        *,
+        check_fn: Callable[[SocialApprovalRecord], tuple[str, SocialReceipt | None]],
+        next_check_delay: float = 30.0,
+    ) -> SocialApprovalRecord:
+        """Reconcile a provider_pending approval using check_fn without re-releasing the post."""
+        record = self.store.get(approval_id)
+        if record is None:
+            raise SocialApprovalConflict("approval not found")
+        if record.status != "provider_pending":
+            return record
+        provider_status, receipt = check_fn(record)
+        if provider_status not in {"pending", "succeeded", "failed"}:
+            raise ValueError(f"invalid provider_status from check_fn: {provider_status}")
+        return self.store.reconcile_pending(
+            approval_id,
+            status=provider_status,  # type: ignore[arg-type]
+            receipt=receipt,
+            next_check_delay=next_check_delay,
+        )
 
     def _submit(self, operation: str, request: SocialRequest, *, authorization_scope: Mapping[str, Any], actor_id: str) -> SocialApprovalRecord:
         if request.operation != operation:

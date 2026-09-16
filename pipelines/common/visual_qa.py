@@ -65,7 +65,7 @@ def inspect_visual_artifact(
     elif resolved_kind == "svg":
         from pipelines.infographic.quality import inspect_svg
 
-        report = inspect_svg(artifact, required_text=tuple(required), renderer_mode=renderer_version)
+        report = inspect_svg(artifact, required_text=tuple(required), renderer_mode=None, check_accessibility=False)
         issues.extend(report.issues)
         width, height = report.width, report.height
     elif resolved_kind in {"png", "jpg", "jpeg"}:

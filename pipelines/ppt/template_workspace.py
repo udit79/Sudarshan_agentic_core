@@ -39,6 +39,21 @@ class PptTemplateContract(BaseModel):
                 raise ValueError(f"design token {name} must be a six-digit hex color")
         return self
 
+    def layout_for(self, purpose: str) -> LayoutContract:
+        """Return the approved layout contract for one semantic slide purpose."""
+
+        for layout in self.layouts:
+            if layout.purpose == purpose:
+                return layout
+        raise ValueError(f"template '{self.template_id}' has no layout for purpose '{purpose}'")
+
+    def validate_rendered_layouts(self, purposes: list[str]) -> None:
+        """Fail closed when a deck asks a template for an unsupported layout."""
+
+        self.validate_layouts()
+        for purpose in dict.fromkeys(purposes):
+            self.layout_for(purpose)
+
 
 def write_template_workspace(contract: PptTemplateContract, output_root: str | Path) -> Path:
     """Persist one JSON-only template workspace for a bounded exporter."""

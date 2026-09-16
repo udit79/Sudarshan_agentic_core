@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 from pathlib import Path
 from threading import Event
 from typing import Mapping
@@ -14,6 +16,7 @@ from pipelines.video.contracts import VideoPackage
 from pipelines.video.native_generator import NativeVideoGenerator
 from pipelines.video.planner import OpenAIVideoPlanner
 from pipelines.video.skills import NativeVideoRenderSkill, NativeVideoStoryboardSkill
+from pipelines.video.provider_jobs import VideoProviderJobStore
 from integrations.providers.moneyprinterturbo import MoneyPrinterTurboClient
 
 
@@ -27,10 +30,16 @@ class VideoPipeline:
         generator: NativeVideoGenerator | None = None,
         client: MoneyPrinterTurboClient | None = None,
         planner: OpenAIVideoPlanner | None = None,
+        provider_job_store: VideoProviderJobStore | None = None,
     ) -> None:
         self.memory_manager = memory_manager
         self.generator = generator or NativeVideoGenerator()
         self.client = client
+        self.provider_job_store = provider_job_store or (
+            VideoProviderJobStore(os.getenv("SUDARSHAN_VIDEO_PROVIDER_JOBS_DB", "artifacts/.state/video_provider_jobs.db"))
+            if client is not None
+            else None
+        )
         self.planner = planner or OpenAIVideoPlanner()
         self.storyboard_skill = NativeVideoStoryboardSkill(self.planner)
         self.render_skill = NativeVideoRenderSkill(self.generator)
@@ -87,17 +96,49 @@ class VideoPipeline:
                 script = str(provider_options.pop("video_script", "") or "\n\n".join(
                     scene.narration for scene in scenes if scene.narration
                 ) or memory_context).strip()[:20000]
-                result = self.client.generate(
-                    subject=subject,
-                    script=script,
-                    options=provider_options,
-                    cancel_event=cancel_event,
-                )
+                submit_fingerprint = hashlib.sha256(
+                    json.dumps(
+                        {"subject": subject, "script": script, "options": provider_options},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                if self.provider_job_store is not None:
+                    self.provider_job_store.record_submit_start(
+                        run_id, "moneyprinterturbo", submit_fingerprint
+                    )
+                try:
+                    result = self.client.generate(
+                        subject=subject,
+                        script=script,
+                        options=provider_options,
+                        cancel_event=cancel_event,
+                    )
+                except Exception as exc:
+                    if self.provider_job_store is not None:
+                        self.provider_job_store.record_submit_unknown(run_id, str(exc))
+                    raise
                 artifact = {
                     "provider": "moneyprinterturbo",
                     "provider_task_id": result.provider_task_id,
                     **dict(result.data),
                 }
+                if self.provider_job_store is not None:
+                    if result.status == "pending":
+                        self.provider_job_store.record_submit_success(
+                            run_id, result.provider_task_id, status="pending"
+                        )
+                    elif result.status in {"succeeded", "failed", "cancelled"}:
+                        self.provider_job_store.record_submit_success(
+                            run_id, result.provider_task_id, status="pending"
+                        )
+                        self.provider_job_store.record_terminal(
+                            run_id,
+                            status=result.status,
+                            receipt=result.data,
+                            error=result.error,
+                        )
                 if result.status == "failed":
                     writer.write("video_generation", "failed", result.error or "MoneyPrinterTurbo failed")
                     return PipelineResponse(
@@ -126,10 +167,12 @@ class VideoPipeline:
                     )
                 output = {"provider": "moneyprinterturbo", "subject": subject, "status": "succeeded"}
             else:
+                attempt_id = str(request.metadata.get("attempt_id") or "1")
                 result = self.render_skill.render(
                     package,
                     scenes=scenes,
                     run_id=run_id,
+                    attempt_id=attempt_id,
                     cancel_event=cancel_event,
                     authorization_scope={
                         "user_id": request.user_id,
@@ -192,6 +235,8 @@ class VideoPipeline:
                     "quality_report": result.metadata.get("quality_report"),
                     "subtitle_path": result.metadata.get("subtitle_path"),
                     "music_path": result.metadata.get("music_path"),
+                    "failed_scene_ids": result.metadata.get("failed_scene_ids", []),
+                    "degraded": result.status == "partial" or bool(result.metadata.get("failed_scene_ids")),
                 }
                 quality_report = result.metadata.get("quality_report") or {}
                 if quality_report.get("status") == "failed":
@@ -201,6 +246,28 @@ class VideoPipeline:
                         run_id=run_id, failure="Rendered video failed deterministic media QA.",
                         artifact=artifact,
                         metadata={"provider": "openai-native", "quality_report": quality_report},
+                    )
+                if result.status == "partial":
+                    writer.write(
+                        "video_generation",
+                        "partial",
+                        f"Video generated with partial scene failures: {result.metadata.get('failed_scene_ids')}",
+                    )
+                    return PipelineResponse(
+                        status="partial",
+                        pipeline=self.pipeline_name,
+                        task_id=request.task_id,
+                        run_id=run_id,
+                        failure=f"Video generated partially; failed scenes: {result.metadata.get('failed_scene_ids')}",
+                        output={"provider": "openai-native", "subject": subject, "status": "partial"},
+                        artifact=artifact,
+                        metadata={
+                            **(dict(result.metadata) if self.client is None else {}),
+                            "provider": "openai-native",
+                            "human_approval_required": False,
+                            "degraded": True,
+                            "failed_scene_ids": result.metadata.get("failed_scene_ids", []),
+                        },
                     )
                 output = {"provider": "openai-native", "subject": subject, "status": "succeeded"}
 
@@ -213,17 +280,29 @@ class VideoPipeline:
             artifact["child_plan"] = [item.model_dump(mode="json") for item in child_plan]
             
             writer.write("video_generation", "succeeded", json.dumps(output, ensure_ascii=False))
-            unit = KnowledgeUnit(
-                unit_id=f"video-{run_id}",
-                content=json.dumps({"output": output, "artifact": artifact}, ensure_ascii=False),
-                source=Source(source_id=run_id, source_type=SourceType.VIDEO,
-                              source_reference=f"pipeline://video/{run_id}"),
-                metadata={"pipeline": self.pipeline_name, "delivery_owner": "frontend", "artifact": artifact},
-                provenance={"task_id": request.task_id, "case_id": request.case_id, "run_id": run_id,
-                            "memory_policy": "validated_output_case_write_back"},
+            
+            from pipelines.common.release_gate import can_release_to_case_memory
+            allowed, _ = can_release_to_case_memory(
+                pipeline=self.pipeline_name,
+                output=output,
+                quality_approved=True,
+                status="succeeded",
+                artifact=artifact,
+                human_approval_required=False,
+                human_approved=True,
             )
-            self.memory_manager.remember(unit, request.access_context, scope_type=ScopeType.CASE,
-                                         memory_type=MemoryType.SUMMARY)
+            if allowed:
+                unit = KnowledgeUnit(
+                    unit_id=f"video-{run_id}",
+                    content=json.dumps({"output": output, "artifact": artifact}, ensure_ascii=False),
+                    source=Source(source_id=run_id, source_type=SourceType.VIDEO,
+                                  source_reference=f"pipeline://video/{run_id}"),
+                    metadata={"pipeline": self.pipeline_name, "delivery_owner": "frontend", "artifact": artifact},
+                    provenance={"task_id": request.task_id, "case_id": request.case_id, "run_id": run_id,
+                                "memory_policy": "validated_output_case_write_back"},
+                )
+                self.memory_manager.remember(unit, request.access_context, scope_type=ScopeType.CASE,
+                                             memory_type=MemoryType.SUMMARY)
             return PipelineResponse(
                 status="succeeded", pipeline=self.pipeline_name, task_id=request.task_id,
                 run_id=run_id, output=output, artifact=artifact,
@@ -243,3 +322,17 @@ class VideoPipeline:
                 status="failed", pipeline=self.pipeline_name, task_id=request.task_id,
                 run_id=run_id, failure=str(exc), metadata={"provider": "openai-native"},
             )
+
+    def reconcile_provider_job(self, run_id: str):
+        """Reconcile one durable MoneyPrinterTurbo job after a retry/restart."""
+
+        if self.client is None or self.provider_job_store is None:
+            return None
+
+        def check(_provider: str, provider_task_id: str):
+            if not provider_task_id:
+                return "submit_unknown", None, "provider task ID is not available"
+            result = self.client.status(provider_task_id)
+            return result.status, result.data, result.error
+
+        return self.provider_job_store.reconcile_job(run_id, check)

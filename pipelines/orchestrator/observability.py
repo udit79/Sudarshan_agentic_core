@@ -51,6 +51,21 @@ class ObservabilityEvent(BaseModel):
     wait_reason: str = Field(default="", max_length=500)
     error_code: str | None = Field(default=None, max_length=100)
     usage: TelemetryUsage | None = None
+    source_sequence: int | None = None
+    attempt_id: str | None = Field(default=None, max_length=160)
+    lane_id: str | None = Field(default=None, max_length=160)
+    fallback: bool = False
+    provider_request_id: str | None = Field(default=None, max_length=160)
+    usage_id: str | None = Field(default=None, max_length=160)
+    operation: str | None = Field(default=None, max_length=80)
+    backend: str | None = Field(default=None, max_length=120)
+    memory_id: str | None = Field(default=None, max_length=200)
+    memory_type: str | None = Field(default=None, max_length=40)
+    query_hash: str | None = Field(default=None, max_length=64)
+    trace_id: str | None = Field(default=None, max_length=200)
+    backend_result_count: int | None = Field(default=None, ge=0)
+    accepted_result_count: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
     classification_level: str = "RESTRICTED"
     owner_id: str | None = Field(default=None, max_length=160)
     case_id: str | None = Field(default=None, max_length=160)
@@ -89,6 +104,15 @@ def _usage(value: Any) -> TelemetryUsage | None:
             estimated_cost=max(0.0, float(value.get("estimated_cost", 0.0) or 0.0)),
             is_estimate=bool(value.get("is_estimate", False)),
         )
+    except (TypeError, ValueError):
+        return None
+
+
+def _nonnegative_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
     except (TypeError, ValueError):
         return None
 
@@ -133,6 +157,20 @@ def runtime_event(name: str, payload: Mapping[str, Any]) -> ObservabilityEvent |
         wait_reason=("Child skill is waiting for a dependency or cache owner." if status == "waiting" else ""),
         error_code=_text(payload.get("error_code"), 100),
         usage=_usage(payload.get("usage")),
+        attempt_id=_text(payload.get("attempt_id"), 160),
+        lane_id=_text(payload.get("lane_id"), 160),
+        fallback=bool(payload.get("fallback", False)),
+        provider_request_id=_text(payload.get("provider_request_id"), 160),
+        usage_id=_text(payload.get("usage_id"), 160),
+        operation=_text(payload.get("operation"), 80),
+        backend=_text(payload.get("backend"), 120),
+        memory_id=_text(payload.get("memory_id"), 200),
+        memory_type=_text(payload.get("memory_type"), 40),
+        query_hash=_text(payload.get("query_hash"), 64),
+        trace_id=_text(payload.get("trace_id"), 200),
+        backend_result_count=_nonnegative_int(payload.get("backend_result_count")),
+        accepted_result_count=_nonnegative_int(payload.get("accepted_result_count")),
+        duration_ms=_nonnegative_int(payload.get("duration_ms")),
         classification_level=require_classification(str(payload.get("classification_level", "RESTRICTED"))),
         owner_id=_text(payload.get("owner_id"), 160),
         case_id=_text(payload.get("case_id"), 160),
@@ -360,6 +398,7 @@ def _summary_from_events(events: tuple[ObservabilityEvent, ...]) -> TelemetrySum
     artifact_ids: set[str] = set()
     child_ids: set[str] = set()
     quality_ids: set[str] = set()
+    seen_usages: set[str] = set()
     summary = TelemetrySummary(event_count=len(events))
     for event in events:
         artifact_ids.update(event.artifact_ids)
@@ -376,6 +415,10 @@ def _summary_from_events(events: tuple[ObservabilityEvent, ...]) -> TelemetrySum
         if event.status in {"waiting", "waiting_for_input", "waiting_for_approval", "pending"} or event.wait_reason:
             summary.wait_count += 1
         if event.usage is not None:
+            usage_key = event.usage_id or event.event_id
+            if usage_key in seen_usages:
+                continue
+            seen_usages.add(usage_key)
             summary.input_tokens += event.usage.input_tokens
             summary.output_tokens += event.usage.output_tokens
             summary.reasoning_tokens += event.usage.reasoning_tokens
@@ -409,6 +452,12 @@ def _progress_observability_event(event: ProgressEvent) -> ObservabilityEvent:
         wait_reason=event.wait_reason or (event.message if event.requires_action else ""),
         error_code=event.error_code,
         usage=event.usage,
+        source_sequence=event.source_sequence,
+        attempt_id=event.attempt_id,
+        lane_id=event.lane_id,
+        fallback=event.fallback,
+        provider_request_id=event.provider_request_id,
+        usage_id=event.usage_id,
     )
 
 

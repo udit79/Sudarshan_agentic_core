@@ -49,7 +49,15 @@ def export_diagram(spec: DiagramSpec, request: DiagramExportRequest) -> DiagramA
         raise ValueError("diagram style gate failed: " + "; ".join(style_issues))
     graph = compile_flowchart_spec(spec)
     svg = render_flowchart_svg(graph)
-    svg_issues = inspect_flowchart_svg(svg, required_text=(spec.diagram_id,))
+    if spec.accessibility:
+        title = spec.accessibility.title
+        description = spec.accessibility.description
+        svg = re.sub(r'<title id="diagram-title">.*?</title>', f'<title id="diagram-title">{escape(title)}</title>', svg, count=1, flags=re.DOTALL)
+        svg = re.sub(r'<desc id="diagram-desc">.*?</desc>', f'<desc id="diagram-desc">{escape(description)}</desc>', svg, count=1, flags=re.DOTALL)
+    svg_issues = inspect_flowchart_svg(
+        svg,
+        required_text=(spec.accessibility.title if spec.accessibility else spec.title,),
+    )
     if svg_issues:
         raise ValueError("diagram SVG quality gate failed: " + "; ".join(svg_issues))
     if request.format == "html":
@@ -59,7 +67,11 @@ def export_diagram(spec: DiagramSpec, request: DiagramExportRequest) -> DiagramA
     destination = Path(request.output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(content, encoding="utf-8")
-    quality = inspect_visual_artifact(destination, kind="svg" if request.format == "svg" else "other", required_text=(spec.diagram_id,))
+    quality = inspect_visual_artifact(
+        destination,
+        kind="svg" if request.format == "svg" else "other",
+        required_text=(spec.accessibility.title if spec.accessibility else spec.title,),
+    )
     if not quality.approved:
         raise ValueError("diagram artifact quality gate failed: " + "; ".join(quality.issues))
     source_hash = _source_hash(spec)
@@ -80,14 +92,6 @@ def _source_hash(spec: DiagramSpec) -> str:
 
 def _html_document(spec: DiagramSpec, svg: str) -> str:
     title = spec.accessibility.title if spec.accessibility else spec.title
-    description = spec.accessibility.description if spec.accessibility else f"{spec.kind} diagram."
-    svg = svg.replace(
-        '<svg ',
-        '<svg role="img" aria-labelledby="diagram-title diagram-desc" ',
-        1,
-    )
-    svg = re.sub(r"<title>.*?</title>", f"<title id=\"diagram-title\">{escape(title)}</title>", svg, count=1, flags=re.DOTALL)
-    svg = re.sub(r"<desc>.*?</desc>", f"<desc id=\"diagram-desc\">{escape(description)}</desc>", svg, count=1, flags=re.DOTALL)
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         f"<title>{escape(title)}</title></head><body>{svg}</body></html>"

@@ -42,6 +42,35 @@ def test_runtime_event_allowlist_drops_payload_and_projects_usage() -> None:
     assert event.artifact_ids == ["artifact-1"]
 
 
+def test_runtime_event_projects_safe_memory_operation_details() -> None:
+    event = runtime_event(
+        "memory.recall.completed",
+        {
+            "run_id": "run-memory",
+            "owner_id": "operator-1",
+            "case_id": "case-1",
+            "operation": "recall",
+            "backend": "CogneeHttpAdapter",
+            "stage_id": "grounding",
+            "query_hash": "abc123",
+            "backend_result_count": 4,
+            "accepted_result_count": 2,
+            "trace_id": "trace-1",
+            "duration_ms": 38,
+            "raw_context": "must never be stored",
+        },
+    )
+
+    assert event is not None
+    assert event.operation == "recall"
+    assert event.backend == "CogneeHttpAdapter"
+    assert event.backend_result_count == 4
+    assert event.accepted_result_count == 2
+    assert event.trace_id == "trace-1"
+    assert event.duration_ms == 38
+    assert not hasattr(event, "raw_context")
+
+
 def test_observability_store_aggregates_runtime_and_progress_metrics(tmp_path) -> None:
     store = SQLiteObservabilityStore(str(tmp_path / "observability.db"))
     store.record_runtime_event(

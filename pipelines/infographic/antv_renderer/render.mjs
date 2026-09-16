@@ -50,20 +50,42 @@ function extractVisibleValues(syntax) {
     .filter((value, index, all) => all.indexOf(value) === index);
 }
 
+function wrapText(value, maxChars) {
+  // Naive word-wrap for safe SVG <tspan> lines (no HTML).
+  const words = String(value).split(/\s+/);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    if ((line + ' ' + word).trim().length > maxChars) {
+      if (line) lines.push(line);
+      line = word;
+    } else {
+      line = (line ? line + ' ' : '') + word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, 3); // cap at 3 lines per card
+}
+
 function fallbackSvg(syntax, width, height) {
   const values = extractVisibleValues(syntax).slice(0, 10);
   const title = values.shift() || 'Sudarshan Infographic Draft';
   const cards = values.length ? values : ['No visible text was available in the supplied specification.'];
-  const cardWidth = (width - 96) / Math.min(cards.length, 3);
+  const cols = Math.min(cards.length, 3);
+  const cardWidth = (width - 96) / cols;
   const cardMarkup = cards.map((value, index) => {
     const column = index % 3;
     const row = Math.floor(index / 3);
     const x = 24 + column * cardWidth;
     const y = 170 + row * 142;
-    return `<g><rect x="${x}" y="${y}" width="${cardWidth - 16}" height="112" rx="12" fill="#F8FAFC" stroke="#CBD5E1"/><text x="${x + 18}" y="${y + 30}" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1E3A8A">${escapeXml(`Observation ${index + 1}`)}</text><foreignObject x="${x + 18}" y="${y + 44}" width="${cardWidth - 52}" height="58"><div xmlns="http://www.w3.org/1999/xhtml" style="font: 16px Arial,sans-serif;line-height:1.35;color:#334155;">${escapeXml(value)}</div></foreignObject></g>`;
+    const lines = wrapText(value, Math.floor((cardWidth - 52) / 8));
+    const labelLines = lines.map((l, li) =>
+      `<tspan x="${x + 18}" dy="${li === 0 ? '1.2em' : '1.35em'}">${escapeXml(l)}</tspan>`
+    ).join('');
+    return `<g><rect x="${x}" y="${y}" width="${cardWidth - 16}" height="112" rx="12" fill="#F8FAFC" stroke="#CBD5E1"/><text x="${x + 18}" y="${y + 30}" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#1E3A8A">${escapeXml(`Observation ${index + 1}`)}</text><text x="${x + 18}" y="${y + 44}" font-family="Arial, sans-serif" font-size="13" fill="#334155">${labelLines}</text></g>`;
   }).join('');
   const caveat = syntax.match(/This is synthetic test data only and must not be treated as operational intelligence\.?/i)?.[0];
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#F8FAFC"/><rect x="24" y="24" width="${width - 48}" height="116" rx="14" fill="#FFFFFF" stroke="#1E3A8A" stroke-width="2"/><text x="48" y="70" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#0F172A">${escapeXml(title)}</text><text x="48" y="106" font-family="Arial, sans-serif" font-size="15" fill="#475569">Sudarshan local preview - rendered from the supplied specification</text>${cardMarkup}<text x="32" y="${height - 22}" font-family="Arial, sans-serif" font-size="12" fill="#475569">${escapeXml(caveat || 'Draft preview - review the quality notice before operational use.')}</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="infographic-title infographic-desc" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><title id="infographic-title">${escapeXml(title)}</title><desc id="infographic-desc">Sudarshan local infographic preview rendered from the supplied specification.</desc><rect width="100%" height="100%" fill="#F8FAFC"/><rect x="24" y="24" width="${width - 48}" height="116" rx="14" fill="#FFFFFF" stroke="#1E3A8A" stroke-width="2"/><text x="48" y="70" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#0F172A">${escapeXml(title)}</text><text x="48" y="106" font-family="Arial, sans-serif" font-size="15" fill="#475569">Sudarshan local preview - rendered from the supplied specification</text>${cardMarkup}<text x="32" y="${height - 22}" font-family="Arial, sans-serif" font-size="12" fill="#475569">${escapeXml(caveat || 'Draft preview - review the quality notice before operational use.')}</text></svg>`;
 }
 
 function runAntvWorker(workerPayload, timeoutMs) {
@@ -115,6 +137,11 @@ try {
   // a stuck parser or renderer cannot keep the request process alive.
   renderer = 'fallback';
   warning = String(error?.message || error);
+  svg = fallbackSvg(payload.syntax, payload.width || 1200, payload.height || 675);
+}
+if (/<foreignObject\b/i.test(svg)) {
+  renderer = 'fallback';
+  warning = 'AntV output contained forbidden foreignObject content; safe fallback was used.';
   svg = fallbackSvg(payload.syntax, payload.width || 1200, payload.height || 675);
 }
 const path = `${outputDir}/${artifactName}.svg`;

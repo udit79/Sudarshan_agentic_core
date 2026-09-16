@@ -55,6 +55,8 @@ class RunContext:
     distribution: str = "Authorized NTRO personnel"
     policy: RunPolicy = field(default_factory=RunPolicy)
     ancestors: tuple[str, ...] = ()
+    attempt_id: str | None = None
+    lease_token: str | None = None
     allowed_capabilities: frozenset[str] | None = None
     allowed_tools: frozenset[str] | None = None
     allowed_trust_tiers: frozenset[str] | None = None
@@ -91,7 +93,7 @@ class SkillRuntime:
         try:
             manifest, adapter = self._validate_call(call, parent_context)
         except SkillRuntimeError as error:
-            self._emit("skill.blocked", call, error_code=error.code, message=str(error))
+            self._emit("skill.blocked", call, attempt_id=parent_context.attempt_id, error_code=error.code, message=str(error))
             return SkillResult(
                 skill_call_id=call.skill_call_id,
                 child_run_id=self._child_id(call),
@@ -111,6 +113,7 @@ class SkillRuntime:
                 self._emit(
                     "skill.cache_hit",
                     call,
+                    attempt_id=parent_context.attempt_id,
                     child_run_id=child_run_id,
                     fingerprint=cache_fingerprint,
                     quality_report_id=cached.quality_report_id,
@@ -124,7 +127,7 @@ class SkillRuntime:
                 )
             cache_claim_owner = self._cache_store.try_claim(cache_fingerprint)
             if cache_claim_owner is None:
-                self._emit("skill.cache_wait", call, fingerprint=cache_fingerprint)
+                self._emit("skill.cache_wait", call, attempt_id=parent_context.attempt_id, fingerprint=cache_fingerprint)
                 return SkillResult(
                     skill_call_id=call.skill_call_id,
                     child_run_id=child_run_id,
@@ -137,7 +140,7 @@ class SkillRuntime:
         except SkillRuntimeError as error:
             if cache_fingerprint is not None and cache_claim_owner is not None:
                 self._cache_store.release_claim(cache_fingerprint, cache_claim_owner)
-            self._emit("skill.blocked", call, error_code=error.code, message=str(error))
+            self._emit("skill.blocked", call, attempt_id=parent_context.attempt_id, error_code=error.code, message=str(error))
             return SkillResult(
                 skill_call_id=call.skill_call_id,
                 child_run_id=child_run_id,
@@ -162,7 +165,7 @@ class SkillRuntime:
                 budget_reservation_id = reservation.reservation_id
             except BudgetExceededError as error:
                 self._release_slot(call, parent_context)
-                self._emit("skill.blocked", call, error_code=error.code, message=str(error))
+                self._emit("skill.blocked", call, attempt_id=parent_context.attempt_id, error_code=error.code, message=str(error))
                 return SkillResult(
                     skill_call_id=call.skill_call_id,
                     child_run_id=child_run_id,
@@ -171,7 +174,7 @@ class SkillRuntime:
                     failure_message=str(error),
                 )
 
-        self._emit("skill.started", call, child_run_id=child_run_id, manifest_version=manifest.version)
+        self._emit("skill.started", call, attempt_id=parent_context.attempt_id, child_run_id=child_run_id, manifest_version=manifest.version)
         try:
             child_cancel_event = Event()
             request = self._build_request(call, parent_context, child_task_id, child_cancel_event)
@@ -197,15 +200,15 @@ class SkillRuntime:
                     failure_code="CHILD_TIMEOUT",
                     failure_message="Child skill exceeded its wall-time budget.",
                 )
-                self._emit("skill.failed", call, child_run_id=child_run_id, error_code=result.failure_code)
+                self._emit("skill.failed", call, attempt_id=parent_context.attempt_id, child_run_id=child_run_id, error_code=result.failure_code)
                 return result
             if parent_context.cancel_event.is_set():
                 if budget_reservation_id is not None and not budget_settled:
                     self._budget_controller.release(budget_reservation_id)
                     budget_settled = True
-                return self._cancelled(call, child_run_id, "PARENT_CANCELLED")
+                return self._cancelled(call, child_run_id, "PARENT_CANCELLED", attempt_id=parent_context.attempt_id)
 
-            usage_record = self._usage_from_response(call, response)
+            usage_record = self._usage_from_response(call, response, attempt_id=parent_context.attempt_id)
             if budget_reservation_id is not None:
                 try:
                     self._budget_controller.commit(
@@ -223,7 +226,7 @@ class SkillRuntime:
                         failure_code=error.code,
                         failure_message=str(error),
                     )
-                    self._emit("skill.failed", call, child_run_id=child_run_id, error_code=error.code)
+                    self._emit("skill.failed", call, attempt_id=parent_context.attempt_id, child_run_id=child_run_id, error_code=error.code)
                     return result
 
             result = self._result_from_response(call, child_run_id, response)
@@ -242,6 +245,7 @@ class SkillRuntime:
             self._emit(
                 event_name,
                 call,
+                attempt_id=parent_context.attempt_id,
                 child_run_id=child_run_id,
                 error_code=result.failure_code,
                 artifact_ids=result.artifact_ids,
@@ -257,7 +261,7 @@ class SkillRuntime:
                 failure_code="CHILD_EXCEPTION",
                 failure_message=str(error)[:1000],
             )
-            self._emit("skill.failed", call, child_run_id=child_run_id, error_code=result.failure_code)
+            self._emit("skill.failed", call, attempt_id=parent_context.attempt_id, child_run_id=child_run_id, error_code=result.failure_code)
             return result
         finally:
             if budget_reservation_id is not None and not budget_settled:
@@ -534,7 +538,7 @@ class SkillRuntime:
         raw_metadata_ids = metadata.get("artifact_ids", [])
         if not artifact_ids and isinstance(raw_metadata_ids, (list, tuple)):
             artifact_ids = [str(item) for item in raw_metadata_ids if str(item).strip()]
-        status = {"pending": "waiting", "failed": "failed", "succeeded": "succeeded"}.get(response.status, "failed")
+        status = {"pending": "waiting", "failed": "failed", "succeeded": "succeeded", "partial": "partial"}.get(response.status, "failed")
         raw_child_plan = artifact.get("child_plan", []) if isinstance(artifact, Mapping) else []
         child_plan = [dict(item) for item in raw_child_plan if isinstance(item, Mapping)]
         return SkillResult(
@@ -550,7 +554,7 @@ class SkillRuntime:
         )
 
     @staticmethod
-    def _usage_from_response(call: SkillCall, response: PipelineResponse) -> UsageRecord:
+    def _usage_from_response(call: SkillCall, response: PipelineResponse, attempt_id: str | None = None) -> UsageRecord:
         metadata = dict(response.metadata or {})
         raw_usage = metadata.get("usage")
         usage = dict(raw_usage) if isinstance(raw_usage, Mapping) else metadata
@@ -569,6 +573,7 @@ class SkillRuntime:
                 if usage.get("estimated_cost") is not None else None
             ),
         ).model_copy(update={
+            "attempt_id": attempt_id,
             "tool_calls": int(usage.get("tool_calls", 0) or 0),
             "is_estimate": bool(usage.get("is_estimate", receipt.is_estimate)),
             "charge_type": str(usage.get("charge_type", "provider")),
@@ -584,7 +589,7 @@ class SkillRuntime:
             ),
         })
 
-    def _cancelled(self, call: SkillCall, child_run_id: str, code: str) -> SkillResult:
+    def _cancelled(self, call: SkillCall, child_run_id: str, code: str, attempt_id: str | None = None) -> SkillResult:
         result = SkillResult(
             skill_call_id=call.skill_call_id,
             child_run_id=child_run_id,
@@ -592,10 +597,10 @@ class SkillRuntime:
             failure_code=code,
             failure_message="Child skill cancelled by its parent.",
         )
-        self._emit("skill.cancelled", call, child_run_id=child_run_id, error_code=code)
+        self._emit("skill.cancelled", call, attempt_id=attempt_id, child_run_id=child_run_id, error_code=code)
         return result
 
-    def _emit(self, name: str, call: SkillCall, **fields: Any) -> None:
+    def _emit(self, name: str, call: SkillCall, attempt_id: str | None = None, **fields: Any) -> None:
         if self._event_sink is None:
             return
         payload = {
@@ -603,6 +608,7 @@ class SkillRuntime:
             "parent_run_id": call.parent_run_id,
             "parent_node_id": call.parent_node_id,
             "skill_id": call.skill_id,
+            "attempt_id": attempt_id,
             **fields,
         }
         self._event_sink(name, payload)

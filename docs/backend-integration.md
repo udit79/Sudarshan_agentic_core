@@ -78,6 +78,34 @@ when it is not in the JSON payload. If `user_id` is present, it must match the
 operator header. Classification is normalized to one of `UNCLASSIFIED`,
 `RESTRICTED`, `CONFIDENTIAL`, `SECRET`, or `TOP SECRET`.
 
+### What `RESTRICTED` means in this project
+
+`RESTRICTED` is the default project handling label for sensitive case material
+that is not approved for public release or unapproved external distribution.
+It may contain operational details, personal information, source references, or
+other case content that should be available only to an authorized operator with
+the matching User/Case/Task scope and a legitimate need to use it.
+
+In the current policy model, the levels are ordered from least to most
+restrictive:
+
+```text
+UNCLASSIFIED < RESTRICTED < CONFIDENTIAL < SECRET < TOP SECRET
+```
+
+An accessor may read an artifact only when their declared access level is at
+least as high as the artifact's level. The level is propagated through runs,
+memory/evidence references, artifacts, A2A handoffs, response headers, and safe
+audit/observability metadata. The separate `distribution` field further
+limits the intended recipients; the default is `Authorized NTRO personnel`.
+
+This is an application policy label, not proof of a real-world security
+clearance or a legal classification decision. `RESTRICTED` does not by itself
+provide encryption, identity proofing, network isolation, provider approval,
+retention enforcement, or need-to-know decisions. Production deployment must
+map these values to the approved organizational/security policy and provide
+those controls at the gateway, storage, network, and operator-identity layers.
+
 | Method | Route | Use | Success |
 | --- | --- | --- | --- |
 | GET | `/health` | service and registry check | `200` |

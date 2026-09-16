@@ -6,14 +6,16 @@ def _output(bullets=None):
     return PresentationOutput(
         presentation_id="brief-1",
         title="Brief",
-        subtitle="Subtitle",
         classification_level="RESTRICTED",
         distribution="Authorized",
-        agenda=["Context", "Decision"],
-        slides=[SlideContent(slide_number=1, title="Context", bullets=bullets or ["One"]) , SlideContent(slide_number=2, title="Decision", bullets=["Two"])],
-        conclusion_summary="Summary",
-        key_takeaways=["Takeaway"],
-        confidence_statement="High",
+        slides=[
+            SlideContent(slide_id="cover", order=1, title="Cover", bullets=[], layout="cover"),
+            SlideContent(slide_id="agenda", order=2, title="Agenda", bullets=["Context", "Decision"], layout="agenda"),
+            SlideContent(slide_id="s1", order=3, title="Context", bullets=bullets or ["One"], layout="content"),
+            SlideContent(slide_id="s2", order=4, title="Decision", bullets=["Two"], layout="content"),
+            SlideContent(slide_id="conclusion", order=5, title="Conclusion", bullets=["Takeaway"], layout="conclusion"),
+            SlideContent(slide_id="closing", order=6, title="Closing", bullets=["High"], layout="closing"),
+        ],
     )
 
 

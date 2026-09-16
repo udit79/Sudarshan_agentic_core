@@ -7,10 +7,11 @@ from typing import Any
 from pipelines.advisory.schemas import QualityReview
 from pipelines.common.text_generation import TextTransformationFlow
 from pipelines.infographic.agents import build_agents
+from pipelines.infographic.quality import inspect_svg, _NEVER_APPROVED_MODES
 from pipelines.infographic.renderer import AntVInfographicRenderer
-from pipelines.infographic.quality import inspect_svg
 from pipelines.infographic.schemas import InfographicOutput
 from pipelines.infographic.tasks import build_tasks
+from pipelines.infographic.waiver import OperatorWaiverStore
 
 
 class InfographicFlow(TextTransformationFlow):
@@ -42,6 +43,7 @@ class InfographicFlow(TextTransformationFlow):
         max_attempts: int = 2,
         llm: Any = None,
         renderer: AntVInfographicRenderer | None = None,
+        operator_waiver_store: OperatorWaiverStore | None = None,
         progress_callback: Any = None,
     ) -> None:
         super().__init__(
@@ -51,15 +53,18 @@ class InfographicFlow(TextTransformationFlow):
             progress_callback=progress_callback,
         )
         self.renderer = renderer or AntVInfographicRenderer()
+        self.operator_waiver_store = operator_waiver_store or OperatorWaiverStore()
 
     def enrich_output(self, output: Any) -> InfographicOutput:
         """Render valid syntax, retaining syntax-only output if Node is unavailable."""
         from pipelines.orchestrator.cross_skill import build_child_plan
 
-
         if not isinstance(output, InfographicOutput):
             return output
         try:
+            operator_waiver_id = str(
+                self._request().metadata.get("operator_waiver_id", "")
+            ).strip() or None
             artifact_path = self.renderer(
                 output.syntax,
                 artifact_name=f"{output.infographic_id}-{self.state.run_id}",
@@ -69,13 +74,37 @@ class InfographicFlow(TextTransformationFlow):
                 required_text=(output.title,),
                 renderer_mode=self.renderer.last_render_mode,
                 renderer_warning=self.renderer.last_render_warning,
+                operator_waiver_id=(
+                    operator_waiver_id
+                    if self.renderer.last_render_mode != "fallback"
+                    else (
+                        operator_waiver_id
+                        if operator_waiver_id
+                        and self.operator_waiver_store.verify_and_consume_waiver(
+                            operator_waiver_id, run_id=self.state.run_id
+                        )
+                        else None
+                    )
+                ),
             )
             if not quality_report.approved:
                 raise RuntimeError(f"Infographic SVG quality gate failed: {quality_report.issues}")
+
+            # Typed mode enforcement: mode drives degraded flag, not a caveat string.
+            typed_mode = quality_report.renderer_mode
+            degraded = quality_report.degraded  # True for 'fallback'
+
+            # syntax_only and failed must never be marked 'rendered'.
+            if typed_mode in _NEVER_APPROVED_MODES:
+                raise RuntimeError(
+                    f"renderer_mode '{typed_mode}' cannot produce a rendered artifact"
+                )
+
             caveats = list(output.caveats)
-            if self.renderer.last_render_mode == "fallback":
-                warning = self.renderer.last_render_warning or "AntV SSR did not complete within its configured bound."
-                caveats.append(f"Rendered with the deterministic local SVG fallback: {warning}")
+            if degraded:
+                warning = quality_report.renderer_warning or "AntV SSR did not complete within its configured bound."
+                caveats.append(f"Rendered with the deterministic local SVG fallback (degraded): {warning}")
+
             rendered = output.model_copy(update={
                 "render_status": "rendered",
                 "artifact_path": artifact_path,
@@ -85,7 +114,10 @@ class InfographicFlow(TextTransformationFlow):
             self.state.artifact = {
                 "path": artifact_path,
                 "artifact_type": "svg",
-                "renderer_mode": self.renderer.last_render_mode,
+                "renderer_mode": typed_mode,
+                "degraded": degraded,
+                "renderer_warning": quality_report.renderer_warning,
+                "operator_waiver_id": quality_report.operator_waiver_id,
                 "renderer_version": getattr(self.renderer, "renderer_version", "unknown"),
                 "quality_report": quality_report.model_dump(mode="json"),
                 "child_plan": [
@@ -100,6 +132,7 @@ class InfographicFlow(TextTransformationFlow):
             }
             return rendered
         except Exception as exc:
+            # Any failure produces syntax_only — explicitly unapproved, never rendered.
             return output.model_copy(update={
                 "render_status": "syntax_only",
                 "artifact_path": None,

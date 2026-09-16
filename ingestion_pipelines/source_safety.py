@@ -108,7 +108,16 @@ def _looks_like_text(sample: bytes) -> bool:
     return True
 
 
-def _matches_magic(path: Path, extension: str, sample: bytes, *, max_uncompressed_bytes: int) -> bool:
+def _matches_magic(
+    path: Path,
+    extension: str,
+    sample: bytes,
+    *,
+    max_uncompressed_bytes: int,
+    byte_size: int = 0,
+    max_archive_members: int = 2048,
+    max_expansion_ratio: float = 100.0,
+) -> bool:
     if extension in TEXT_EXTENSIONS:
         return _looks_like_text(sample)
     if extension in PDF_EXTENSIONS:
@@ -133,9 +142,12 @@ def _matches_magic(path: Path, extension: str, sample: bytes, *, max_uncompresse
                 infos = archive.infolist()
         except (OSError, zipfile.BadZipFile):
             return False
-        if len(infos) > 4096:
+        if len(infos) > max_archive_members:
             return False
-        if sum(info.file_size for info in infos) > max_uncompressed_bytes:
+        total_uncompressed = sum(info.file_size for info in infos)
+        if total_uncompressed > max_uncompressed_bytes:
+            return False
+        if byte_size > 0 and (total_uncompressed / byte_size) > max_expansion_ratio:
             return False
         names = {info.filename for info in infos}
         if any(
@@ -192,7 +204,7 @@ def inspect_source(
 
     with path.open("rb") as source:
         sample = source.read(4096)
-    if not _matches_magic(path, extension, sample, max_uncompressed_bytes=max_bytes):
+    if not _matches_magic(path, extension, sample, max_uncompressed_bytes=max_bytes, byte_size=byte_size):
         raise SourceSafetyError("source content does not match its declared file type")
 
     classification = require_classification(classification_level)

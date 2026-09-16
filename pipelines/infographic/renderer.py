@@ -10,6 +10,17 @@ from pathlib import Path
 from threading import Event
 from typing import Any
 
+from pipelines.infographic.quality import coerce_renderer_mode, RendererMode
+
+
+# Time reserved for fallback generation + process cleanup after the AntV
+# worker deadline fires.  The outer Python deadline is:
+#   timeout_seconds = AntV_worker_budget + FALLBACK_BUDGET + SHUTDOWN_HEADROOM
+# Minimum valid timeout_seconds enforced in __init__.
+FALLBACK_BUDGET_SECONDS: int = 3
+SHUTDOWN_HEADROOM_SECONDS: int = 3
+MINIMUM_TIMEOUT_SECONDS: int = FALLBACK_BUDGET_SECONDS + SHUTDOWN_HEADROOM_SECONDS + 1
+
 
 class AntVInfographicRenderer:
     """Render validated AntV syntax to SVG through a small Node subprocess."""
@@ -48,7 +59,15 @@ class AntVInfographicRenderer:
                 raise ValueError("ANTV_RENDER_TIMEOUT_SECONDS must be an integer") from exc
         if timeout_seconds < 1:
             raise ValueError("timeout_seconds must be positive")
+        min_required = FALLBACK_BUDGET_SECONDS + SHUTDOWN_HEADROOM_SECONDS + 1
+        if timeout_seconds < min_required:
+            raise ValueError(
+                f"timeout_seconds must be at least {min_required} "
+                f"(fallback={FALLBACK_BUDGET_SECONDS}s + shutdown={SHUTDOWN_HEADROOM_SECONDS}s + 1s worker minimum)"
+            )
         self.timeout_seconds = timeout_seconds
+        # Effective deadline given to the subprocess loop; reserves headroom.
+        self._effective_deadline = timeout_seconds - SHUTDOWN_HEADROOM_SECONDS
 
     def __call__(
         self,
@@ -65,7 +84,12 @@ class AntVInfographicRenderer:
             "artifactName": artifact_name,
             "width": self.width,
             "height": self.height,
-            "ssrTimeoutMs": self.ssr_timeout_ms,
+            # Keep the nested SSR worker inside the outer deadline so the
+            # reserved shutdown/fallback headroom remains real.
+            "ssrTimeoutMs": min(
+                self.ssr_timeout_ms,
+                max(100, int(self._effective_deadline * 1000) - 100),
+            ),
         })
         if cancel_event is not None and cancel_event.is_set():
             raise RuntimeError("AntV renderer cancelled before start")
@@ -85,9 +109,12 @@ class AntVInfographicRenderer:
                 if cancel_event is not None and cancel_event.is_set():
                     self._stop(process)
                     raise RuntimeError("AntV renderer cancelled")
-                if time.monotonic() - started >= self.timeout_seconds:
+                if time.monotonic() - started >= self._effective_deadline:
                     self._stop(process)
-                    raise RuntimeError("AntV renderer exceeded its deadline")
+                    raise RuntimeError(
+                        f"AntV outer process exceeded deadline after {self._effective_deadline}s "
+                        "(outer-process timeout)"
+                    )
                 time.sleep(0.05)
             stdout = process.stdout.read() if process.stdout is not None else b""
             stderr = process.stderr.read() if process.stderr is not None else b""
@@ -99,7 +126,10 @@ class AntVInfographicRenderer:
         try:
             result: Any = json.loads(stdout.decode("utf-8"))
             path = result["path"]
-            self.last_render_mode = str(result.get("renderer", "antv"))
+            # Coerce the Node-supplied renderer string to a typed RendererMode.
+            # Unknown values become 'unknown' and will fail the quality gate.
+            raw_mode = result.get("renderer")
+            self.last_render_mode: RendererMode = coerce_renderer_mode(str(raw_mode) if raw_mode is not None else None)
             warning = result.get("warning")
             self.last_render_warning = str(warning) if warning else None
         except (json.JSONDecodeError, KeyError, TypeError) as exc:

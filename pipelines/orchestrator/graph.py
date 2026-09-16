@@ -51,8 +51,11 @@ class OrchestratorState(TypedDict):
     request: dict[str, Any]
     run_id: str
     task_id: str
+    attempt_id: str | None
+    lease_token: str | None
     pipeline: str
     requested_pipelines: list[str]
+    preparation_id: str | None
     understanding: dict[str, Any]
     clarification_required: bool
     clarification_questions: list[str]
@@ -96,6 +99,7 @@ def _request_from_dict(data: Mapping[str, Any]) -> AdvisoryRequest:
         parent_artifact_id=data.get("parent_artifact_id"),
         revision_instruction=data.get("revision_instruction"),
         revision_scope=tuple(data.get("revision_scope", ())),
+        constraints=data.get("constraints"),
         metadata=data.get("metadata", {}),
     )
 
@@ -116,6 +120,7 @@ def _request_to_dict(request: AdvisoryRequest) -> dict[str, Any]:
         "parent_artifact_id": request.parent_artifact_id,
         "revision_instruction": request.revision_instruction,
         "revision_scope": list(request.revision_scope),
+        "constraints": request.constraints.model_dump(mode="json") if hasattr(request.constraints, "model_dump") else request.constraints,
         "metadata": dict(request.metadata),
     }
 
@@ -492,6 +497,8 @@ class PipelineOrchestrator:
                 task_id=state["task_id"],
                 case_id=request.case_id,
                 run_id=state["run_id"],
+                attempt_id=state.get("attempt_id"),
+                lease_token=state.get("lease_token"),
                 attempt=1,
                 top_k=request.top_k,
                 token_budget=request.token_budget,
@@ -547,6 +554,8 @@ class PipelineOrchestrator:
         *,
         run_id: str | None = None,
         cancellation_event: Event | None = None,
+        attempt_id: str | None = None,
+        lease_token: str | None = None,
     ) -> OrchestrationResult:
         resolved_run_id = run_id or f"run-{uuid4()}"
         ProgressReporter(self.progress_sink, run_id=resolved_run_id, task_id=request.task_id).emit(
@@ -557,19 +566,31 @@ class PipelineOrchestrator:
         )
         request_data = _request_to_dict(request)
         request_data["metadata"] = {**dict(request.metadata), "run_id": resolved_run_id}
+        prepared_pack = request.metadata.get("context_pack")
+        if not isinstance(prepared_pack, Mapping):
+            prepared_pack = request.metadata.get("request_context_pack")
+        if not isinstance(prepared_pack, Mapping):
+            prepared_pack = {}
+        prepared_records = prepared_pack.get("records", [])
+        if not isinstance(prepared_records, list):
+            prepared_records = []
+        prepared_context = str(prepared_pack.get("context_text", ""))
+        selected_pipelines = [str(item) for item in request.requested_pipelines]
         initial: OrchestratorState = {
             "request": request_data,
             "run_id": resolved_run_id,
             "task_id": request.task_id,
-            "pipeline": "",
-            "requested_pipelines": [],
+            "attempt_id": attempt_id,
+            "lease_token": lease_token,
+            "pipeline": selected_pipelines[0] if selected_pipelines else "",
+            "requested_pipelines": selected_pipelines,
             "understanding": {},
             "clarification_required": False,
             "clarification_questions": [],
             "clarification_response": None,
-            "request_memory_context": "",
-            "request_memory_records": [],
-            "request_context_pack": {},
+            "request_memory_context": prepared_context,
+            "request_memory_records": prepared_records,
+            "request_context_pack": dict(prepared_pack),
             "memory_context": "",
             "memory_records": [],
             "context_pack": {},
@@ -662,10 +683,30 @@ class PipelineOrchestrator:
                        message="Understanding the requested operation")
         try:
             request = _request_from_dict(state["request"])
-            understanding = self.request_understander.run(
-                request,
-                memory_context=str(state.get("request_memory_context", "")),
-            )
+
+            # Use pre-validated routing if available from the preparation phase
+            if request.requested_pipelines:
+                from pipelines.orchestrator.understanding import RequestUnderstanding
+                understanding = RequestUnderstanding(
+                    intent=request.operation,
+                    requested_pipeline=request.requested_pipelines[0],
+                    requested_pipelines=list(request.requested_pipelines),
+                    audience=request.distribution,
+                    classification_level=request.classification_level,
+                    distribution=request.distribution,
+                    operation=request.operation,
+                    parent_run_id=request.parent_run_id,
+                    parent_artifact_id=request.parent_artifact_id,
+                    revision_scope=list(request.revision_scope),
+                    confidence=1.0,
+                    clarification_required=False,
+                    clarification_questions=[],
+                )
+            else:
+                understanding = self.request_understander.run(
+                    request,
+                    memory_context=str(state.get("request_memory_context", "")),
+                )
             pipelines = understanding.requested_pipelines or [understanding.requested_pipeline]
             pipeline = pipelines[0]
             request_data = dict(state["request"])
@@ -745,6 +786,23 @@ class PipelineOrchestrator:
 
         self._check_cancelled(state["run_id"])
         reporter = self._reporter(state)
+        prepared_pack = state.get("request_context_pack") or {}
+        if prepared_pack:
+            records = prepared_pack.get("records", [])
+            context_text = str(prepared_pack.get("context_text", ""))
+            reporter.emit(
+                stage="request_memory_recall",
+                status="succeeded",
+                progress=8,
+                message="Using the persisted request ContextPack",
+            )
+            return {
+                "request_memory_context": context_text,
+                "request_memory_records": records if isinstance(records, list) else [],
+                "request_context_pack": prepared_pack,
+                "stage": "request_memory_recall",
+                "status": "running",
+            }
         reporter.emit(
             stage="request_memory_recall",
             status="running",
@@ -1085,6 +1143,9 @@ class PipelineOrchestrator:
                 elif response.status == "succeeded":
                     reporter.emit(stage="pipeline_result", status="succeeded", progress=90,
                                   message="Pipeline produced a validated result", pipeline=pipeline)
+                elif response.status == "partial":
+                    reporter.emit(stage="pipeline_result", status="partial", progress=90,
+                                  message="Pipeline produced a degraded or partial result", pipeline=pipeline)
                 else:
                     reporter.emit(stage="pipeline_result", status="failed", progress=100,
                                   message="Pipeline failed", pipeline=pipeline, error_code="PIPELINE_FAILED")

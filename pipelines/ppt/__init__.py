@@ -33,6 +33,7 @@ from pipelines.ppt.schemas import (
     FlowchartSpec,
     LayoutBox,
     PresentationOutput,
+    PresentationTheme,
     PresentationQualityReview,
     RepairPatch,
     SlideContent,
@@ -45,10 +46,12 @@ from pipelines.ppt.source_workspace import DeckSourceWorkspace, EvidenceSourceBi
 from pipelines.ppt.svg_contract import CanonicalSvgArtifact, write_canonical_svg
 from pipelines.ppt.template_workspace import LayoutContract, PptTemplateContract, write_template_workspace
 from pipelines.ppt.child_artifacts import ChildArtifactRef, SlideArtifactBundle, reconcile_slide_artifacts
+from pipelines.ppt.visual_regression import compare_pptx_fixture, pptx_visual_signature, pptx_visual_snapshot
 
 __all__ = [
     "PresentationFlow",
     "PresentationOutput",
+    "PresentationTheme",
     "PresentationQualityReview",
     "SlideContent",
     "EvidenceBinding",
@@ -94,6 +97,9 @@ __all__ = [
     "ChildArtifactRef",
     "SlideArtifactBundle",
     "reconcile_slide_artifacts",
+    "compare_pptx_fixture",
+    "pptx_visual_signature",
+    "pptx_visual_snapshot",
 ]
 
 

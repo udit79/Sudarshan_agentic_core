@@ -67,13 +67,14 @@ def test_real_final_output_renders_through_node_boundary(tmp_path) -> None:
     assert "<svg" in svg[:500]
     assert "Source review" in svg or "E-1" in svg
     assert "Synthetic case process" in svg
-    assert renderer.last_render_mode in {"antv", "fallback"}
+    assert renderer.last_render_mode in {"native", "fallback"}
     assert "#1e3a8a" in svg.lower() or "#0f766e" in svg.lower()
     report = inspect_svg(
         artifact,
         required_text=("Synthetic case process",),
         renderer_mode=renderer.last_render_mode,
         renderer_warning=renderer.last_render_warning,
+        operator_waiver_id=("waiver-test" if renderer.last_render_mode == "fallback" else None),
     )
     assert report.approved, report.issues
     assert report.width and report.width > 0

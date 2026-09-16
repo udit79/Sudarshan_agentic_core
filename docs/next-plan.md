@@ -71,6 +71,13 @@ through scheduler, orchestrator, child runtime, and provider adapters.
 **Priority:** P0  
 **Depends on:** NP-01
 
+**Implementation status (2026-09-16):** Safe progress and observability events
+are persisted locally/shared through the control-plane projection, and
+`get_sudarshan_trajectory` plus `GET /runs/{run_id}/trajectory` expose a
+redacted timeline with parallel-lane summaries. Direct wiring into an external
+Harness trajectory UI/plugin and distributed event reconciliation remain
+environment/deployment work; the durable DAG is still authoritative.
+
 Define one redacted event contract for progress, observability, DAG, MCP, A2A,
 and Harness trajectory. Add `source_sequence`, `node_id`, `parent_node_id`,
 `child_id`, `attempt_id`, `lane_id`, `cache_status`, `fallback`, `artifact_id`,
@@ -131,6 +138,15 @@ validated phase. Use one bounded, redacted, provenance-bearing `ContextPack`.
 **Priority:** P0  
 **Depends on:** NP-04
 
+**Implementation status (2026-09-16):** P0 enforcement slice implemented for
+the native PPT path. `page_count` normalizes to total `slide_count`, request
+constraints survive orchestrator/flow round-trips, themes are applied to
+native PPT objects, and the emitted PPTX is reopened for deterministic color,
+font, overflow, editability, z-order, and slide-count checks. A checked-in
+visual-contract fixture protects the native layout signature. Rasterized
+PowerPoint/LibreOffice smoke tests remain a separate environment-dependent
+promotion step.
+
 Normalize user constraints into typed fields before generation: total pages,
 content pages, colors, theme, layers, output format, required diagram, and
 revision scope.
@@ -150,10 +166,21 @@ revision scope.
 **Priority:** P0  
 **Depends on:** NP-05
 
+**Implementation status (2026-09-16):** The native path records per-slide
+source and rendered-part hashes, preserves and checks untouched slide XML,
+marks downstream dependents as `invalidated` until explicitly regenerated,
+validates template/master contracts, and enforces the post-render gate. The
+PPT Master adapter only performs a local subprocess export and PPTX read-back
+when a user-managed checkout is configured. PPT Master is not hosted,
+installed, or downloaded by Sudarshan; set `SUDARSHAN_PPT_MASTER_ROOT` after
+self-hosting/installing it. Without that configuration, native rendering is
+the only available PPT path.
+
 Use stable `slide_id`s, per-slide artifacts, dependency hashes, and a deck
 manifest. Update only the requested slide and preserve untouched slide hashes,
-notes, theme, and editable layers. Wire the optional PPT Master adapter as a
-round-trip path without making it a second orchestrator.
+notes, theme, and editable layers. Keep the PPT Master bridge optional and
+local; it must never become a second orchestrator or an assumed hosted
+provider.
 
 **Acceptance criteria**
 
@@ -219,6 +246,29 @@ Close the pipeline-specific gaps found in the staged audit:
   and explicit partial/degraded release state.
 - Infographic/diagram: structural, accessibility, palette, layer, and native
   renderer checks before success.
+
+#### MiniMax-H3 boundary: reference only, no new adapter
+
+MiniMax-H3 is not hosted by this project. Running it would require a separate
+GPU/model-serving deployment, so adding an H3-specific provider adapter now
+would create another unsupported integration layer—the same overengineering
+pattern this plan is intended to remove.
+
+We therefore adopt **no MiniMax-H3 provider** in this implementation plan.
+We retain only provider-neutral lessons in the existing video pipeline:
+
+- provider jobs need durable status/reconciliation rather than blind resubmits;
+- scene output needs explicit media validation and artifact checksums;
+- audio ownership must be explicit so TTS and generated audio are not silently
+  duplicated;
+- higher-quality regeneration, if a future hosted provider actually exists,
+  must be a typed dependent artifact stage rather than a hidden fallback;
+- prompts and shot plans should receive bounded authorized context.
+
+We are not adopting H3 weights, H3 mode fields, Hub canvas workflows, H3
+memory, H3 scheduling, or an H3-specific adapter. If a real hosted provider is
+selected later, it must first satisfy the existing generic provider contract;
+that future decision is out of scope for NP-09.
 
 **Acceptance criteria**
 

@@ -218,14 +218,16 @@ class EvidenceIndex:
     ) -> list[sqlite3.Row]:
         if not context.user_id:
             raise PermissionError("evidence search requires a user scope")
-        params: list[Any] = [context.user_id, context.case_id]
-        query = """
-            SELECT * FROM evidence_blocks
-            WHERE user_id = ? AND (case_id = ? OR case_id IS NULL)
-        """
+        params: list[Any] = [context.user_id]
+        if context.case_id:
+            query = "SELECT * FROM evidence_blocks WHERE user_id = ? AND case_id = ?"
+            params.append(context.case_id)
+        else:
+            query = "SELECT * FROM evidence_blocks WHERE user_id = ? AND case_id IS NULL"
+
         if context.task_id:
             query += " AND (task_id = ? OR task_id IS NULL)"
-            params.extend([context.task_id])
+            params.append(context.task_id)
         if modality:
             values = list(modality)
             query += f" AND modality IN ({','.join('?' for _ in values)})"
@@ -246,6 +248,7 @@ class EvidenceIndex:
             "evidence_id": str(row["evidence_id"]),
             "document_id": str(row["document_id"]),
             "source_reference": str(row["source_reference"]),
+            "source_hash": str(row["source_hash"]),
             "modality": str(row["modality"]),
             "content": str(row["content"]),
             "location": json.loads(str(row["location_json"])),
@@ -253,8 +256,17 @@ class EvidenceIndex:
             "confidence": float(row["confidence"]),
             "extractor_version": str(row["extractor_version"]),
             "model_version": row["model_version"],
-            "source_hash": str(row["source_hash"]),
+            "user_id": row["user_id"],
+            "case_id": row["case_id"],
+            "task_id": row["task_id"],
+            "classification_level": str(row["classification_level"]),
             "object_id": row["object_id"],
+            "provenance": {
+                "source_hash": str(row["source_hash"]),
+                "source_reference": str(row["source_reference"]),
+                "extractor_version": str(row["extractor_version"]),
+                "model_version": row["model_version"],
+            },
         }
 
     def search(
@@ -395,6 +407,23 @@ class EvidenceIndex:
             if document.user_id
             else ScopeType.SYSTEM
         )
+        first_block = document.evidence_blocks[0] if document.evidence_blocks else None
+        source_hash = first_block.source_hash if first_block else ""
+        extractor_version = first_block.extractor_version if first_block else "evidence-index@1.0.0"
+        model_version = first_block.model_version if first_block else None
+        fallbacks = sorted({
+            str(reason)
+            for block in document.evidence_blocks
+            for reason in (
+                [block.metadata.get("fallback_reason")]
+                if block.metadata.get("fallback_reason")
+                else list(block.metadata.get("fallbacks") or [])
+            )
+            if reason
+        })
+        low_confidence_count = sum(1 for block in document.evidence_blocks if block.confidence < 0.7)
+        quality_status = "partial" if fallbacks or low_confidence_count else "passed"
+
         unit = KnowledgeUnit(
             unit_id=f"evidence-summary:{document.id}",
             content=summary,
@@ -402,13 +431,23 @@ class EvidenceIndex:
             metadata={
                 "projection": "evidence-summary",
                 "classification_level": classification,
+                "review_state": "unreviewed",
+                "quality_status": quality_status,
+                "fallbacks": fallbacks,
+                "low_confidence_count": low_confidence_count,
+                "extractor_version": extractor_version,
+                "model_version": model_version,
+                "source_hash": source_hash,
+                "source_reference": str(document.source_path),
                 "evidence_ids": [block.evidence_id for block in document.evidence_blocks],
                 "chunk_ids": [chunk.chunk_id for chunk in document.chunks],
                 "relationship_ids": [relation.relation_id for relation in document.relationships],
             },
             provenance={
-                "source_hash": document.evidence_blocks[0].source_hash,
+                "source_hash": source_hash,
                 "compiler": "evidence-index@1.0.0",
+                "extractor_version": extractor_version,
+                "model_version": model_version,
                 "exact_evidence_store": "EvidenceIndex",
             },
         )

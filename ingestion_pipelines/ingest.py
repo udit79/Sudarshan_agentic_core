@@ -22,6 +22,13 @@ def ingest_file(
     video_policy: "VideoIngestionPolicy | None" = None,
     cancel_event: Event | None = None,
 ) -> IngestedDocument:
+    """Lower-level extraction helper and local compatibility path.
+
+    Production callers must use ``submit_ingestion()`` to ensure source safety,
+    budgets, idempotency, caching, and governed memory projection.
+    When a MemoryManager is passed here, memory is projected as ``MemoryType.SUMMARY``
+    (never unreviewed ``MemoryType.FACT``).
+    """
     document_id = str(uuid4())
     reference = source_reference or file_path
     evidence_blocks = []
@@ -81,7 +88,7 @@ def ingest_file(
             to_knowledge_unit(document),
             context,
             scope_type=scope_type,
-            memory_type=MemoryType.FACT,
+            memory_type=MemoryType.SUMMARY,
             run_in_background=False,
         )
     return document

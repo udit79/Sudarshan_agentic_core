@@ -170,8 +170,18 @@ class LinkedInPostFlow(TextTransformationFlow):
         issues: list[str] = []
         if not output.claim_bindings:
             issues.append("claim_bindings must identify evidence for every material public claim")
+        else:
+            for binding in output.claim_bindings:
+                if binding.role == "fact" and not (binding.evidence_ids or binding.source_references):
+                    issues.append(f"factual claim binding '{binding.claim_id}' must reference verified evidence_ids or source_references")
+        if output.humanizer_report.score < 0.70:
+            issues.append(f"humanizer score {output.humanizer_report.score:.2f} is below the release threshold of 0.70")
         if not output.humanizer_report.approved:
-            issues.extend(issue.message for issue in output.humanizer_report.issues if issue.severity == "block")
+            blocking = [issue.message for issue in output.humanizer_report.issues if issue.severity == "block"]
+            if blocking:
+                issues.extend(blocking)
+            elif output.humanizer_report.score >= 0.70:
+                issues.append("humanizer review rejected the draft")
         if output.approval_required != "publish" or output.publish_status != "draft_only":
             issues.append("LinkedIn generation must remain draft_only and require separate publish approval")
         return issues

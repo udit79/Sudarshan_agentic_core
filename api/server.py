@@ -23,7 +23,13 @@ from ingestion_pipelines import SourceSafetyError, inspect_source
 from ingestion_pipelines.extract import SUPPORTED_EXTENSIONS
 from pipelines.common.ntro_policy import require_classification, require_classification_access
 from pipelines.common.contracts import AdvisoryRequest
-from integrations.deepseek_harness.a2a import agent_card, cancel_task as a2a_cancel_task, get_task as a2a_get_task, submit_task as a2a_submit_task
+from integrations.deepseek_harness.a2a import (
+    agent_card,
+    agent_card_for_pipeline,
+    cancel_task as a2a_cancel_task,
+    get_task as a2a_get_task,
+    submit_task as a2a_submit_task,
+)
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 ARTIFACT_ROOT = (Path(__file__).resolve().parents[1] / "artifacts").resolve()
@@ -121,6 +127,16 @@ async def get_agent_card(request: Request):
     return agent_card(str(request.base_url).rstrip("/"))
 
 
+@app.get("/.well-known/agents/{pipeline_name}.json")
+async def get_pipeline_agent_card(request: Request, pipeline_name: str):
+    """Return a specialist card backed by the single Sudarshan orchestrator."""
+
+    pipeline = pipeline_name.strip().lower()
+    if pipeline not in {str(item).strip().lower() for item in get_application().list_pipelines()}:
+        raise HTTPException(status_code=404, detail="Unknown specialist pipeline")
+    return agent_card_for_pipeline(pipeline, str(request.base_url).rstrip("/"))
+
+
 @app.post("/a2a/tasks")
 async def submit_a2a_task(request: Request):
     try:
@@ -138,8 +154,14 @@ async def submit_a2a_task(request: Request):
 
 
 @app.get("/a2a/tasks/{run_id}")
-async def get_a2a_task(run_id: str):
-    return a2a_get_task(get_application(), run_id)
+async def get_a2a_task(request: Request, run_id: str):
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    if not operator_id:
+        raise HTTPException(status_code=401, detail="X-Operator-Id is required")
+    try:
+        return a2a_get_task(get_application(), run_id, operator_id=operator_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @app.post("/a2a/tasks/{run_id}/cancel")
@@ -147,8 +169,13 @@ async def cancel_a2a_task(request: Request, run_id: str):
     task_id = request.headers.get("x-task-id", "").strip()
     if not task_id:
         raise HTTPException(status_code=422, detail="X-Task-Id is required")
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    if not operator_id:
+        raise HTTPException(status_code=401, detail="X-Operator-Id is required")
     try:
-        return a2a_cancel_task(get_application(), run_id, task_id=task_id)
+        return a2a_cancel_task(
+            get_application(), run_id, task_id=task_id, operator_id=operator_id
+        )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -535,6 +562,50 @@ async def get_run_telemetry(run_id: str):
     return get_application().telemetry(run_id)
 
 
+@app.get("/runs/{run_id}/observability")
+async def get_run_observability(
+    run_id: str,
+    request: Request,
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    """Get the operator-safe lifecycle trace, including memory operations."""
+
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    if not operator_id:
+        raise HTTPException(status_code=401, detail="x-operator-id header is required")
+    try:
+        return await asyncio.to_thread(
+            get_application().observability_events,
+            run_id,
+            operator_id=operator_id,
+            limit=limit,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get("/runs/{run_id}/trajectory")
+async def get_run_trajectory(
+    run_id: str,
+    request: Request,
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    """Get the safe Harness trajectory projection with parallel lane summaries."""
+
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    if not operator_id:
+        raise HTTPException(status_code=401, detail="x-operator-id header is required")
+    try:
+        return await asyncio.to_thread(
+            get_application().trajectory,
+            run_id,
+            operator_id=operator_id,
+            limit=limit,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 @app.get("/runs/{run_id}/wait")
 async def wait_run(
     run_id: str,
@@ -593,6 +664,72 @@ async def resume_run(run_id: str, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return JSONResponse(content=result)
+
+
+@app.get("/runs/{run_id}/dag")
+async def get_run_dag(
+    run_id: str,
+    request: Request,
+    after_revision: int = Query(default=0, ge=0, description="Return 'not_changed' if revision has not advanced past this value."),
+):
+    """Return the public DAG projection for a run.
+
+    ETag is ``W/"<run_id>:<revision>"`` and changes on every revision increment.
+    Supports conditional requests via ``If-None-Match``.
+
+    Cursor semantics
+    ----------------
+    - ``after_revision=0`` (default): always return the current graph.
+    - ``after_revision=N``: returns ``{"status": "not_changed"}`` (HTTP 200) or
+      ``304 Not Modified`` (ETag match) when the revision has not advanced past N.
+    - Sending ``after_revision`` > current revision raises HTTP 400.
+    """
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    if not operator_id:
+        raise HTTPException(status_code=401, detail="x-operator-id header is required")
+
+    include_failure_details = (
+        request.headers.get("x-include-failure-details", "").strip().lower() == "true"
+    )
+
+    try:
+        result = await asyncio.to_thread(
+            get_application().get_dag,
+            run_id,
+            operator_id,
+            after_revision=after_revision,
+            include_failure_details=include_failure_details,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found in DAG store")
+
+    if result.get("status") == "not_changed":
+        # Check whether the client sent an If-None-Match header.
+        # If so, we don't know the revision; fall through to a 200.
+        return JSONResponse(content=result, status_code=200)
+
+    revision = result.get("revision", 0)
+    etag = f'W/"{run_id}:{revision}"'
+
+    # Validate cursor: if client asked for after_revision > current revision, reject.
+    if after_revision > revision:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "revision_regressed", "current_revision": revision},
+        )
+
+    # Conditional GET: 304 Not Modified when ETag matches.
+    if_none_match = request.headers.get("if-none-match", "").strip()
+    if if_none_match and if_none_match == etag:
+        return JSONResponse(content=None, status_code=304)
+
+    return JSONResponse(
+        content=result,
+        headers={"ETag": etag, "Cache-Control": "no-cache"},
+    )
+
 
 
 @app.post("/runs/{run_id}/cancel")

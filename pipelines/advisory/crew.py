@@ -346,54 +346,68 @@ class AdvisoryFlow(Flow[TaskState]):
             self.state.record("human_approval", "succeeded", summary="Advisory approved for artifact handoff")
             artifact = self.artifact_writer.write(advisory, approved_by=approved_by)
             self.state.artifact = artifact.model_dump(mode="json")
-            unit = KnowledgeUnit(
-                unit_id=advisory.advisory_id,
-                content=artifact.content,
-                source=Source(
-                    source_id=self.state.run_id,
-                    source_type=SourceType.TEXT,
-                    source_reference=f"pipeline://advisory/{self.state.run_id}",
-                ),
-                metadata={
-                    "pipeline": self.pipeline_name,
-                    "classification_level": advisory.classification_level,
-                    "artifact_path": artifact.path,
-                    "operation": self.state.operation,
-                    "parent_run_id": self.state.parent_run_id,
-                    "parent_artifact_id": self.state.parent_artifact_id,
-                    "revision_scope": self.state.revision_scope,
-                    "advisory": advisory.model_dump(mode="json"),
-                },
-                provenance={
-                    "task_id": self.state.task_id,
-                    "case_id": self.state.case_id,
-                    "run_id": self.state.run_id,
-                    "memory_policy": "case_output_after_quality_gate",
-                    "human_approval": "approved",
-                    "approval_feedback": feedback,
-                    "operation": self.state.operation,
-                    "parent_run_id": self.state.parent_run_id,
-                    "parent_artifact_id": self.state.parent_artifact_id,
-                },
+            from pipelines.common.release_gate import can_release_to_case_memory
+
+            releasable, reason = can_release_to_case_memory(
+                pipeline=self.pipeline_name,
+                output=advisory,
+                quality_approved=bool(self.state.quality_review and self.state.quality_review.get("approved")),
+                status="succeeded",
+                artifact=artifact,
+                human_approval_required=True,
+                human_approved=(self.state.approval_status == "approved"),
             )
-            self.memory_manager.remember(
-                unit,
-                AdvisoryRequest(
-                    query=self.state.query,
-                    user_id=self.state.user_id,
-                    case_id=self.state.case_id,
-                    task_id=self.state.task_id,
-                    classification_level=self.state.classification_level,
-                    distribution=self.state.distribution,
-                    operation=self.state.operation,
-                    parent_run_id=self.state.parent_run_id,
-                    parent_artifact_id=self.state.parent_artifact_id,
-                    revision_instruction=self.state.revision_instruction,
-                    revision_scope=tuple(self.state.revision_scope),
-                ).access_context,
-                scope_type=ScopeType.CASE,
-                memory_type=MemoryType.SUMMARY,
-            )
+            if releasable:
+                unit = KnowledgeUnit(
+                    unit_id=advisory.advisory_id,
+                    content=artifact.content,
+                    source=Source(
+                        source_id=self.state.run_id,
+                        source_type=SourceType.TEXT,
+                        source_reference=f"pipeline://advisory/{self.state.run_id}",
+                    ),
+                    metadata={
+                        "pipeline": self.pipeline_name,
+                        "classification_level": advisory.classification_level,
+                        "artifact_path": artifact.path,
+                        "operation": self.state.operation,
+                        "parent_run_id": self.state.parent_run_id,
+                        "parent_artifact_id": self.state.parent_artifact_id,
+                        "revision_scope": self.state.revision_scope,
+                        "advisory": advisory.model_dump(mode="json"),
+                    },
+                    provenance={
+                        "task_id": self.state.task_id,
+                        "case_id": self.state.case_id,
+                        "run_id": self.state.run_id,
+                        "memory_policy": "case_output_after_quality_gate",
+                        "human_approval": "approved",
+                        "approval_feedback": feedback,
+                        "operation": self.state.operation,
+                        "parent_run_id": self.state.parent_run_id,
+                        "parent_artifact_id": self.state.parent_artifact_id,
+                    },
+                )
+                self.memory_manager.remember(
+                    unit,
+                    AdvisoryRequest(
+                        query=self.state.query,
+                        user_id=self.state.user_id,
+                        case_id=self.state.case_id,
+                        task_id=self.state.task_id,
+                        classification_level=self.state.classification_level,
+                        distribution=self.state.distribution,
+                        operation=self.state.operation,
+                        parent_run_id=self.state.parent_run_id,
+                        parent_artifact_id=self.state.parent_artifact_id,
+                        revision_instruction=self.state.revision_instruction,
+                        revision_scope=tuple(self.state.revision_scope),
+                    ).access_context,
+                    scope_type=ScopeType.CASE,
+                    memory_type=MemoryType.SUMMARY,
+                )
+            else:
+                self.state.record("case_write_back", "skipped", summary=f"Case memory write skipped: {reason}")
             self.state.status = "succeeded"
             response = PipelineResponse(
                 status="succeeded",

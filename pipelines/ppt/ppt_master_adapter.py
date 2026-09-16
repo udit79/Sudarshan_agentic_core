@@ -1,8 +1,10 @@
-"""Optional, bounded adapter for the local PPT Master exporter.
+"""Optional, bounded bridge to a user-managed local PPT Master checkout.
 
-PPT Master remains an external renderer/workspace tool. Sudarshan owns the
-request, evidence, authorization, budgets, cancellation, and artifact gate;
-this module only validates a prepared workspace and invokes the exporter.
+PPT Master is not hosted, downloaded, or provisioned by Sudarshan. The caller
+must install/self-host the reference runtime and set
+``SUDARSHAN_PPT_MASTER_ROOT`` to that checkout. Sudarshan owns the request,
+evidence, authorization, budgets, cancellation, and artifact gate; this module
+only validates a prepared workspace and invokes the local exporter.
 """
 
 from __future__ import annotations
@@ -49,10 +51,11 @@ class PptMasterExportResult:
     svg_quality_report_path: str | None = None
     renderer_version: str = "ppt-master@local"
     failure_code: str | None = None
+    slide_count: int | None = None
 
 
 class PptMasterAdapter:
-    """Invoke only the deterministic PPT Master export command."""
+    """Invoke the deterministic exporter from an explicitly configured local checkout."""
 
     renderer_id = "presentation.ppt-master"
 
@@ -70,6 +73,20 @@ class PptMasterAdapter:
         script = self.script_path
         return script is not None and script.is_file()
 
+    @property
+    def availability_reason(self) -> str | None:
+        """Explain why the local bridge cannot run, without probing a service."""
+
+        if self.config.root is None:
+            return (
+                "PPT Master is not hosted by Sudarshan; install or self-host a "
+                "local checkout and set SUDARSHAN_PPT_MASTER_ROOT"
+            )
+        script = self.script_path
+        if script is None or not script.is_file():
+            return f"PPT Master exporter script was not found under {self.config.root}"
+        return None
+
     def build_command(
         self,
         project_path: str | Path,
@@ -79,7 +96,7 @@ class PptMasterAdapter:
     ) -> list[str]:
         script = self.script_path
         if script is None or not script.is_file():
-            raise PptMasterAdapterError("PPT Master exporter is not configured or not installed")
+            raise PptMasterAdapterError(self.availability_reason or "PPT Master exporter is unavailable")
 
         project = Path(project_path).expanduser().resolve()
         if not project.is_dir():
@@ -154,12 +171,19 @@ class PptMasterAdapter:
                 "PPT_MASTER_QUALITY_REPORT_MISSING",
                 "PPT Master export completed without both required quality reports",
             )
+        try:
+            from pptx import Presentation
+
+            slide_count = len(Presentation(str(output)).slides)
+        except Exception as exc:
+            return self._failed("PPT_MASTER_READBACK_FAILED", f"PPTX read-back failed: {exc}")
         return PptMasterExportResult(
             status="succeeded",
             output_path=str(output),
             quality_report_path=str(quality_report),
             svg_quality_report_path=str(svg_quality_report),
             renderer_version=self.config.renderer_version,
+            slide_count=slide_count,
         )
 
     @staticmethod

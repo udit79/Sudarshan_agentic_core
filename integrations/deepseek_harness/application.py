@@ -114,8 +114,10 @@ class SudarshanApplication:
         self.observability.purge_expired(retention_seconds=max(1, retention_seconds), dry_run=False)
         progress_store = RedisProgressSink(control_plane) if control_plane is not None else SQLiteProgressSink()
         self.progress_sink = ObservableProgressSink(progress_store, self.observability)
+        memory_manager = MemoryManager.from_env()
+        memory_manager.operation_observer = self._record_memory_operation
         self.orchestrator = PipelineOrchestrator(
-            MemoryManager.from_env(),
+            memory_manager,
             progress_sink=self.progress_sink,
             checkpointer=create_sqlite_checkpointer(),
         )
@@ -170,6 +172,8 @@ class SudarshanApplication:
         )
         self._run_contexts: dict[str, dict[str, str]] = {}
         self._run_context_lock = Lock()
+        self._preparations: dict[str, dict[str, Any]] = {}
+        self._preparations_lock = Lock()
         self.scheduler = LocalRunScheduler(
             self.run,
             db_path=os.getenv("SUDARSHAN_QUEUE_DB_PATH", "artifacts/.state/run_queue.db"),
@@ -199,6 +203,14 @@ class SudarshanApplication:
                 os.getenv("SUDARSHAN_INGESTION_QUEUE_RECLAIM_IDLE_MS", "1800000")
             ),
         )
+        # NP-08: Shared public DAG projection store — a pure projection of run
+        # state, not a second scheduler. Lazily created on first access via
+        # get_dag() so that import-only usage does not incur disk I/O.
+        self._dag_db_path = os.getenv(
+            "SUDARSHAN_DAG_DB_PATH", "artifacts/.state/dag.db"
+        )
+        self._dag: Any | None = None  # type: DependencyDAG | None
+        self._dag_lock = Lock()
 
     @staticmethod
     def _build_control_plane() -> RedisControlPlane | None:
@@ -232,7 +244,23 @@ class SudarshanApplication:
         )
         metadata["run_id"] = run_id
         data["metadata"] = metadata
-        request = AdvisoryRequest(**data)
+        request_data = dict(data)
+        # Transport/admission fields are not part of AdvisoryRequest. Keep
+        # them in the queued payload, but never pass them into the typed
+        # pipeline request constructor.
+        for key in (
+            "idempotency_key",
+            "preparation_id",
+            "context_pack",
+            "evidence_refs",
+            "budget_cap",
+            "input_references",
+            "target_pipeline",
+            "parent_node_id",
+            "lineage",
+        ):
+            request_data.pop(key, None)
+        request = AdvisoryRequest(**request_data)
 
         # Explicit routes are rejected at the application boundary. Natural
         # language routing remains the orchestrator's responsibility.
@@ -251,12 +279,217 @@ class SudarshanApplication:
             raise ValueError(f"Unknown pipeline(s): {', '.join(unknown)}")
         return request, run_id
 
+    def _resolve_lineage(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        run_id: str,
+        operator_id: str,
+        is_revision: bool = False,
+    ) -> Any:
+        """Derive authoritative, tamper-proof execution lineage server-side."""
+        from integrations.deepseek_harness.contracts import LineageContext
+
+        data = dict(payload)
+        metadata = dict(data.get("metadata") or {})
+        parent_run_id = data.get("parent_run_id") or metadata.get("parent_run_id")
+        parent_node_id = data.get("parent_node_id") or metadata.get("parent_node_id")
+
+        if parent_run_id:
+            parent_run_id = str(parent_run_id).strip()
+            parent_state = self.status(parent_run_id)
+            if parent_state.get("status") == "not_found":
+                raise ValueError(f"parent_run_id does not exist: {parent_run_id}")
+            parent_owner = (
+                parent_state.get("user_id")
+                or self._run_contexts.get(parent_run_id, {}).get("user_id")
+                or self._run_contexts.get(parent_run_id, {}).get("operator_id")
+            )
+            if parent_owner and str(parent_owner).strip() != str(operator_id).strip():
+                raise PermissionError("operator_id does not have authorization for parent_run_id")
+
+            parent_lineage_raw = (
+                parent_state.get("lineage")
+                or self._run_contexts.get(parent_run_id, {}).get("lineage")
+                or (parent_state.get("metadata") or {}).get("lineage")
+            )
+            if isinstance(parent_lineage_raw, Mapping):
+                parent_lineage = LineageContext.model_validate(parent_lineage_raw)
+                root_run_id = parent_lineage.root_run_id
+                depth = parent_lineage.lineage_depth + 1
+                rev_seq = parent_lineage.revision_sequence + (1 if is_revision else 0)
+                causal = list(parent_lineage.causal_chain) + [parent_run_id]
+                trace_id = parent_lineage.trace_id or parent_run_id
+            else:
+                root_run_id = parent_run_id
+                depth = 1
+                rev_seq = 1 if is_revision else 0
+                causal = [parent_run_id]
+                trace_id = parent_run_id
+
+            return LineageContext(
+                root_run_id=root_run_id,
+                parent_run_id=parent_run_id,
+                parent_node_id=str(parent_node_id) if parent_node_id else "parent-task",
+                lineage_depth=depth,
+                revision_sequence=rev_seq,
+                causal_chain=causal,
+                trace_id=trace_id,
+            )
+
+        # Root run
+        return LineageContext(
+            root_run_id=run_id,
+            parent_run_id=None,
+            parent_node_id=None,
+            lineage_depth=0,
+            revision_sequence=0,
+            causal_chain=[run_id],
+            trace_id=str(data.get("trace_id") or metadata.get("trace_id") or run_id),
+        )
+
+    def prepare(
+        self, payload: Mapping[str, Any], *, operator_id: str | None = None
+    ) -> dict[str, Any]:
+        """Validate, authorize, and atomically persist a request preparation."""
+        import hashlib
+        import json
+        from datetime import datetime, timedelta, timezone
+        from pipelines.orchestrator.graph import _context_pack
+        from api.control_plane import ControlPlaneConflict
+        from pipelines.orchestrator.contracts import RequestConstraints
+
+        data = dict(payload)
+        user_id = str(data.get("user_id", "")).strip()
+        operator = (operator_id or user_id).strip()
+        if operator != user_id:
+            return {
+                "status": "rejected",
+                "rejection_code": "UNAUTHORIZED_USER",
+                "rejection_reason": "user_id must match the authenticated operator",
+            }
+
+        idempotency_key = str(data.get("idempotency_key", "")).strip()
+        if not idempotency_key:
+            raise ValueError("idempotency_key is required")
+
+        try:
+            request, run_id = self._prepare_request(data)
+            constraints = RequestConstraints.model_validate(data.get("constraints") or {})
+        except (TypeError, ValueError) as exc:
+            return {
+                "status": "rejected",
+                "rejection_code": "INVALID_REQUEST",
+                "rejection_reason": str(exc)[:1000],
+            }
+
+        # Request preparation must not use task working memory before a
+        # pipeline is selected. Task memory is execution context and is
+        # recalled later by the grounding stage; preparation uses only the
+        # authenticated User/Case context.
+        preparation_context = AccessContext(
+            user_id=request.user_id,
+            case_id=request.case_id,
+        )
+        pack = _context_pack(
+            self.orchestrator.memory_manager,
+            query=request.query,
+            context=preparation_context,
+            run_id=run_id,
+            stage_id="understanding",
+            top_k=min(request.top_k, 8),
+            token_budget=min(request.token_budget, 1200),
+        )
+
+        fingerprint = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+        selected_pipelines = list(request.requested_pipelines)
+        if not selected_pipelines:
+            metadata = dict(data.get("metadata") or {})
+            selected_pipelines = [
+                str(item).strip().lower()
+                for item in (metadata.get("pipelines") or [])
+                if str(item).strip()
+            ]
+            if not selected_pipelines and metadata.get("pipeline"):
+                selected_pipelines = [str(metadata["pipeline"]).strip().lower()]
+        status = "prepared" if selected_pipelines else "needs_clarification"
+        clarification_questions = (
+            []
+            if status == "prepared"
+            else ["Which Sudarshan pipeline or pipelines should produce the requested output?"]
+        )
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        memory_snapshot_id = (
+            (pack.get("retrieval_trace_id") or pack.get("pack_id")) if pack else None
+        )
+        record = {
+            "preparation_id": f"prep-{idempotency_key}",
+            "context_pack_id": pack["pack_id"] if pack else "",
+            "normalized_request": request.as_inputs(),
+            "authorized_user_id": request.user_id,
+            "case_id": request.case_id,
+            "task_id": request.task_id,
+            "classification": request.classification_level,
+            "selected_pipelines": selected_pipelines,
+            "constraint_set": constraints.model_dump(mode="json"),
+            "evidence_refs": list(data.get("evidence_refs") or []),
+            "status": status,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": expires_at,
+            "memory_snapshot_id": memory_snapshot_id,
+            "clarification_questions": clarification_questions,
+            "request_fingerprint": fingerprint,
+            "context_pack": pack,
+        }
+
+        cp = getattr(self.scheduler, "control_plane", None)
+        if cp is not None and hasattr(cp, "preparation_create_if_absent"):
+            try:
+                record = cp.preparation_create_if_absent(idempotency_key, fingerprint, record)
+            except ControlPlaneConflict:
+                return {
+                    "status": "rejected",
+                    "rejection_code": "IDEMPOTENCY_CONFLICT",
+                    "rejection_reason": "preparation key was already admitted with a different request fingerprint",
+                }
+        else:
+            preparation_store = self.scheduler if hasattr(self.scheduler, "preparation_create_if_absent") else None
+            if preparation_store is not None:
+                record = preparation_store.preparation_create_if_absent(
+                    idempotency_key, fingerprint, record
+                )
+            else:
+                with self._preparations_lock:
+                    existing = self._preparations.get(idempotency_key)
+                    if existing:
+                        if existing.get("request_fingerprint") != fingerprint:
+                            return {
+                                "status": "rejected",
+                                "rejection_code": "IDEMPOTENCY_CONFLICT",
+                                "rejection_reason": "preparation key was already admitted with a different request fingerprint",
+                            }
+                        record = existing
+                    else:
+                        self._preparations[idempotency_key] = record
+
+        return {
+            "status": record["status"],
+            "preparation_id": record["preparation_id"],
+            "context_pack_id": record["context_pack_id"],
+            "normalized_request": record["normalized_request"],
+            "expires_at": record["expires_at"],
+            "memory_snapshot_id": record.get("memory_snapshot_id"),
+            "clarification_questions": list(record.get("clarification_questions") or []),
+        }
+
     def run(
         self,
         payload: Mapping[str, Any],
         *,
         operator_id: str | None = None,
         cancel_event: Event | None = None,
+        attempt_id: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         request, run_id = self._prepare_request(payload)
         operator = (operator_id or request.user_id).strip()
@@ -283,7 +516,7 @@ class SudarshanApplication:
         )
         try:
             if request.metadata.get("skill_job") is True:
-                output = self._invoke_skill_request(request, run_id=run_id, cancel_event=cancel_event)
+                output = self._invoke_skill_request(request, run_id=run_id, cancel_event=cancel_event, attempt_id=attempt_id, lease_token=lease_token)
                 result_status = str(output.get("status", "failed"))
                 audit.log_run_complete(
                     operator_id=operator,
@@ -299,6 +532,8 @@ class SudarshanApplication:
                 request,
                 run_id=run_id,
                 cancellation_event=cancel_event,
+                attempt_id=attempt_id,
+                lease_token=lease_token,
             )
         except Exception:
             audit.log_run_complete(
@@ -311,6 +546,10 @@ class SudarshanApplication:
                 status="failed",
             )
             raise
+        payload = orchestration_result_to_dict(result)
+        # Required specialist children are part of the application release
+        # boundary: reconcile them before returning success to the caller.
+        self._execute_orchestration_child_plans(payload, request)
         audit.log_run_complete(
             operator_id=operator,
             case_id=request.case_id,
@@ -318,10 +557,8 @@ class SudarshanApplication:
             run_id=run_id,
             classification=request.classification_level,
             pipeline=result.pipeline or "",
-            status=result.status,
+            status=payload.get("status", result.status),
         )
-        payload = orchestration_result_to_dict(result)
-        self._execute_orchestration_child_plans(payload, request)
         return payload
 
     def list_skills(self) -> list[dict[str, Any]]:
@@ -381,6 +618,8 @@ class SudarshanApplication:
         *,
         operator_id: str,
         cancel_event: Event | None = None,
+        attempt_id: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         """Execute one admitted ingestion job without exposing source paths."""
 
@@ -408,7 +647,18 @@ class SudarshanApplication:
             raise
         if cancel_event is not None and cancel_event.is_set():
             return {"status": "cancelled", "error": "ingestion cancelled after extraction"}
-        return {"status": "succeeded", "skill_result": result}
+        worker_status = result.get("status", "succeeded") if isinstance(result, Mapping) else "succeeded"
+        qr = result.get("quality_report") if isinstance(result, Mapping) else None
+        quality_status = (
+            qr.get("status")
+            if isinstance(qr, Mapping) and qr.get("status")
+            else ("passed" if worker_status == "succeeded" else "partial")
+        )
+        return {
+            "status": worker_status,
+            "quality_status": quality_status,
+            "skill_result": result,
+        }
 
     def submit_ingestion(
         self,
@@ -416,8 +666,9 @@ class SudarshanApplication:
         *,
         operator_id: str,
     ) -> dict[str, Any]:
-        """Admit source extraction asynchronously with idempotent identity."""
+        """Admit source extraction asynchronously with verified hashing and safety."""
 
+        from ingestion_pipelines.source_safety import inspect_source, SourceSafetyError
         from pipelines.common.ntro_policy import require_classification
 
         data = dict(payload)
@@ -426,9 +677,9 @@ class SudarshanApplication:
         task_id = str(data.get("task_id", "")).strip()
         file_path = str(data.get("file_path", "")).strip()
         source_reference = str(data.get("source_reference", "")).strip()
-        source_hash = str(data.get("source_hash", "")).strip()
-        if not all((user_id, case_id, task_id, file_path, source_reference, source_hash)):
-            raise ValueError("ingestion requires file_path, source_reference, source_hash, user_id, case_id, and task_id")
+        caller_supplied_hash = str(data.get("source_hash", "")).strip()
+        if not all((user_id, case_id, task_id, file_path, source_reference)):
+            raise ValueError("ingestion requires file_path, source_reference, user_id, case_id, and task_id")
         if operator_id.strip() != user_id:
             raise PermissionError("user_id must match the authenticated operator")
         data["job_type"] = "ingestion"
@@ -439,13 +690,36 @@ class SudarshanApplication:
         data["user_id"] = user_id
         data["case_id"] = case_id
         data["task_id"] = task_id
-        budget = self._ingestion_budget(data.get("budget"), modality=str(data.get("modality", "")))
+
+        # Admission-time safety inspection and hash verification
+        max_bytes = int(os.getenv("SUDARSHAN_MAX_INGEST_BYTES", str(50 * 1024 * 1024)))
+        inspection = inspect_source(
+            file_path,
+            source_reference=source_reference,
+            max_bytes=max_bytes,
+            classification_level=data["classification_level"],
+            user_id=user_id,
+            case_id=case_id,
+            task_id=task_id,
+        )
+        if caller_supplied_hash and caller_supplied_hash != inspection.source_hash:
+            raise ValueError(
+                f"source_hash mismatch: expected {inspection.source_hash}, got {caller_supplied_hash}"
+            )
+        source_hash = inspection.source_hash
+        data["source_hash"] = source_hash
+        data["media_type"] = inspection.media_type
+        data["modality"] = inspection.modality
+        if inspection.instruction_markers:
+            data["instruction_markers"] = list(inspection.instruction_markers)
+
+        budget = self._ingestion_budget(data.get("budget"), modality=inspection.modality)
         data["budget"] = budget.model_dump(mode="json")
         if self._object_store_enabled() and Path(file_path).is_file():
             source_object = self.object_store.put_file(
                 file_path,
                 kind="source",
-                media_type=str(data.get("media_type") or "application/octet-stream"),
+                media_type=inspection.media_type,
                 classification_level=data["classification_level"],
                 owner_id=user_id,
                 case_id=case_id,
@@ -453,12 +727,17 @@ class SudarshanApplication:
                 retention_class="source",
             )
             data["source_object_id"] = source_object.object_id
-            # This path is only a same-process optimization. Workers resolve
-            # the opaque object ID before extraction after a restart.
             data["file_path"] = str(source_object.path)
+
         idempotency_key = str(data.get("idempotency_key", "")).strip()
         if not idempotency_key:
-            identity = f"{user_id}|{case_id}|{task_id}|{source_hash}"
+            model_policy = str(data.get("model_policy") or os.getenv("SUDARSHAN_INGESTION_MODEL_POLICY", "local-first"))
+            config_hash = str(data.get("configuration_hash") or os.getenv("SUDARSHAN_INGESTION_CONFIGURATION_HASH", "local-default"))
+            video_policy_str = json.dumps(data.get("video_policy") or {}, sort_keys=True)
+            identity = (
+                f"{user_id}|{case_id}|{task_id}|{source_hash}|{data['classification_level']}|"
+                f"{model_policy}|{config_hash}|{video_policy_str}"
+            )
             idempotency_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
         ingestion_id = f"ing-{idempotency_key}"
         data["ingestion_id"] = ingestion_id
@@ -486,19 +765,37 @@ class SudarshanApplication:
         if state is None:
             return {"ingestion_id": str(ingestion_id), "status": "not_found"}
         status = str(state.get("status", "queued"))
-        quality_status = {
-            "succeeded": "ready",
-            "partial": "partial",
-            "failed": "failed",
-        }.get(status, "pending")
         result = state.get("skill_result")
         receipt = result if isinstance(result, Mapping) else {}
+        quality_report = receipt.get("quality_report") if isinstance(receipt.get("quality_report"), Mapping) else None
+        quality_status = (
+            quality_report.get("status")
+            if quality_report and quality_report.get("status")
+            else state.get("quality_status")
+            or {
+                "succeeded": "passed",
+                "partial": "partial",
+                "failed": "failed",
+            }.get(status, "pending")
+        )
         return {
             "ingestion_id": state["run_id"],
             "task_id": state["task_id"],
             "case_id": state["case_id"],
             "status": status,
             "quality_status": quality_status,
+            "quality_report": quality_report or {
+                "status": quality_status,
+                "fallback_count": receipt.get("fallback_count", 0),
+                "fallbacks": list(receipt.get("fallbacks") or []),
+                "evidence_count": receipt.get("evidence_count", 0),
+                "chunk_count": receipt.get("chunk_count", 0),
+                "relationship_count": receipt.get("relationship_count", 0),
+                "low_confidence_count": receipt.get("low_confidence_count", 0),
+                "memory_projection_status": receipt.get("memory_projection_status", "pending"),
+                "review_state": receipt.get("review_state", "unreviewed"),
+                "source_map_complete": receipt.get("source_map_complete", False),
+            },
             "source_reference": state.get("source_reference"),
             "source_hash": state.get("source_hash"),
             "media_type": state.get("media_type"),
@@ -508,13 +805,13 @@ class SudarshanApplication:
             "queue_wait_ms": state.get("queue_wait_ms"),
             "error": state.get("error"),
             "dead_letter": bool(state.get("dead_letter", False)),
-            # Keep dashboard/reconnect consumers independent of the nested
-            # worker result while retaining ``result`` for compatibility.
             "cache_status": receipt.get("cache_status"),
             "budget": receipt.get("budget"),
             "usage": receipt.get("usage"),
             "fallback_count": receipt.get("fallback_count", 0),
             "fallbacks": list(receipt.get("fallbacks") or []),
+            "memory_projection_status": receipt.get("memory_projection_status", "pending"),
+            "memory_projection_error": receipt.get("memory_projection_error"),
             "evidence_count": receipt.get("evidence_count", 0),
             "chunk_count": receipt.get("chunk_count", 0),
             "relationship_count": receipt.get("relationship_count", 0),
@@ -539,6 +836,8 @@ class SudarshanApplication:
         *,
         operator_id: str | None = None,
         cancel_event: Event | None = None,
+        attempt_id: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         """Invoke a local child skill through SkillRuntime, without Run API recursion."""
 
@@ -553,6 +852,25 @@ class SudarshanApplication:
         parent_run_id = str(data.get("parent_run_id", "")).strip()
         if not parent_run_id:
             raise ValueError("parent_run_id is required for a local child skill")
+
+        # Lineage resolution for child skill
+        lineage = self._resolve_lineage(
+            data,
+            run_id=f"skill-{uuid4().hex[:8]}",
+            operator_id=user_id,
+        )
+        metadata = dict(data.get("metadata") or {})
+        metadata["lineage"] = lineage.model_dump(mode="json")
+        metadata["parent_node_id"] = data.get("parent_node_id", "harness-skill")
+        metadata["skill_id"] = canonical
+
+        # Budget cap derivation: min of requested budget and manifest limit
+        token_budget = manifest.budget_policy.max_model_tokens
+        if data.get("budget_cap") and isinstance(data["budget_cap"], Mapping):
+            cap = data["budget_cap"].get("max_model_tokens")
+            if cap and isinstance(cap, int):
+                token_budget = min(token_budget, cap)
+
         return self._invoke_skill_request(
             AdvisoryRequest(
                 query=str(data.get("query", "")),
@@ -561,13 +879,37 @@ class SudarshanApplication:
                 task_id=str(data.get("task_id", "")),
                 classification_level=str(data.get("classification_level", "RESTRICTED")),
                 distribution=str(data.get("distribution", "Authorized NTRO personnel")),
-                token_budget=manifest.budget_policy.max_model_tokens,
-                metadata=dict(data.get("metadata") or {}),
+                token_budget=token_budget,
+                metadata=metadata,
                 requested_pipelines=(skill_pipeline(canonical) or canonical,),
             ),
             run_id=parent_run_id,
             skill_id=canonical,
             cancel_event=cancel_event,
+            attempt_id=attempt_id,
+            lease_token=lease_token,
+        )
+
+    def invoke_a2a(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        operator_id: str,
+        cancel_event: Event | None = None,
+        attempt_id: str | None = None,
+        lease_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Execute a local specialist handoff using the portable A2A envelope."""
+
+        from integrations.deepseek_harness.a2a import invoke_local_task
+
+        return invoke_local_task(
+            self,
+            payload,
+            operator_id=operator_id,
+            cancel_event=cancel_event,
+            attempt_id=attempt_id,
+            lease_token=lease_token,
         )
 
     def _invoke_skill_request(
@@ -577,6 +919,8 @@ class SudarshanApplication:
         run_id: str,
         skill_id: str | None = None,
         cancel_event: Event | None = None,
+        attempt_id: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         canonical = canonical_skill_id(skill_id or str(request.metadata.get("skill_id", "")))
         manifest = self.skill_manifests.get(canonical)
@@ -602,6 +946,8 @@ class SudarshanApplication:
             classification_level=request.classification_level,
             distribution=request.distribution,
             policy=manifest.budget_policy,
+            attempt_id=attempt_id,
+            lease_token=lease_token,
             ancestors=tuple(request.metadata.get("ancestor_skills", ())),
             allowed_capabilities=frozenset(manifest.required_capabilities),
             allowed_tools=frozenset(manifest.allowed_tools),
@@ -631,13 +977,21 @@ class SudarshanApplication:
             "failed": "failed",
             "cancelled": "cancelled",
         }[result.status]
+        lineage_data = request.metadata.get("lineage")
         return {
             "status": top_level_status,
             "run_id": run_id,
             "task_id": request.task_id,
             "skill_id": canonical,
             "skill_version": manifest.version,
+            "lineage": lineage_data,
+            "artifacts": [
+                {"artifact_id": art_id}
+                for art_id in getattr(result, "artifact_ids", [])
+            ],
+            "quality_status": "passed" if top_level_status == "succeeded" else "partial",
             "skill_result": result.model_dump(mode="json"),
+            "result": result.model_dump(mode="json"),
         }
 
     def _execute_orchestration_child_plans(
@@ -782,8 +1136,27 @@ class SudarshanApplication:
                 model=(payload.get("usage") or {}).get("model") if isinstance(payload.get("usage"), Mapping) else None,
                 usage=payload.get("usage"),
                 cache_status=cache_status,
+                node_id=payload.get("node_id"),
+                parent_node_id=payload.get("parent_node_id"),
+                attempt_id=payload.get("attempt_id"),
+                lane_id=payload.get("lane_id"),
+                fallback=bool(payload.get("fallback", False)),
+                provider_request_id=payload.get("provider_request_id"),
+                usage_id=payload.get("usage_id"),
             )
         )
+
+    def _record_memory_operation(self, name: str, payload: Mapping[str, Any]) -> None:
+        """Record safe memory-provider lifecycle telemetry.
+
+        The memory manager deliberately sends hashes, IDs, counts, and timing
+        only. Raw Cognee requests and returned case content stay inside the
+        memory boundary.
+        """
+
+        observability = getattr(self, "observability", None)
+        if observability is not None:
+            observability.record_runtime_event(name, payload)
 
     def submit(
         self,
@@ -793,17 +1166,81 @@ class SudarshanApplication:
     ) -> dict[str, Any]:
         """Validate and durably enqueue a run without executing it inline."""
 
-        request, run_id = self._prepare_request(payload)
+        data = dict(payload)
+        preparation_id = data.get("preparation_id")
+        if preparation_id:
+            idempotency_key = preparation_id.replace("prep-", "")
+            cp = getattr(self.scheduler, "control_plane", None)
+            if cp is not None and hasattr(cp, "preparation_get"):
+                record = cp.preparation_get(idempotency_key)
+            else:
+                with self._preparations_lock:
+                    record = self._preparations.get(idempotency_key)
+            if not record:
+                raise ValueError("Preparation not found or expired")
+            if record.get("status") != "prepared":
+                raise ValueError(
+                    "Preparation cannot start until clarification is resolved"
+                )
+            operator = (operator_id or record.get("authorized_user_id", "")).strip()
+            if operator != record.get("authorized_user_id"):
+                raise PermissionError("user_id must match the authorized user of the preparation")
+            data.update(record.get("normalized_request", {}))
+            data["context_pack"] = record.get("context_pack")
+            data["metadata"] = {
+                **dict(data.get("metadata") or {}),
+                "preparation_id": preparation_id,
+                "context_pack": record.get("context_pack") or {},
+                "memory_snapshot_id": record.get("memory_snapshot_id"),
+            }
+
+        # An explicit idempotency key must control the logical run identity.
+        # Previously it was accepted by the MCP schema but ignored here,
+        # allowing timeout retries to create a fresh run.
+        idempotency_key = str(data.get("idempotency_key") or preparation_id or "").strip()
+        if idempotency_key:
+            metadata = dict(data.get("metadata") or {})
+            metadata["run_id"] = f"run-{hashlib.sha256(idempotency_key.encode()).hexdigest()[:32]}"
+            data["metadata"] = metadata
+
+        request, run_id = self._prepare_request(data)
         operator = (operator_id or request.user_id).strip()
         if operator != request.user_id:
             raise PermissionError("user_id must match the authenticated operator")
-        queued_payload = dict(payload)
+
+        # Server-derived authoritative lineage
+        is_revision = data.get("operation") == "revise" or bool(data.get("revision_instruction"))
+        lineage = self._resolve_lineage(
+            data,
+            run_id=run_id,
+            operator_id=operator,
+            is_revision=is_revision,
+        )
+        request.metadata["lineage"] = lineage.model_dump(mode="json")
+        queued_payload = dict(data)
         queued_payload["metadata"] = dict(request.metadata)
+        queued_payload["lineage"] = lineage.model_dump(mode="json")
+
+        with self._run_context_lock:
+            self._run_contexts[run_id] = {
+                "operator_id": operator,
+                "user_id": request.user_id,
+                "case_id": request.case_id,
+                "task_id": request.task_id,
+                "classification_level": request.classification_level,
+                "lineage": lineage.model_dump(mode="json"),
+            }
+
         state = self.scheduler.submit(run_id, queued_payload, operator_id=operator)
         return {
             "status": state.get("status", "queued"),
             "run_id": run_id,
             "task_id": request.task_id,
+            "reused": bool(state.get("idempotent_replay", False)),
+            "attempt_id": state.get("attempt_id"),
+            "next_actions": ["get_sudarshan_status", "wait_sudarshan"],
+            "dag_revision": 0,
+            "lineage": lineage.model_dump(mode="json"),
             "pipeline": None,
             "pipelines": list(request.requested_pipelines),
             "classification_level": request.classification_level,
@@ -897,6 +1334,77 @@ class SudarshanApplication:
             str(run_id),
             access_level=os.getenv("SUDARSHAN_TELEMETRY_ACCESS_LEVEL", "RESTRICTED"),
         ).model_dump(mode="json")
+
+    def observability_events(
+        self,
+        run_id: str,
+        *,
+        operator_id: str | None = None,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        """Return the sanitized operator trace, including memory operations."""
+
+        observability = getattr(self, "observability", None)
+        if observability is None:
+            return {"status": "ready", "run_id": str(run_id), "events": [], "event_count": 0}
+        events = observability.events(
+            str(run_id),
+            limit=max(1, min(int(limit), 5000)),
+            access_level=os.getenv("SUDARSHAN_TELEMETRY_ACCESS_LEVEL", "RESTRICTED"),
+            operator_id=operator_id,
+        )
+        return {
+            "status": "ready",
+            "run_id": str(run_id),
+            "events": [event.model_dump(mode="json") for event in events],
+            "event_count": len(events),
+        }
+
+    def trajectory(
+        self,
+        run_id: str,
+        *,
+        operator_id: str | None = None,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        """Return a safe Harness timeline and grouped parallel-lane summary.
+
+        This is a projection of the existing observability events. It does not
+        schedule work, infer dependencies, or replace the durable DAG.
+        """
+
+        projection = self.observability_events(
+            run_id,
+            operator_id=operator_id,
+            limit=limit,
+        )
+        lane_state: dict[str, dict[str, Any]] = {}
+        for event in projection["events"]:
+            lane_id = (
+                event.get("lane_id")
+                or event.get("node_id")
+                or event.get("child_id")
+                or "main"
+            )
+            lane = lane_state.setdefault(
+                str(lane_id),
+                {
+                    "lane_id": str(lane_id),
+                    "event_count": 0,
+                    "last_status": "",
+                    "last_stage": "",
+                },
+            )
+            lane["event_count"] += 1
+            lane["last_status"] = event.get("status", "")
+            lane["last_stage"] = event.get("stage", "")
+        return {
+            "status": projection["status"],
+            "run_id": projection["run_id"],
+            "events": projection["events"],
+            "event_count": projection["event_count"],
+            "lanes": list(lane_state.values()),
+        }
 
     @staticmethod
     def _skill_id(pipeline: Any) -> str:
@@ -1005,6 +1513,8 @@ class SudarshanApplication:
                 return {
                     "run_id": run_id,
                     "task_id": queue_state.get("task_id"),
+                    "user_id": queue_state.get("user_id") or self._run_contexts.get(run_id, {}).get("user_id"),
+                    "case_id": queue_state.get("case_id") or self._run_contexts.get(run_id, {}).get("case_id"),
                     "status": status,
                     "stage": summary.stage,
                     "pipeline": pipeline,
@@ -1014,6 +1524,7 @@ class SudarshanApplication:
                     "clarification_questions": [],
                     "error": queue_state.get("error"),
                     "dead_letter": bool(queue_state.get("dead_letter", False)),
+                    "lineage": queue_state.get("lineage") or self._run_contexts.get(run_id, {}).get("lineage"),
                     "skill_result": queue_state.get("skill_result"),
                     "harness_correlation": queue_state.get("harness_correlation"),
                     "events": [],
@@ -1152,14 +1663,27 @@ class SudarshanApplication:
         never the controlled filesystem path or artifact bytes.
         """
 
+        import mimetypes
+
         from api.artifacts import ArtifactStore
         from pipelines.common.ntro_policy import require_classification_access
 
         root = os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts")
         manifest, _source = ArtifactStore(root).get(str(artifact_id).strip())
         require_classification_access(classification_level, manifest.classification_level)
+        # ArtifactManifest intentionally stores only the portable contract; it
+        # does not expose filesystem-derived MIME/provenance attributes. Infer
+        # the public media type from the manifest name and keep provenance in
+        # the explicit metadata field instead of reaching through stale fields.
+        mime_type = mimetypes.guess_type(manifest.name, strict=False)[0] or "application/octet-stream"
         return {
             "artifact_id": manifest.artifact_id,
+            "uri": manifest.uri,
+            "mime_type": mime_type,
+            "sha256": manifest.sha256,
+            "classification_level": manifest.classification_level,
+            "created_at": manifest.created_at,
+            "provenance": dict(manifest.metadata.get("provenance", {})),
             "manifest": manifest.model_dump(mode="json"),
             "download_uri": manifest.uri,
             "integrity_verified": True,
@@ -1532,6 +2056,8 @@ class SudarshanApplication:
                     video_policy=resolved_video_policy,
                     cancel_event=cancel_event,
                 )
+                if cancel_event is not None and cancel_event.is_set():
+                    return {"status": "cancelled", "error": "ingestion cancelled after extraction"}
                 evidence_count = len(document.evidence_blocks)
                 if evidence_count > 1:
                     self.ingestion_budget_controller.charge(
@@ -1540,6 +2066,8 @@ class SudarshanApplication:
                         units=0,
                         fan_out=evidence_count - 1,
                     )
+                if cancel_event is not None and cancel_event.is_set():
+                    return {"status": "cancelled", "error": "ingestion cancelled before cache write"}
                 self.ingestion_stage_cache.put(
                     fingerprint=fingerprint,
                     source_hash=resolved_source_hash,
@@ -1550,45 +2078,88 @@ class SudarshanApplication:
                     payload=self._cached_document_payload(document),
                     ttl_seconds=float(os.getenv("SUDARSHAN_INGESTION_CACHE_TTL_SECONDS", "86400")),
                 )
+            if cancel_event is not None and cancel_event.is_set():
+                return {"status": "cancelled", "error": "ingestion cancelled before indexing"}
             index_receipt = self.evidence_index.index_document(
                 document,
                 classification_level=classification,
             )
+            if cancel_event is not None and cancel_event.is_set():
+                return {"status": "cancelled", "error": "ingestion cancelled before memory projection"}
             try:
                 memory_receipt = self.evidence_index.project_to_memory(
                     document,
                     self.orchestrator.memory_manager,
                     classification_level=classification,
                 )
+                memory_projection_status = "succeeded" if memory_receipt.get("projected") else "failed"
+                memory_projection_error = memory_receipt.get("error") if not memory_receipt.get("projected") else None
             except Exception as exc:
                 memory_receipt = {
                     "projected": False,
                     "memory_id": None,
                     "error": str(exc),
                 }
-            fallback_reasons = sorted(
-                {
-                    str(reason)
+                memory_projection_status = "failed"
+                memory_projection_error = str(exc)
+
+            if cancel_event is not None and cancel_event.is_set():
+                return {"status": "cancelled", "error": "ingestion cancelled after memory projection"}
+
+            raw_fallbacks = set()
+            for block in document.evidence_blocks:
+                block_fallbacks: set[str] = set()
+                if block.metadata.get("fallback_reason"):
+                    block_fallbacks.add(str(block.metadata["fallback_reason"]))
+                for fb in (block.metadata.get("fallbacks") or []):
+                    if fb:
+                        block_fallbacks.add(str(fb))
+                if block.metadata.get("ocr_fallback") and not block_fallbacks:
+                    block_fallbacks.add("ocr_fallback")
+                raw_fallbacks.update(block_fallbacks)
+            fallback_reasons = sorted(raw_fallbacks)
+            fallback_count = len(fallback_reasons)
+            low_confidence_count = sum(1 for block in document.evidence_blocks if block.confidence < 0.7)
+
+            if (
+                fallback_count > 0
+                or low_confidence_count > 0
+                or memory_projection_status == "failed"
+            ):
+                status = "partial"
+                quality_status = "partial"
+            else:
+                status = "succeeded"
+                quality_status = "passed"
+
+            from ingestion_pipelines.contracts import IngestionQualityReport
+
+            quality_report = IngestionQualityReport(
+                quality_report_id=f"qr-{resolved_ingestion_id}",
+                ingestion_id=resolved_ingestion_id,
+                document_id=document.id,
+                status=quality_status,
+                coverage={
+                    "evidence_count": len(document.evidence_blocks),
+                    "chunk_count": len(document.chunks),
+                    "relationship_count": len(document.relationships),
+                },
+                block_counts={
+                    block.modality: sum(1 for b in document.evidence_blocks if b.modality == block.modality)
                     for block in document.evidence_blocks
-                    for reason in (
-                        [block.metadata.get("fallback_reason")]
-                        if block.metadata.get("fallback_reason")
-                        else list(block.metadata.get("fallbacks") or [])
-                    )
-                    if reason
-                }
+                },
+                low_confidence_count=low_confidence_count,
+                fallback_count=fallback_count,
+                fallbacks=fallback_reasons,
+                evidence_count=len(document.evidence_blocks),
+                chunk_count=len(document.chunks),
+                relationship_count=len(document.relationships),
+                memory_projection_status=memory_projection_status,
+                review_state="unreviewed",
+                source_map_complete=bool(document.evidence_blocks and document.chunks),
+                cache_hits=1 if cache_status == "hit" else 0,
+                usage_is_estimate=True,
             )
-            fallback_count = sum(
-                1
-                for block in document.evidence_blocks
-                if block.metadata.get("ocr_fallback")
-            ) + sum(
-                len(set(block.metadata.get("fallbacks") or []))
-                for block in document.evidence_blocks
-            )
-            if not memory_receipt.get("projected"):
-                fallback_reasons.append(f"memory_projection_unavailable: {type(memory_receipt.get('error')).__name__}")
-                fallback_count += 1
         except Exception as exc:
             audit.log(
                 operator_id=operator_id,
@@ -1609,7 +2180,9 @@ class SudarshanApplication:
             classification=classification,
         )
         return {
-            "status": "partial" if fallback_count else "succeeded",
+            "status": status,
+            "quality_status": quality_status,
+            "quality_report": quality_report.model_dump(mode="json"),
             "document_id": document.id,
             "source_reference": source_reference,
             "source_object_id": source_object_id,
@@ -1620,10 +2193,13 @@ class SudarshanApplication:
             "classification_level": classification,
             "content_characters": len(document.raw_text),
             "memory_persisted": bool(memory_receipt.get("projected", False)),
+            "memory_projection_status": memory_projection_status,
+            "memory_projection_error": memory_projection_error,
             "evidence_indexed": bool(index_receipt.get("indexed", False)),
             "evidence_count": int(index_receipt.get("evidence_count", 0)),
             "chunk_count": int(index_receipt.get("chunk_count", 0)),
             "relationship_count": int(index_receipt.get("relationship_count", 0)),
+            "low_confidence_count": low_confidence_count,
             "evidence_memory_id": memory_receipt.get("memory_id"),
             "cache_status": cache_status,
             "cache_fingerprint": fingerprint,
@@ -1635,6 +2211,84 @@ class SudarshanApplication:
             "usage": self.ingestion_usage.snapshot(resolved_ingestion_id),
             "ingested_at": document.ingested_at,
         }
+
+    def _dag_store(self) -> "Any":  # returns DependencyDAG
+        """Return the shared public DAG store, creating it lazily."""
+        if self._dag is None:
+            with self._dag_lock:
+                if self._dag is None:
+                    from pipelines.orchestrator.dag import DependencyDAG
+
+                    self._dag = DependencyDAG(
+                        db_path=self._dag_db_path,
+                        control_plane=self.control_plane,
+                    )
+        return self._dag
+
+    def get_dag(
+        self,
+        run_id: str,
+        operator_id: str,
+        *,
+        after_revision: int = -1,
+        include_failure_details: bool = False,
+    ) -> dict[str, Any]:
+        """Return a public DAG snapshot for *run_id*.
+
+        This is the secure application boundary for all DAG reads (HTTP and
+        MCP). Authorization is checked before the DAG is accessed.
+
+        Parameters
+        ----------
+        run_id:
+            The run whose DAG to read.
+        operator_id:
+            The caller's operator ID. Must match the operator that created the
+            run, or hold elevated permissions in the durable run context.
+        after_revision:
+            If provided and the DAG revision has not advanced past this value,
+            returns ``{"status": "not_changed"}`` immediately.
+        include_failure_details:
+            When ``True``, ``failure_code`` and ``safe_failure_summary`` are
+            included in the response for failed / blocked nodes. Callers must
+            hold elevated permissions to set this flag.
+
+        Returns
+        -------
+        dict
+            Serialised :class:`~pipelines.orchestrator.contracts.PublicDAGGraph`
+            or ``{"status": "not_changed"}`` when the revision has not advanced.
+
+        Raises
+        ------
+        PermissionError
+            When *operator_id* does not match the run's stored operator.
+        KeyError
+            When *run_id* does not exist in the DAG store.
+        """
+        from pipelines.orchestrator.dag import DAGError
+
+        # Authorization: check the durable run context.
+        with self._run_context_lock:
+            ctx = self._run_contexts.get(run_id)
+        if ctx is not None and ctx.get("operator_id") != operator_id:
+            raise PermissionError(
+                f"operator '{operator_id}' is not authorised to read run '{run_id}'"
+            )
+
+        dag = self._dag_store()
+        try:
+            graph = dag.get_public_dag(
+                run_id,
+                after_revision=after_revision,
+                include_failure_details=include_failure_details,
+            )
+        except DAGError as exc:
+            raise KeyError(run_id) from exc
+
+        if graph is None:
+            return {"status": "not_changed"}
+        return graph.model_dump(mode="json")
 
 
 _application: SudarshanApplication | None = None

@@ -86,6 +86,7 @@ class NativeVideoRenderSkill:
         *,
         scenes: list[Any],
         run_id: str,
+        attempt_id: str = "1",
         cancel_event: Event | None = None,
         authorization_scope: Mapping[str, Any] | None = None,
     ) -> NativeVideoResult:
@@ -94,6 +95,7 @@ class NativeVideoRenderSkill:
             return renderer.render(
                 package,
                 scenes,
+                attempt_id=attempt_id,
                 run_id=run_id,
                 cancel_event=cancel_event,
                 authorization_scope=authorization_scope,
@@ -101,6 +103,7 @@ class NativeVideoRenderSkill:
         return renderer.generate(
             subject=package.subject,
             scenes=scenes,
+            attempt_id=attempt_id,
             artifact_name=f"video-{run_id}",
             package_dir=Path("artifacts") / "videos" / str(run_id),
             cancel_event=cancel_event,

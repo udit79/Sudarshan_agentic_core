@@ -10,6 +10,7 @@ from typing import Iterable
 from pydantic import BaseModel, ConfigDict, Field
 
 from pipelines.common.visual_qa import inspect_visual_artifact
+from pipelines.infographic.quality import validate_svg_safety
 
 
 class CanonicalSvgArtifact(BaseModel):
@@ -60,15 +61,14 @@ def write_canonical_svg(
 
 
 def _validate_static_svg(svg: str) -> None:
+    """Delegate to the shared SVG safety contract in pipelines.infographic.quality."""
     if not isinstance(svg, str) or not re.match(r"^\s*<svg\b", svg):
         raise ValueError("canonical SVG must start with an SVG root")
     if not re.search(r"</svg>\s*$", svg):
         raise ValueError("canonical SVG must have a closing SVG root")
-    content = re.sub(r"xmlns(?::\w+)?\s*=\s*[\"']https?://[^\"']+[\"']", "", svg, flags=re.IGNORECASE)
-    if re.search(r"<script\b|<foreignObject\b|javascript:|data:text/html|(?:href|src|url)\s*=\s*[\"']https?://", content, re.IGNORECASE):
-        raise ValueError("canonical SVG cannot contain executable or remote content")
-    if re.search(r"\son[a-z]+\s*=", svg, re.IGNORECASE):
-        raise ValueError("canonical SVG cannot contain event-handler attributes")
+    violations = validate_svg_safety(svg)
+    if violations:
+        raise ValueError("canonical SVG cannot contain executable or remote content: " + "; ".join(violations))
 
 
 def _dimensions(svg: str) -> tuple[int, int] | None:

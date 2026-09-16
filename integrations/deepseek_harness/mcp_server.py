@@ -14,17 +14,27 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from integrations.deepseek_harness.adapter import get_harness_adapter
+from integrations.deepseek_harness.contracts import (
+    ArtifactResponse,
+    DAGResponse,
+    ObservabilityResponse,
+    PreparationResponse,
+    SkillInvokeResponse,
+    StartRunResponse,
+    StatusResponse,
+    TrajectoryResponse,
+    WaitResponse,
+)
 
 
 mcp = FastMCP(
     "sudarshan-agentic-core",
     instructions=(
-        "Use run_sudarshan for NTRO case operations. Use "
+        "Use start_sudarshan_run for asynchronous NTRO case operations. Use "
         "get_sudarshan_status for frontend-safe progress, "
         "get_sudarshan_artifact for verified artifact manifests, "
-        "list_sudarshan_skills/get_sudarshan_skill for canonical skill discovery, "
-        "invoke_sudarshan_skill for bounded local child skills, and "
-        "start_sudarshan_skill for durable background skill jobs. "
+        "get_sudarshan_dag for execution graph visualization, "
+        "get_sudarshan_trajectory for the safe execution timeline and parallel lanes, "
         "wait_sudarshan for bounded waiting on completion or user action, "
         "resume_sudarshan for clarification or approval decisions, and "
         "cancel_sudarshan for cooperative cancellation. The tools route "
@@ -37,24 +47,57 @@ mcp = FastMCP(
 
 
 # The external MCP contract stays backwards-compatible with the complete
-# surface. Native Harness sessions use the smaller artifact profile so the
-# model does not pay for evidence, memory-maintenance, and operational schemas
-# that the Sudarshan backend performs behind the run boundary.
+# surface. Native Harness sessions use role-specific profiles so models do
+# not pay for overlapping or internal tools.
 MCP_TOOL_PROFILES: dict[str, frozenset[str] | None] = {
     "full": None,
     "artifact": frozenset(
         {
-            "run_sudarshan",
-            "resume_sudarshan",
-            "cancel_sudarshan",
-            "get_sudarshan_status",
-            "get_sudarshan_artifact",
             "start_sudarshan_run",
+            "get_sudarshan_status",
             "wait_sudarshan",
+            "cancel_sudarshan",
+            "get_sudarshan_artifact",
+            "get_sudarshan_dag",
+            "get_sudarshan_trajectory",
+        }
+    ),
+    "specialist": frozenset(
+        {
+            "start_sudarshan_run",
+            "get_sudarshan_status",
+            "wait_sudarshan",
+            "cancel_sudarshan",
+            "get_sudarshan_artifact",
+            "get_sudarshan_dag",
+            "get_sudarshan_trajectory",
             "list_sudarshan_skills",
             "get_sudarshan_skill",
-            "invoke_sudarshan_skill",
-            "start_sudarshan_skill",
+        }
+    ),
+    "operator": frozenset(
+        {
+            "start_sudarshan_run",
+            "get_sudarshan_status",
+            "wait_sudarshan",
+            "resume_sudarshan",
+            "cancel_sudarshan",
+            "get_sudarshan_artifact",
+            "get_sudarshan_usage",
+            "get_sudarshan_observability",
+            "get_sudarshan_trajectory",
+            "get_sudarshan_dag",
+            "get_sudarshan_health",
+        }
+    ),
+    "reviewer": frozenset(
+        {
+            "get_sudarshan_status",
+            "wait_sudarshan",
+            "get_sudarshan_artifact",
+            "get_sudarshan_dag",
+            "get_sudarshan_trajectory",
+            "resume_sudarshan",
         }
     ),
 }
@@ -84,8 +127,8 @@ def configure_mcp_tool_profile(profile: str | None = None) -> str:
 @mcp.tool(
     name="run_sudarshan",
     description=(
-        "Run one Sudarshan operation. The backend owns memory, routing, "
-        "pipeline execution, revisions, and provider adapters."
+        "Compatibility synchronous operation. (In native model sessions, "
+        "use start_sudarshan_run instead for non-blocking admission)."
     ),
 )
 def run_sudarshan(
@@ -157,10 +200,13 @@ def cancel_sudarshan(run_id: str, task_id: str) -> dict[str, str]:
         "Raw Cognee context and model reasoning are never returned."
     ),
 )
-def get_sudarshan_status(run_id: str) -> dict[str, Any]:
+def get_sudarshan_status(run_id: str) -> StatusResponse:
     """Return the application status projection for one run."""
 
-    return _call("status", run_id)
+    raw = _call("status", run_id)
+    if isinstance(raw, StatusResponse):
+        return raw
+    return StatusResponse.model_validate(raw)
 
 
 @mcp.tool(
@@ -170,25 +216,63 @@ def get_sudarshan_status(run_id: str) -> dict[str, Any]:
         "a generated artifact. Filesystem paths and raw artifact bytes are not returned."
     ),
 )
-
-
 def get_sudarshan_artifact(
     artifact_id: str,
     classification_level: str = "RESTRICTED",
-) -> dict[str, Any]:
+) -> ArtifactResponse:
     """Read one integrity-checked artifact manifest through the application boundary."""
 
-    return _call(
+    raw = _call(
         "get_artifact",
         artifact_id,
         classification_level=classification_level,
     )
+    if isinstance(raw, ArtifactResponse):
+        return raw
+    return ArtifactResponse.model_validate(raw)
+
+
+@mcp.tool(
+    name="prepare_sudarshan_request",
+    description="Propose a structured request and return an idempotent preparation handle.",
+)
+def prepare_sudarshan_request(
+    query: str,
+    user_id: str,
+    case_id: str,
+    task_id: str,
+    idempotency_key: str,
+    classification_level: str = "RESTRICTED",
+    distribution: str = "Authorized NTRO personnel",
+    requested_pipelines: list[str] | None = None,
+    constraints: dict[str, Any] | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
+) -> PreparationResponse:
+    raw = _call(
+        "prepare",
+        {
+            "query": query,
+            "user_id": user_id,
+            "case_id": case_id,
+            "task_id": task_id,
+            "idempotency_key": idempotency_key,
+            "classification_level": classification_level,
+            "distribution": distribution,
+            "requested_pipelines": requested_pipelines or [],
+            "constraints": constraints or {},
+            "evidence_refs": evidence_refs or [],
+        },
+        operator_id=user_id,
+    )
+    if isinstance(raw, PreparationResponse):
+        return raw
+    return PreparationResponse.model_validate(raw)
 
 
 @mcp.tool(
     name="start_sudarshan_run",
     description=(
-        "Start an asynchronous Sudarshan operation and return its run handle. "
+        "Canonical admission: Start an asynchronous Sudarshan operation and return its run handle. "
         "Use wait_sudarshan or get_sudarshan_status for progress."
     ),
 )
@@ -206,10 +290,12 @@ def start_sudarshan_run(
     revision_instruction: str | None = None,
     revision_scope: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    preparation_id: str | None = None,
+    idempotency_key: str | None = None,
+) -> StartRunResponse:
     """Validate and enqueue an operation without blocking the Harness call."""
 
-    return _call(
+    raw = _call(
         "submit",
         {
             "query": query,
@@ -225,9 +311,14 @@ def start_sudarshan_run(
             "revision_instruction": revision_instruction,
             "revision_scope": revision_scope or [],
             "metadata": metadata or {},
+            "preparation_id": preparation_id,
+            "idempotency_key": idempotency_key,
         },
         operator_id=user_id,
     )
+    if isinstance(raw, StartRunResponse):
+        return raw
+    return StartRunResponse.model_validate(raw)
 
 
 @mcp.tool(
@@ -238,15 +329,18 @@ def wait_sudarshan(
     run_id: str,
     timeout_ms: int = 30_000,
     after_sequence: int = 0,
-) -> dict[str, Any]:
+) -> WaitResponse:
     """Return a safe status projection and only events after the cursor."""
 
-    return _call(
+    raw = _call(
         "wait",
         run_id,
         timeout_ms=timeout_ms,
         after_sequence=after_sequence,
     )
+    if isinstance(raw, WaitResponse):
+        return raw
+    return WaitResponse.model_validate(raw)
 
 
 @mcp.tool(
@@ -276,6 +370,47 @@ def cleanup_sudarshan_lifecycle(dry_run: bool = True, older_than_seconds: int = 
 )
 def get_sudarshan_usage(run_id: str) -> dict[str, Any]:
     return _call("usage", run_id)
+
+
+@mcp.tool(
+    name="get_sudarshan_observability",
+    description=(
+        "Operator-only safe execution trace. Shows lifecycle events for the run, "
+        "including Cognee recall/remember start, completion, counts, timing, "
+        "backend, query hash, and trace ID. Never returns prompts, raw memory, "
+        "provider payloads, or model reasoning."
+    ),
+)
+def get_sudarshan_observability(
+    run_id: str,
+    operator_id: str,
+    limit: int = 500,
+) -> ObservabilityResponse:
+    raw = _call("observability_events", run_id, operator_id=operator_id, limit=limit)
+    if isinstance(raw, ObservabilityResponse):
+        return raw
+    return ObservabilityResponse.model_validate(raw)
+
+
+@mcp.tool(
+    name="get_sudarshan_trajectory",
+    description=(
+        "Read the safe, ordered execution trajectory for a run. It includes "
+        "recorded lifecycle steps and parallel lane summaries for child skills, "
+        "memory, cache, quality, fallback, and provider events. It never returns "
+        "prompts, raw memory, provider payloads, credentials, or hidden reasoning. "
+        "The durable DAG remains the source of truth for dependencies."
+    ),
+)
+def get_sudarshan_trajectory(
+    run_id: str,
+    operator_id: str,
+    limit: int = 500,
+) -> TrajectoryResponse:
+    raw = _call("trajectory", run_id, operator_id=operator_id, limit=limit)
+    if isinstance(raw, TrajectoryResponse):
+        return raw
+    return TrajectoryResponse.model_validate(raw)
 
 
 @mcp.tool(
@@ -315,9 +450,9 @@ def invoke_sudarshan_skill(
     classification_level: str = "RESTRICTED",
     distribution: str = "Authorized NTRO personnel",
     metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return _call(
-        "invoke_skill",
+) -> SkillInvokeResponse:
+    raw = _call(
+        "invoke_a2a",
         {
             "skill_id": skill_id,
             "parent_run_id": parent_run_id,
@@ -331,6 +466,20 @@ def invoke_sudarshan_skill(
             "metadata": metadata or {},
         },
         operator_id=user_id,
+    )
+    if isinstance(raw, SkillInvokeResponse):
+        return raw
+    # Keep the public MCP response stable while the internal child handoff is
+    # now the same A2A envelope used by the HTTP transport.
+    return SkillInvokeResponse(
+        status=str(raw.get("status", "failed")),
+        run_id=str(raw.get("run_id", parent_run_id)),
+        task_id=task_id,
+        skill_id=skill_id,
+        artifacts=list(raw.get("artifacts") or []),
+        quality_status=str((raw.get("quality_receipts") or [{}])[0].get("status", "partial")),
+        lineage=raw.get("lineage"),
+        result=dict(raw.get("result") or {}),
     )
 
 
@@ -350,8 +499,8 @@ def start_sudarshan_skill(
     classification_level: str = "RESTRICTED",
     distribution: str = "Authorized NTRO personnel",
     metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return _call(
+) -> StartRunResponse:
+    raw = _call(
         "submit_skill",
         {
             "skill_id": skill_id,
@@ -365,6 +514,9 @@ def start_sudarshan_skill(
         },
         operator_id=user_id,
     )
+    if isinstance(raw, StartRunResponse):
+        return raw
+    return StartRunResponse.model_validate(raw)
 
 
 @mcp.tool(
@@ -506,6 +658,41 @@ def get_sudarshan_evidence(
         task_id=task_id,
         classification_level=classification_level,
     )
+
+
+@mcp.tool(
+    name="get_sudarshan_dag",
+    description=(
+        "Return the public DAG projection for a run. "
+        "Shows node statuses, dependencies, progress, lanes, and timing for all tasks "
+        "in the execution graph. Use after_revision to poll for updates efficiently: "
+        "pass the revision from the last response to receive only when something changed. "
+        "Returns {status: 'not_changed'} when the graph has not advanced past after_revision."
+    ),
+)
+def get_sudarshan_dag(
+    run_id: str,
+    operator_id: str,
+    after_revision: int = 0,
+    include_failure_details: bool = False,
+) -> DAGResponse:
+    """Read the public DAG for *run_id* through the application boundary."""
+    from integrations.deepseek_harness.application import get_application
+
+    try:
+        raw = get_application().get_dag(
+            run_id,
+            operator_id,
+            after_revision=after_revision,
+            include_failure_details=include_failure_details,
+        )
+        if isinstance(raw, DAGResponse):
+            return raw
+        return DAGResponse.model_validate(raw)
+    except PermissionError as exc:
+        return DAGResponse(status="forbidden", run_id=run_id, updated_at=str(exc))
+    except KeyError:
+        return DAGResponse(status="not_found", run_id=run_id)
 
 
 if __name__ == "__main__":

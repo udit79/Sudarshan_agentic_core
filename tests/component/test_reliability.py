@@ -7,6 +7,7 @@ from pathlib import Path
 from api.dag_scheduler import DAGSchedulerBridge
 from pipelines import ProgressEvent
 from pipelines.infographic.renderer import AntVInfographicRenderer
+from pipelines.infographic.renderer import MINIMUM_TIMEOUT_SECONDS
 from pipelines.orchestrator.contracts import NodeSpec
 from pipelines.orchestrator.dag import DependencyDAG
 from pipelines.orchestrator.progress import SQLiteProgressSink
@@ -96,7 +97,7 @@ def test_renderer_failure_is_explicit_and_does_not_return_a_fake_artifact(tmp_pa
     renderer = AntVInfographicRenderer(
         node_binary="definitely-missing-node",
         output_dir=tmp_path,
-        timeout_seconds=1,
+        timeout_seconds=MINIMUM_TIMEOUT_SECONDS,
     )
 
     try:
@@ -135,7 +136,7 @@ def test_video_partial_package_retries_only_failed_scene(tmp_path) -> None:
     ]
 
     first = generator.generate(subject="Recovery test", scenes=scenes, artifact_name="partial")
-    assert first.status == "succeeded"
+    assert first.status == "partial"
     assert first.metadata["degraded"] is True
     assert first.metadata["failed_scene_ids"] == ["scene-1"]
     assert calls == ["scene-0", "scene-1"]

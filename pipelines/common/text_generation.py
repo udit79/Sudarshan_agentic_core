@@ -96,6 +96,10 @@ class TextTransformationFlow(Flow[TaskState]):
         self.state.top_k = request.top_k
         self.state.token_budget = request.token_budget
         self.state.operation = request.operation
+        raw_constraints = request.constraints
+        if hasattr(raw_constraints, "model_dump"):
+            raw_constraints = raw_constraints.model_dump(mode="json")
+        self.state.constraints = dict(raw_constraints or {}) if isinstance(raw_constraints, Mapping) else {}
         self.state.parent_run_id = request.parent_run_id
         self.state.parent_artifact_id = request.parent_artifact_id
         self.state.revision_instruction = request.revision_instruction
@@ -147,6 +151,7 @@ class TextTransformationFlow(Flow[TaskState]):
             top_k=self.state.top_k,
             token_budget=self.state.token_budget,
             operation=self.state.operation,
+            constraints=dict(self.state.constraints),
             parent_run_id=self.state.parent_run_id,
             parent_artifact_id=self.state.parent_artifact_id,
             revision_instruction=self.state.revision_instruction,
@@ -306,6 +311,7 @@ class TextTransformationFlow(Flow[TaskState]):
         quality_data = result.quality.model_dump(mode="json")
         if deterministic_issues:
             quality_data["issues"] = [*quality_data.get("issues", []), *deterministic_issues]
+            quality_data["approved"] = False
         self.state.quality_review = quality_data
         if quality_data.get("approved") is True and not deterministic_issues:
             self.state.record("quality_gate", "succeeded", summary="Output approved for frontend delivery")
@@ -329,41 +335,63 @@ class TextTransformationFlow(Flow[TaskState]):
             output = self.output_model.model_validate(self.state.output)  # type: ignore[union-attr]
             output = self.enrich_output(output)
             self.state.output = output.model_dump(mode="json")
-            unit = KnowledgeUnit(
-                unit_id=f"{self.pipeline_name}-{self.state.run_id}",
-                content=output.model_dump_json(),
-                source=Source(
-                    source_id=self.state.run_id,
-                    source_type=SourceType.TEXT,
-                    source_reference=f"pipeline://{self.pipeline_name}/{self.state.run_id}",
+            from pipelines.common.release_gate import can_release_to_case_memory
+
+            quality_approved = bool(self.state.quality_review and self.state.quality_review.get("approved"))
+            artifact = self.state.artifact
+            artifact_data = artifact if isinstance(artifact, Mapping) else {}
+            request_metadata = self._request().metadata
+            releasable, reason = can_release_to_case_memory(
+                pipeline=self.pipeline_name,
+                output=output,
+                quality_approved=quality_approved,
+                status="succeeded",
+                artifact=artifact,
+                operator_waiver_id=artifact_data.get("operator_waiver_id"),
+                memory_policy_allows_degraded=bool(
+                    request_metadata.get("memory_policy_allows_degraded", False)
                 ),
-                metadata={
-                    "pipeline": self.pipeline_name,
-                    "classification_level": self.state.classification_level,
-                    "delivery_owner": "frontend",
-                    "human_approval_required": self.human_approval_required,
-                    "operation": self.state.operation,
-                    "parent_run_id": self.state.parent_run_id,
-                    "parent_artifact_id": self.state.parent_artifact_id,
-                    "revision_scope": self.state.revision_scope,
-                    "output": output.model_dump(mode="json"),
-                },
-                provenance={
-                    "task_id": self.state.task_id,
-                    "case_id": self.state.case_id,
-                    "run_id": self.state.run_id,
-                    "memory_policy": "validated_output_case_write_back",
-                    "operation": self.state.operation,
-                    "parent_run_id": self.state.parent_run_id,
-                    "parent_artifact_id": self.state.parent_artifact_id,
-                },
+                human_approval_required=self.human_approval_required,
+                human_approved=not self.human_approval_required,
             )
-            self.memory_manager.remember(
-                unit,
-                self._request().access_context,
-                scope_type=ScopeType.CASE,
-                memory_type=MemoryType.SUMMARY,
-            )
+            if releasable:
+                unit = KnowledgeUnit(
+                    unit_id=f"{self.pipeline_name}-{self.state.run_id}",
+                    content=output.model_dump_json(),
+                    source=Source(
+                        source_id=self.state.run_id,
+                        source_type=SourceType.TEXT,
+                        source_reference=f"pipeline://{self.pipeline_name}/{self.state.run_id}",
+                    ),
+                    metadata={
+                        "pipeline": self.pipeline_name,
+                        "classification_level": self.state.classification_level,
+                        "delivery_owner": "frontend",
+                        "human_approval_required": self.human_approval_required,
+                        "operation": self.state.operation,
+                        "parent_run_id": self.state.parent_run_id,
+                        "parent_artifact_id": self.state.parent_artifact_id,
+                        "revision_scope": self.state.revision_scope,
+                        "output": output.model_dump(mode="json"),
+                    },
+                    provenance={
+                        "task_id": self.state.task_id,
+                        "case_id": self.state.case_id,
+                        "run_id": self.state.run_id,
+                        "memory_policy": "validated_output_case_write_back",
+                        "operation": self.state.operation,
+                        "parent_run_id": self.state.parent_run_id,
+                        "parent_artifact_id": self.state.parent_artifact_id,
+                    },
+                )
+                self.memory_manager.remember(
+                    unit,
+                    self._request().access_context,
+                    scope_type=ScopeType.CASE,
+                    memory_type=MemoryType.SUMMARY,
+                )
+            else:
+                self.state.record("case_write_back", "skipped", summary=f"Case memory write skipped: {reason}")
             self.state.status = "succeeded"
             self._result = PipelineResponse(
                 status="succeeded",

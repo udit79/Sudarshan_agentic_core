@@ -63,11 +63,19 @@ def test_native_mcp_profile_keeps_full_external_mode_and_bounds_native_schema():
     assert MCP_TOOL_PROFILES["full"] is None
     artifact = MCP_TOOL_PROFILES["artifact"]
     assert artifact is not None
-    assert "list_sudarshan_skills" in artifact
     assert "start_sudarshan_run" in artifact
     assert "get_sudarshan_artifact" in artifact
+    assert "get_sudarshan_dag" in artifact
+    assert "run_sudarshan" not in artifact
+    assert "start_sudarshan_skill" not in artifact
     assert "search_sudarshan_text_evidence" not in artifact
     assert "remember_sudarshan_context" not in artifact
+
+    specialist = MCP_TOOL_PROFILES["specialist"]
+    assert specialist is not None
+    assert "list_sudarshan_skills" in specialist
+    assert "get_sudarshan_skill" in specialist
+    assert "start_sudarshan_run" in specialist
 
 
 def test_native_harness_bundle_loads_live_operations_bridge():

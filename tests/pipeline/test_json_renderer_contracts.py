@@ -46,7 +46,11 @@ def test_system_json_contracts_are_typed_safe_and_renderer_ready(tmp_path) -> No
         "summary_id": "summary-1",
         "title": "Case summary",
         "executive_summary": "One reviewed source is available for assessment.",
-        "key_findings": ["One reviewed source is available."],
+            "key_findings": [{
+                "finding_id": "kf-1",
+                "text": "One reviewed source is available.",
+                "evidence_ids": ["E-1"],
+            }],
         "implications": ["Further independent verification is needed."],
         "recommended_actions": ["Review the source record."],
         "evidence": [evidence],

@@ -18,7 +18,17 @@ from threading import RLock
 from typing import Any, Callable, Iterable, Literal, Mapping
 
 from api.control_plane import ControlPlane, ControlPlaneConflict, LeaseToken, StaleLeaseError, new_worker_id
-from pipelines.orchestrator.contracts import NodeSpec
+from pipelines.orchestrator.contracts import (
+    DAGNodeStatus,
+    DAGTransitionIntent,
+    NodeSpec,
+    PublicChildSpec,
+    PublicDAGEdge,
+    PublicDAGGraph,
+    PublicDAGNode,
+    RunEnqueueIntent,
+    TERMINAL_NODE_STATUSES,
+)
 
 
 NodeStatus = Literal[
@@ -370,6 +380,8 @@ class DependencyDAG:
                 CREATE TABLE IF NOT EXISTS dag_runs (
                     run_id TEXT PRIMARY KEY,
                     status TEXT NOT NULL,
+                    failure_code TEXT,
+                    safe_failure_summary TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -384,13 +396,68 @@ class DependencyDAG:
                     max_repairs INTEGER NOT NULL DEFAULT 0,
                     failure_code TEXT,
                     failure_reason TEXT,
+                    safe_failure_summary TEXT,
                     output_ref TEXT,
+                    progress INTEGER,
+                    attempt_id TEXT,
+                    lane_id TEXT,
+                    started_at TEXT,
+                    completed_at TEXT,
                     PRIMARY KEY (run_id, node_id),
                     FOREIGN KEY (run_id) REFERENCES dag_runs(run_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_dag_nodes_ready ON dag_nodes(run_id, status);
+                -- NP-08: outbox for transactional scheduler enqueue records.
+                -- Records are NEVER deleted; they transition to 'acknowledged'.
+                CREATE TABLE IF NOT EXISTS dag_outbox (
+                    event_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    queue_name TEXT NOT NULL,
+                    payload_fingerprint TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    acknowledged_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_dag_outbox_run ON dag_outbox(run_id, status);
+                -- NP-08: per-consumer delivery status for each outbox event.
+                CREATE TABLE IF NOT EXISTS dag_consumers (
+                    consumer_name TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    published_at TEXT,
+                    acknowledged_at TEXT,
+                    PRIMARY KEY (consumer_name, event_id)
+                );
+                -- NP-08: monotonic public revision counter per run.
+                CREATE TABLE IF NOT EXISTS dag_revisions (
+                    run_id TEXT PRIMARY KEY,
+                    revision INTEGER NOT NULL DEFAULT 0
+                );
                 """
             )
+        # Idempotent column migrations for databases created before NP-08.
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        """Add NP-08 columns to pre-existing schemas without data loss."""
+        _optional_columns = [
+            ("dag_runs", "failure_code", "TEXT"),
+            ("dag_runs", "safe_failure_summary", "TEXT"),
+            ("dag_nodes", "safe_failure_summary", "TEXT"),
+            ("dag_nodes", "progress", "INTEGER"),
+            ("dag_nodes", "attempt_id", "TEXT"),
+            ("dag_nodes", "lane_id", "TEXT"),
+            ("dag_nodes", "started_at", "TEXT"),
+            ("dag_nodes", "completed_at", "TEXT"),
+        ]
+        with self._connection:
+            for table, col, col_type in _optional_columns:
+                try:
+                    self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                except Exception:  # noqa: BLE001 — column already exists
+                    pass
 
     def _supports_remote_snapshots(self) -> bool:
         return self._control_plane is not None and all(
@@ -702,3 +769,283 @@ class DependencyDAG:
         if self._event_sink is None:
             return
         self._event_sink(name, {"run_id": run_id, **fields})
+
+    # ------------------------------------------------------------------
+    # NP-08 public projection API
+    # ------------------------------------------------------------------
+
+    def _get_or_create_revision(self, run_id: str) -> int:
+        """Return the current public revision for *run_id*, creating 0 if absent."""
+        row = self._connection.execute(
+            "SELECT revision FROM dag_revisions WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            self._connection.execute(
+                "INSERT INTO dag_revisions(run_id, revision) VALUES (?, 0)", (run_id,)
+            )
+            return 0
+        return int(row["revision"])
+
+    def _increment_revision(self, run_id: str) -> int:
+        """Atomically increment the public revision counter and return the new value."""
+        self._connection.execute(
+            """
+            INSERT INTO dag_revisions(run_id, revision) VALUES (?, 1)
+            ON CONFLICT(run_id) DO UPDATE SET revision = revision + 1
+            """,
+            (run_id,),
+        )
+        row = self._connection.execute(
+            "SELECT revision FROM dag_revisions WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        return int(row["revision"])
+
+    def apply_transition(self, intent: DAGTransitionIntent) -> int:
+        """Apply a public DAG state transition and return the new public revision.
+
+        Timestamps (``started_at`` when transitioning to ``running``,
+        ``completed_at`` for terminal statuses) are server-assigned here.
+        ``revision`` and ``timestamp`` must never be accepted from callers.
+        """
+        now = _now()
+        run_id = intent.run_id
+        with self._lock, self._connection:
+            self._require_run_locked(run_id)
+            if intent.scope == "run":
+                update_fields: dict[str, Any] = {"updated_at": now}
+                if intent.run_status:
+                    update_fields["status"] = intent.run_status
+                if intent.failure_code is not None:
+                    update_fields["failure_code"] = intent.failure_code
+                if intent.safe_failure_summary is not None:
+                    update_fields["safe_failure_summary"] = intent.safe_failure_summary
+                set_clause = ", ".join(f"{k} = ?" for k in update_fields)
+                self._connection.execute(
+                    f"UPDATE dag_runs SET {set_clause} WHERE run_id = ?",
+                    (*update_fields.values(), run_id),
+                )
+            elif intent.scope == "node":
+                node_id = intent.node_id
+                assert node_id is not None  # validated by DAGTransitionIntent
+                row = self._get_node_row_locked(run_id, node_id)
+                node_updates: dict[str, Any] = {}
+                if intent.node_status:
+                    node_updates["status"] = intent.node_status
+                    if intent.node_status == "running" and row["started_at"] is None:
+                        node_updates["started_at"] = now
+                    if intent.node_status in TERMINAL_NODE_STATUSES:
+                        node_updates["completed_at"] = now
+                if intent.progress is not None:
+                    node_updates["progress"] = intent.progress
+                if intent.attempt_id is not None:
+                    node_updates["attempt_id"] = intent.attempt_id
+                if intent.lane_id is not None:
+                    node_updates["lane_id"] = intent.lane_id
+                if intent.failure_code is not None:
+                    node_updates["failure_code"] = intent.failure_code
+                if intent.safe_failure_summary is not None:
+                    node_updates["safe_failure_summary"] = intent.safe_failure_summary
+                if intent.output_ref is not None:
+                    node_updates["output_ref"] = intent.output_ref
+                if node_updates:
+                    set_clause = ", ".join(f"{k} = ?" for k in node_updates)
+                    self._connection.execute(
+                        f"UPDATE dag_nodes SET {set_clause} WHERE run_id = ? AND node_id = ?",
+                        (*node_updates.values(), run_id, node_id),
+                    )
+                # Keep the run updated_at current.
+                self._connection.execute(
+                    "UPDATE dag_runs SET updated_at = ? WHERE run_id = ?",
+                    (now, run_id),
+                )
+            elif intent.scope == "admission":
+                parent_node_id = intent.parent_node_id
+                for child in intent.admitted_nodes or []:
+                    deps_json = json.dumps(child.dependencies, sort_keys=True)
+                    spec_data = {
+                        "node_id": child.node_id,
+                        "skill_id": child.skill_id,
+                        "dependencies": child.dependencies,
+                        "output_schema_ref": child.output_schema_ref,
+                    }
+                    spec_json = json.dumps(spec_data, sort_keys=True)
+                    try:
+                        self._connection.execute(
+                            """
+                            INSERT INTO dag_nodes(
+                                run_id, node_id, skill_id, spec_json, dependencies_json,
+                                status, repair_attempts, max_repairs
+                            ) VALUES (?, ?, ?, ?, ?, 'pending', 0, 0)
+                            """,
+                            (run_id, child.node_id, child.skill_id, spec_json, deps_json),
+                        )
+                    except Exception:  # noqa: BLE001 — node already exists; skip
+                        pass
+                self._connection.execute(
+                    "UPDATE dag_runs SET updated_at = ? WHERE run_id = ?",
+                    (now, run_id),
+                )
+            revision = self._increment_revision(run_id)
+        self._emit(
+            "dag.transition",
+            run_id,
+            scope=intent.scope,
+            event_id=intent.event_id,
+            revision=revision,
+        )
+        return revision
+
+    def apply_enqueue(self, intent: RunEnqueueIntent) -> int:
+        """Persist a ``RunEnqueueIntent`` to the outbox.
+
+        ``created_at`` is server-assigned if the caller left it as ``None``.
+        Records are never deleted; they are acknowledged by
+        :meth:`acknowledge_enqueue`.
+
+        Returns the SQLite ``last_insert_rowid()`` for the outbox row.
+        """
+        now = _now()
+        created_at = intent.created_at if intent.created_at is not None else now
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO dag_outbox(
+                    event_id, run_id, queue_name, payload_fingerprint,
+                    status, created_at
+                ) VALUES (?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    intent.event_id,
+                    intent.run_id,
+                    intent.queue_name,
+                    intent.payload_fingerprint,
+                    created_at,
+                ),
+            )
+            row_id = self._connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return int(row_id)
+
+    def acknowledge_enqueue(self, event_id: str) -> None:
+        """Mark an outbox record as acknowledged.
+
+        The record is **never deleted**; ``status`` is set to
+        ``'acknowledged'`` and ``acknowledged_at`` is server-assigned.
+        Idempotent: calling again on an already-acknowledged record is a no-op.
+        """
+        now = _now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                UPDATE dag_outbox
+                SET status = 'acknowledged', acknowledged_at = ?
+                WHERE event_id = ? AND status = 'pending'
+                """,
+                (now, event_id),
+            )
+
+    def mark_admission_failed(
+        self,
+        run_id: str,
+        *,
+        event_id: str | None = None,
+        safe_failure_summary: str | None = None,
+    ) -> int:
+        """Record a run-level admission failure in the public DAG.
+
+        Generates an idempotent ``DAGTransitionIntent`` with
+        ``scope="run"``, ``run_status="failed"``, and
+        ``failure_code="DAG_ADMISSION_FAILED"``, then applies it.
+        """
+        import uuid
+
+        eid = event_id or f"adm-fail-{uuid.uuid4().hex[:16]}"
+        intent = DAGTransitionIntent(
+            event_id=eid,
+            run_id=run_id,
+            scope="run",
+            run_status="failed",
+            failure_code="DAG_ADMISSION_FAILED",
+            safe_failure_summary=safe_failure_summary or "Run could not be admitted to the scheduler",
+        )
+        return self.apply_transition(intent)
+
+    def get_public_dag(
+        self,
+        run_id: str,
+        *,
+        after_revision: int = -1,
+        include_failure_details: bool = False,
+    ) -> PublicDAGGraph | None:
+        """Return a safe public snapshot of the DAG for *run_id*.
+
+        Returns ``None`` if the revision has not advanced past *after_revision*
+        (caller may return ``304 Not Modified`` or ``{status: 'not_changed'}``).
+
+        The default *after_revision=-1* means "I have seen nothing" — the
+        call always returns the current graph.
+
+        Pass the ``revision`` from the previous response to poll efficiently:
+        the call returns ``None`` when nothing has changed since that revision.
+
+        Failure details (``failure_code``, ``safe_failure_summary``) are
+        included only when *include_failure_details* is ``True`` and the
+        caller holds elevated permissions.
+        """
+        self._sync_remote(run_id)
+        with self._lock:
+            run_row = self._connection.execute(
+                "SELECT * FROM dag_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if run_row is None:
+                raise DAGError(f"run '{run_id}' does not exist")
+            revision = self._get_or_create_revision(run_id)
+            if revision <= after_revision:
+                return None
+            node_rows = self._connection.execute(
+                "SELECT * FROM dag_nodes WHERE run_id = ? ORDER BY node_id", (run_id,)
+            ).fetchall()
+
+        run_status: str = str(run_row["status"])
+        run_failure_code: str | None = run_row["failure_code"] if include_failure_details else None
+        run_failure_summary: str | None = (
+            run_row["safe_failure_summary"] if include_failure_details else None
+        )
+
+        nodes: list[PublicDAGNode] = []
+        edges: list[PublicDAGEdge] = []
+        for row in node_rows:
+            node_status: DAGNodeStatus = str(row["status"])  # type: ignore[assignment]
+            is_terminal = node_status in TERMINAL_NODE_STATUSES
+            nodes.append(
+                PublicDAGNode(
+                    node_id=str(row["node_id"]),
+                    skill_id=str(row["skill_id"]),
+                    status=node_status,
+                    progress=row["progress"],
+                    attempt_id=row["attempt_id"],
+                    lane_id=row["lane_id"],
+                    started_at=row["started_at"],
+                    completed_at=row["completed_at"],
+                    repair_attempts=int(row["repair_attempts"]),
+                    max_repairs=int(row["max_repairs"]),
+                    output_ref=row["output_ref"],
+                    failure_code=row["failure_code"] if (include_failure_details and is_terminal) else None,
+                    safe_failure_summary=(
+                        row["safe_failure_summary"] if (include_failure_details and is_terminal) else None
+                    ),
+                )
+            )
+            for dep in json.loads(row["dependencies_json"]):
+                edges.append(PublicDAGEdge(source=str(dep), target=str(row["node_id"])))
+
+        return PublicDAGGraph(
+            run_id=run_id,
+            revision=revision,
+            status=run_status,  # type: ignore[arg-type]
+            created_at=str(run_row["created_at"]),
+            updated_at=str(run_row["updated_at"]),
+            failure_code=run_failure_code,
+            safe_failure_summary=run_failure_summary,
+            nodes=nodes,
+            edges=edges,
+        )

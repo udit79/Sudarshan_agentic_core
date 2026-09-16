@@ -36,16 +36,15 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
         description=(
             "Write a complete NTRO briefing presentation from the intelligence analysis. "
             "The classification is {classification_level}; distribution is {distribution}. "
-            "Use the exact PresentationOutput schema. Include: a descriptive title and subtitle, "
-            "an agenda listing all slide topics, individual slides each with a focused title, "
-            "3-6 bullet points, and informative speaker notes, a conclusion slide summarising "
-            "the key message, key takeaways (max 5), evidence references, confidence statement, "
-            "and intelligence gaps. "
+            "Use the exact PresentationOutput schema. Generate only the number of slides required by the supplied constraints. "
+            "A requested exact slide count includes any cover, agenda, conclusion, or closing slide; never add those slides "
+            "when they would exceed the requested count. Use the appropriate `layout` field for slides that are actually planned. "
             "Keep slides focused: one topic per slide. Bullets must be complete sentences or "
             "clear noun phrases — no fragments, no filler. Speaker notes must add context not "
             "visible on the slide. Never invent NTRO policy, response authority, or contacts. "
             "Write like a formal NTRO briefing: direct, neutral, precise. "
-            "Follow the central prompt plan where compatible with these rules:\n{prompt_plan}"
+            "Follow the central prompt plan where compatible with these rules:\n{prompt_plan}\n"
+            "Constraints to strictly enforce (e.g. target slide count, colors):\n{constraints}"
         ),
         expected_output="A complete validated PresentationOutput JSON object.",
         agent=agents["presentation_writer"],
@@ -122,7 +121,9 @@ def build_staged_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> di
             "Convert the grounded intelligence and routed DeckPlan into a complete validated "
             "PresentationOutput. Preserve evidence bindings, one message per slide, speaker "
             "notes, uncertainty, and gaps. Use only typed child artifact references for visuals. "
-            "The classification is {classification_level}; distribution is {distribution}."
+            "The classification is {classification_level}; distribution is {distribution}. "
+            "The constraints are authoritative: {constraints}. If an exact slide count is supplied, "
+            "the `slides` array must contain exactly that many slides, including any cover or closing slide."
         ),
         expected_output="A complete validated PresentationOutput JSON object.",
         agent=agents["presentation_writer"],
@@ -134,7 +135,7 @@ def build_staged_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> di
         description=(
             "Review the staged PresentationOutput and its plan. Check evidence bindings, one "
             "message per slide, visual routing, placeholders, overflow risks, agenda alignment, "
-            "gaps, and unsupported claims. Return precise slide-level repair IDs."
+            "gaps, unsupported claims, and exact slide/page-count constraints. Return precise slide-level repair IDs."
         ),
         expected_output="A validated PresentationQualityReview JSON object.",
         agent=agents["quality_critic"],

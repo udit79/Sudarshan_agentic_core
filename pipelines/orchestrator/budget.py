@@ -275,38 +275,105 @@ class BudgetController:
         """Return an estimate-aware usage report without claiming billing truth."""
 
         if self._control_plane is not None:
-            records = [UsageRecord.model_validate(item) for item in self._control_plane.usage_records(run_id)]
+            raw_records = [UsageRecord.model_validate(item) for item in self._control_plane.usage_records(run_id)]
         else:
             with self._lock:
-                records = list(self._usage_records.get(str(run_id), ()))
-        estimated = [record for record in records if record.is_estimate]
-        observed = [record for record in records if not record.is_estimate]
-        orchestration = [record for record in records if not record.node_id]
-        by_charge_type: dict[str, dict[str, int | float]] = {}
+                raw_records = list(self._usage_records.get(str(run_id), ()))
+
+        records: list[UsageRecord] = []
+        seen = set()
+        for r in raw_records:
+            if not r.usage_id:
+                # Should not happen as usage_id has min_length=1
+                continue
+            if r.usage_id in seen:
+                continue
+            seen.add(r.usage_id)
+            records.append(r)
+
+        logical_tokens = 0
+        logical_cost = 0.0
+        attempts_map: dict[str, dict[str, Any]] = {}
+        provider_observed_tokens = 0
+        provider_observed_count = 0
+        estimated_tokens = 0
+        estimated_count = 0
+        billing_tokens = 0
+        billing_cost = 0.0
+        billing_count = 0
+        unreconciled_usage: list[str] = []
+
         for record in records:
-            bucket = by_charge_type.setdefault(
-                record.charge_type,
-                {"record_count": 0, "tokens": 0, "estimated_tokens": 0, "observed_tokens": 0},
-            )
             tokens = self._tokens(record)
-            bucket["record_count"] = int(bucket["record_count"]) + 1
-            bucket["tokens"] = int(bucket["tokens"]) + tokens
-            key = "estimated_tokens" if record.is_estimate else "observed_tokens"
-            bucket[key] = int(bucket[key]) + tokens
+            cost = record.estimated_cost or 0.0
+            
+            logical_tokens += tokens
+            logical_cost += cost
+
+            if record.attempt_id:
+                bucket = attempts_map.setdefault(record.attempt_id, {"attempt_id": record.attempt_id, "tokens": 0, "status": "unknown"})
+                bucket["tokens"] += tokens
+                if record.provider_request_id and not record.is_estimate:
+                    bucket["status"] = "observed"
+                elif record.is_estimate and bucket["status"] == "unknown":
+                    bucket["status"] = "estimated"
+            
+            if record.provider_request_id is not None and not record.is_estimate:
+                provider_observed_tokens += tokens
+                provider_observed_count += 1
+            
+            if record.is_estimate:
+                estimated_tokens += tokens
+                estimated_count += 1
+            
+            if record.billing_status in {"matched", "adjusted"}:
+                billing_tokens += tokens
+                billing_cost += cost
+                billing_count += 1
+            else:
+                unreconciled_usage.append(record.usage_id)
+
+        billing_status = "unreconciled"
+        if billing_count > 0:
+            if billing_count == provider_observed_count and provider_observed_count > 0:
+                billing_status = "reconciled"
+            else:
+                billing_status = "partial"
+
         return {
-            "run_id": str(run_id),
-            "record_count": len(records),
-            "estimated_record_count": len(estimated),
-            "observed_record_count": len(observed),
-            "estimated_tokens": sum(self._tokens(record) for record in estimated),
-            "observed_tokens": sum(self._tokens(record) for record in observed),
-            "orchestration_tokens": sum(self._tokens(record) for record in orchestration),
-            "missing_or_estimated_usage": [record.usage_id for record in estimated],
-            "by_charge_type": by_charge_type,
-            "unreconciled_usage": [
-                record.usage_id for record in records if record.billing_status in {"unreconciled", "missing"}
-            ],
-            "billing_truth": False,
+            "logical_run": {
+                "tokens": logical_tokens,
+                "cost": logical_cost,
+                "attempt_count": len(attempts_map)
+            },
+            "attempts": list(attempts_map.values()),
+            "provider_observed": {
+                "tokens": provider_observed_tokens,
+                "record_count": provider_observed_count
+            },
+            "estimated": {
+                "tokens": estimated_tokens,
+                "record_count": estimated_count
+            },
+            "billing_reconciled": {
+                "tokens": billing_tokens,
+                "cost": billing_cost,
+                "status": billing_status
+            },
+            # Compatibility aliases for existing telemetry consumers. Keep
+            # the typed buckets above as the canonical contract.
+            "observed_record_count": provider_observed_count,
+            "estimated_record_count": estimated_count,
+            "observed_tokens": provider_observed_tokens,
+            "estimated_tokens": estimated_tokens,
+            "unreconciled_usage": unreconciled_usage,
+            "by_charge_type": {
+                "provider": {
+                    "observed_tokens": provider_observed_tokens,
+                    "estimated_tokens": estimated_tokens,
+                },
+                "logical_run": {"tokens": logical_tokens, "cost": logical_cost},
+            },
         }
 
     @staticmethod

@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from memory.cognee_adapter import CogneeConfig, CogneeHttpAdapter, MemoryBackend
 from memory.context_builder import BuiltContext, ContextBuilder, ContextLevel, RetrievedMemory
@@ -225,7 +226,8 @@ class MemoryManager:
 
     def __init__(self, backend: MemoryBackend, *, dataset_name: str = "sudarshan_memory",
                  store: MemoryStore | None = None, context_builder: ContextBuilder | None = None,
-                 event_log: MemoryEventLog | None = None) -> None:
+                 event_log: MemoryEventLog | None = None,
+                 operation_observer: Callable[[str, Mapping[str, Any]], None] | None = None) -> None:
         if not dataset_name.strip():
             raise ValueError("dataset_name must be non-empty")
         self.backend = backend
@@ -233,6 +235,19 @@ class MemoryManager:
         self.store = store or MemoryStore()
         self.context_builder = context_builder or ContextBuilder()
         self.event_log = event_log or MemoryEventLog()
+        # Optional safe telemetry hook. It receives identifiers and counts,
+        # never query text, recalled content, credentials, or backend payloads.
+        self.operation_observer = operation_observer
+
+    def _observe_operation(self, name: str, payload: Mapping[str, Any]) -> None:
+        observer = self.operation_observer
+        if observer is None:
+            return
+        try:
+            observer(name, payload)
+        except Exception:
+            # Memory telemetry must never change the result of a memory call.
+            return
 
     @classmethod
     def from_env(cls) -> "MemoryManager":
@@ -304,11 +319,39 @@ class MemoryManager:
                         unit.created_at, utc_now(), unit.source, metadata, unit.provenance,
                         lifecycle=lifecycle, importance=importance,
                         confidence=confidence, expires_at=expires_at)
-        response = self.backend.remember(
-            memory_id=memory.id, content=memory.content,
-            node_sets=node_sets_for_scope(memory.scope), metadata=metadata,
-            dataset_name=self.dataset_name, run_in_background=run_in_background,
-        )
+        run_id = str(unit.provenance.get("run_id") or metadata.get("run_id") or context.task_id or "")
+        started = time.monotonic()
+        operation_payload = {
+            "run_id": run_id,
+            "operation": "remember",
+            "backend": type(self.backend).__name__,
+            "owner_id": context.user_id,
+            "case_id": context.case_id,
+            "memory_id": memory.id,
+            "memory_type": memory_type.value,
+            "scope_type": scope_type.value,
+            "scope_id": memory_scope.scope_id,
+        }
+        self._observe_operation("memory.remember.started", operation_payload)
+        try:
+            response = self.backend.remember(
+                memory_id=memory.id, content=memory.content,
+                node_sets=node_sets_for_scope(memory.scope), metadata=metadata,
+                dataset_name=self.dataset_name, run_in_background=run_in_background,
+            )
+        except Exception as exc:
+            self._observe_operation("memory.remember.failed", {
+                **operation_payload,
+                "duration_ms": max(0, round((time.monotonic() - started) * 1000)),
+                "error_code": type(exc).__name__,
+            })
+            raise
+        self._observe_operation("memory.remember.completed", {
+            **operation_payload,
+            "duration_ms": max(0, round((time.monotonic() - started) * 1000)),
+            "backend_response_keys": sorted(str(key) for key in response)[:32]
+            if isinstance(response, Mapping) else [],
+        })
         self.store.upsert_memory(memory)
         self.event_log.append(
             "created",
@@ -425,9 +468,33 @@ class MemoryManager:
             raise ValueError("query must be a non-empty string")
         if top_k < 1:
             raise ValueError("top_k must be positive")
-        raw = self.backend.recall(query=query.strip(), node_sets=accessible_node_sets(context),
-                                  dataset_name=self.dataset_name, top_k=top_k,
-                                  session_id=session_id)
+        query_hash = hashlib.sha256(query.strip().encode("utf-8")).hexdigest()[:16]
+        run_id = str(session_id or context.task_id or "")
+        operation_payload = {
+            "run_id": run_id,
+            "operation": "recall",
+            "backend": type(self.backend).__name__,
+            "owner_id": context.user_id,
+            "case_id": context.case_id,
+            "stage_id": stage_id,
+            "query_hash": query_hash,
+            "top_k": top_k,
+            "token_budget": token_budget,
+        }
+        started = time.monotonic()
+        self._observe_operation("memory.recall.started", operation_payload)
+        try:
+            raw = self.backend.recall(query=query.strip(), node_sets=accessible_node_sets(context),
+                                      dataset_name=self.dataset_name, top_k=top_k,
+                                      session_id=session_id)
+        except Exception as exc:
+            self._observe_operation("memory.recall.failed", {
+                **operation_payload,
+                "duration_ms": max(0, round((time.monotonic() - started) * 1000)),
+                "error_code": type(exc).__name__,
+            })
+            raise
+        raw_count = len(raw) if hasattr(raw, "__len__") else None
         results = tuple(
             result
             for item in raw
@@ -437,7 +504,7 @@ class MemoryManager:
             and self.store.is_recallable(result.memory_id)
             and result.lifecycle == MemoryLifecycle.ACTIVE.value
         )
-        return RecallResponse(
+        response = RecallResponse(
             self.context_builder.build(
                 results,
                 token_budget,
@@ -447,6 +514,14 @@ class MemoryManager:
             ),
             results,
         )
+        self._observe_operation("memory.recall.completed", {
+            **operation_payload,
+            "duration_ms": max(0, round((time.monotonic() - started) * 1000)),
+            "backend_result_count": raw_count,
+            "accepted_result_count": len(results),
+            "trace_id": response.context.trace.trace_id if response.context.trace else None,
+        })
+        return response
 
     def case_history(self, context: AccessContext) -> list[Any]:
         """Return the authenticated case's safe memory lifecycle history."""

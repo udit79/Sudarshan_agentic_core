@@ -168,9 +168,9 @@ def render_flowchart_svg(
     by_id = layout.by_id
     colors = {"start": "#D1FAE5", "process": "#DBEAFE", "decision": "#FEF3C7", "review": "#EDE9FE", "end": "#FEE2E2"}
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        f"<title>{escape(spec.flowchart_id)}</title>",
-        f"<desc>Static flowchart {escape(spec.flowchart_id)} with {len(spec.nodes)} nodes and {len(spec.edges)} connections.</desc>",
+        f'<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="diagram-title diagram-desc" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        f'<title id="diagram-title">{escape(spec.flowchart_id)}</title>',
+        f'<desc id="diagram-desc">Static flowchart {escape(spec.flowchart_id)} with {len(spec.nodes)} nodes and {len(spec.edges)} connections.</desc>',
         '<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#475569"/></marker></defs>',
         '<rect width="100%" height="100%" fill="#F8FAFC"/>',
     ]

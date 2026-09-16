@@ -148,6 +148,14 @@ class RunEvent(ContractModel):
     model: str | None = None
     usage: TelemetryUsage | None = None
     cache_status: Literal["hit", "miss", "wait", "write", "not_applicable"] | None = None
+    source_sequence: int | None = None
+    node_id: str | None = None
+    parent_node_id: str | None = None
+    attempt_id: str | None = None
+    lane_id: str | None = None
+    fallback: bool = False
+    provider_request_id: str | None = None
+    usage_id: str | None = None
     timestamp: str = Field(default_factory=_utc_now)
 
 
@@ -208,6 +216,7 @@ class UsageRecord(ContractModel):
 
     usage_id: str = Field(min_length=1)
     run_id: str = Field(min_length=1)
+    attempt_id: str | None = None
     node_id: str | None = None
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
@@ -283,7 +292,7 @@ class SkillCall(ContractModel):
 class SkillResult(ContractModel):
     skill_call_id: str = Field(min_length=1)
     child_run_id: str = Field(min_length=1)
-    status: Literal["succeeded", "failed", "waiting", "cancelled", "blocked"]
+    status: Literal["succeeded", "failed", "waiting", "cancelled", "blocked", "partial"]
     artifact_ids: list[str] = Field(default_factory=list)
     quality_report_id: str | None = None
     usage_ids: list[str] = Field(default_factory=list)
@@ -397,5 +406,240 @@ def project_progress_event(event: Mapping[str, Any], *, sequence: int) -> RunEve
         model=payload.get("model"),
         usage=payload.get("usage"),
         cache_status=payload.get("cache_status"),
+        source_sequence=int(payload.get("source_sequence")) if payload.get("source_sequence") is not None else None,
+        node_id=payload.get("node_id"),
+        parent_node_id=payload.get("parent_node_id"),
+        attempt_id=payload.get("attempt_id"),
+        lane_id=payload.get("lane_id"),
+        fallback=bool(payload.get("fallback", False)),
+        provider_request_id=payload.get("provider_request_id"),
+        usage_id=payload.get("usage_id"),
         timestamp=str(payload.get("timestamp", _utc_now())),
     )
+
+
+class RequestConstraints(ContractModel):
+    slide_count: int | None = Field(default=None, ge=1)
+    page_count: int | None = Field(default=None, ge=1)
+    theme_id: str | None = None
+    color_palette: list[str] = Field(default_factory=list)
+    theme_tokens: dict[str, str] = Field(default_factory=dict)
+    required_sections: list[str] = Field(default_factory=list)
+    revision_scope: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def normalize_page_count(self) -> "RequestConstraints":
+        if self.slide_count is not None and self.page_count is not None and self.slide_count != self.page_count:
+            raise ValueError("slide_count and page_count must match when both are provided")
+        if self.slide_count is None and self.page_count is not None:
+            self.slide_count = self.page_count
+        return self
+
+
+class EvidenceRef(ContractModel):
+    evidence_id: str
+    source_id: str
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    classification_level: str
+
+
+class PreparationRecord(ContractModel):
+    preparation_id: str
+    context_pack_id: str
+    normalized_request: dict[str, Any]
+    authorized_user_id: str
+    case_id: str
+    task_id: str
+    classification: str
+    selected_pipelines: list[str]
+    constraint_set: RequestConstraints
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
+    memory_snapshot_id: str | None = None
+    status: Literal["prepared", "needs_clarification", "rejected"]
+    created_at: str
+    expires_at: str
+    consumed_by_run_id: str | None = None
+    request_fingerprint: str
+
+
+# ---------------------------------------------------------------------------
+# NP-08 — Public DAG projection contracts
+# ---------------------------------------------------------------------------
+
+DAGNodeStatus = Literal[
+    "pending", "ready", "running", "succeeded", "waiting", "failed", "blocked", "cancelled"
+]
+
+#: Node statuses for which failure details are permitted.
+TERMINAL_NODE_STATUSES: frozenset[str] = frozenset({"failed", "blocked", "cancelled"})
+
+
+class PublicChildSpec(ContractModel):
+    """Minimal public description of an admitted child node (no internal spec fields)."""
+
+    node_id: str = Field(min_length=1, max_length=120)
+    skill_id: str = Field(min_length=1, max_length=120)
+    dependencies: list[str] = Field(default_factory=list, max_length=100)
+    output_schema_ref: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_dependencies(self) -> "PublicChildSpec":
+        if len(self.dependencies) != len(set(self.dependencies)):
+            raise ValueError("dependencies must be unique")
+        return self
+
+
+class PublicDAGNode(ContractModel):
+    """Safe public projection of a single DAG node."""
+
+    node_id: str = Field(min_length=1, max_length=120)
+    skill_id: str = Field(min_length=1, max_length=120)
+    status: DAGNodeStatus
+    progress: int | None = Field(default=None, ge=0, le=100)
+    attempt_id: str | None = Field(default=None, max_length=120)
+    lane_id: str | None = Field(default=None, max_length=120)
+    started_at: str | None = None
+    completed_at: str | None = None
+    repair_attempts: int = Field(default=0, ge=0)
+    max_repairs: int = Field(default=0, ge=0)
+    output_ref: str | None = Field(default=None, pattern=r"^artifact-[0-9a-f]{64}$")
+    failure_code: str | None = Field(default=None, max_length=120)
+    safe_failure_summary: str | None = Field(default=None, max_length=500)
+
+
+class PublicDAGEdge(ContractModel):
+    """Directed dependency edge between two public DAG nodes."""
+
+    source: str = Field(min_length=1, max_length=120)
+    target: str = Field(min_length=1, max_length=120)
+    kind: Literal["dependency"] = "dependency"
+
+
+class PublicDAGGraph(ContractModel):
+    """Full public projection of a run's DAG, safe for external readers."""
+
+    run_id: str = Field(min_length=1, max_length=120)
+    revision: int = Field(default=0, ge=0)
+    status: RunStatus
+    created_at: str
+    updated_at: str
+    failure_code: str | None = Field(default=None, max_length=120)
+    safe_failure_summary: str | None = Field(default=None, max_length=500)
+    nodes: list[PublicDAGNode] = Field(default_factory=list)
+    edges: list[PublicDAGEdge] = Field(default_factory=list)
+
+
+class RunEnqueueIntent(ContractModel):
+    """Durable outbox record describing a pending scheduler enqueue.
+
+    ``created_at`` is intentionally ``Optional`` on input; the DAG store
+    assigns it during persistence so callers cannot inject a timestamp.
+    """
+
+    event_id: str = Field(min_length=1, max_length=120)
+    run_id: str = Field(min_length=1, max_length=120)
+    queue_name: str = Field(min_length=1, max_length=120)
+    payload_fingerprint: str = Field(min_length=1, max_length=120)
+    created_at: str | None = None  # server-assigned during persistence
+
+
+class DAGTransitionIntent(ContractModel):
+    """Caller-supplied intent to advance DAG state.
+
+    Scope rules
+    -----------
+    ``node`` scope
+        - Requires ``node_id`` and ``node_status``.
+        - ``failure_code`` / ``safe_failure_summary`` only allowed when
+          ``node_status in TERMINAL_NODE_STATUSES`` (failed, blocked, cancelled).
+        - Forbids run-level and admission fields.
+
+    ``run`` scope
+        - Requires ``run_status``.
+        - ``failure_code`` / ``safe_failure_summary`` only allowed when
+          ``run_status == "failed"``.
+        - Forbids node and admission fields.
+
+    ``admission`` scope
+        - Requires ``parent_node_id`` and ``admitted_nodes``.
+        - Forbids all node / run / failure fields.
+    """
+
+    event_id: str = Field(min_length=1, max_length=120)
+    run_id: str = Field(min_length=1, max_length=120)
+    scope: Literal["run", "node", "admission"]
+
+    node_id: str | None = Field(default=None, max_length=120)
+    parent_node_id: str | None = Field(default=None, max_length=120)
+    node_status: DAGNodeStatus | None = None
+    run_status: RunStatus | None = None
+    admitted_nodes: list[PublicChildSpec] | None = None
+
+    progress: int | None = Field(default=None, ge=0, le=100)
+    attempt_id: str | None = Field(default=None, max_length=120)
+    lane_id: str | None = Field(default=None, max_length=120)
+    # started_at and completed_at are NOT accepted from callers; the store
+    # derives them automatically from status transitions.
+    failure_code: str | None = Field(default=None, max_length=120)
+    safe_failure_summary: str | None = Field(default=None, max_length=500)
+    output_ref: str | None = Field(default=None, pattern=r"^artifact-[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "DAGTransitionIntent":  # noqa: C901
+        if self.scope == "node":
+            if not self.node_id or not self.node_status:
+                raise ValueError("node scope requires node_id and node_status")
+            if self.run_status or self.parent_node_id or self.admitted_nodes:
+                raise ValueError("node scope forbids run/admission fields")
+            # Failure detail fields are only meaningful for terminal statuses.
+            if self.node_status not in TERMINAL_NODE_STATUSES and (
+                self.failure_code or self.safe_failure_summary
+            ):
+                raise ValueError(
+                    "failure_code and safe_failure_summary are only allowed for terminal"
+                    " node statuses: failed, blocked, cancelled"
+                )
+        elif self.scope == "run":
+            if not self.run_status:
+                raise ValueError("run scope requires run_status")
+            if any(
+                [
+                    self.node_id,
+                    self.node_status,
+                    self.parent_node_id,
+                    self.admitted_nodes,
+                    self.progress,
+                    self.attempt_id,
+                    self.lane_id,
+                    self.output_ref,
+                ]
+            ):
+                raise ValueError("run scope forbids node/admission fields")
+            if self.run_status != "failed" and (self.failure_code or self.safe_failure_summary):
+                raise ValueError("run scope only allows failure fields when run_status is 'failed'")
+        elif self.scope == "admission":
+            if not self.parent_node_id or not self.admitted_nodes:
+                raise ValueError("admission scope requires parent_node_id and admitted_nodes")
+            if any(
+                [
+                    self.node_id,
+                    self.node_status,
+                    self.run_status,
+                    self.progress,
+                    self.attempt_id,
+                    self.lane_id,
+                    self.failure_code,
+                    self.safe_failure_summary,
+                    self.output_ref,
+                ]
+            ):
+                raise ValueError("admission scope forbids node/run/failure fields")
+        return self
+
+
+class DAGTransitionRecord(ContractModel):
+    """Durable record of an applied transition; revision and timestamp are server-assigned."""
+
+    intent: DAGTransitionIntent
+    revision: int = Field(ge=0)
+    timestamp: str  # Server-generated ISO-8601 UTC

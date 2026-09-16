@@ -44,6 +44,7 @@ class TaskState(BaseModel):
     top_k: int = Field(default=12, ge=1)
     token_budget: int = Field(default=6000, ge=256)
     operation: Literal["create", "revise"] = "create"
+    constraints: dict[str, Any] = Field(default_factory=dict)
     parent_run_id: str | None = None
     parent_artifact_id: str | None = None
     revision_instruction: str | None = None

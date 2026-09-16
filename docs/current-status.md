@@ -105,10 +105,12 @@ remote children consistently in trajectory.
   infographic, presentation, and video.
 - Native media/rendering paths: editable flowchart SVG/PPTX, AntV SSR bridge,
   native video scene generation/composition, and quality reports.
-- Optional PM-1/PM-2 PPT Master adapter: capability registration, bounded
-  non-shell export, workspace/output containment, cooperative cancellation,
-  timeout handling, and required quality-report discovery. It is disabled by
-  default; the native renderer remains the fallback.
+- Optional local PPT Master bridge: capability registration, bounded non-shell
+  export, workspace/output containment, cooperative cancellation, timeout
+  handling, required quality-report discovery, and PPTX read-back. PPT Master
+  is not hosted or installed by Sudarshan; a user-managed checkout must set
+  `SUDARSHAN_PPT_MASTER_ROOT`. It is disabled by default; native rendering is
+  authoritative.
 - IF-1–IF-3 AntV infographic hardening: pinned renderer version, cooperative
   cancellation, and mandatory SVG quality promotion after native SSR.
 - DD-1/DD-2 Diagram Design hardening: static accessible SVG metadata and
@@ -152,7 +154,9 @@ remote children consistently in trajectory.
 - Portable pipeline-agent foundation: `SkillManifest`, `ChildTaskSpec`,
   `SkillResult`, bounded dependency waves, parent/child lineage, artifact
   references, quality receipts, and local parallel execution. Per-pipeline A2A
-  cards and remote handoff adapters are not yet promoted as complete.
+  cards and remote handoff adapters are not yet promoted as complete. A safe
+  Harness trajectory projection now exposes the same recorded lifecycle events
+  and parallel-lane summaries without replacing the durable DAG.
 - OpenViking-inspired L0/L1/L2 context selection with stage defaults,
   safe legacy fallback, retrieval trace reporting, and typed `ContextPack`
   context levels. Skill manifests also declare bounded reference loading,
@@ -280,7 +284,7 @@ sequenceDiagram
 The current local verification snapshot is:
 
 ```text
-Python: 364 passed, 7 skipped, 33 warnings
+Python: 503 passed, 8 skipped, 32 warnings
 T28 reliability focus: 21 passed
 Video/media focused tests: 30 passed
 PPT Master adapter/quality focused tests: 11 passed; PPT lint: passed

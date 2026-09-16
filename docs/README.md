@@ -51,6 +51,10 @@ runtime truth.
    before changing internal MCP tools, task prompts, or graph visualization.
 16. Read the [reference adaptation ledgers](reference-adaptations/README.md)
    before using code, prompts, assets, or workflow ideas from a local reference.
+17. Read [pipeline benchmarking](pipeline-benchmarking.md) before comparing
+   providers, tuning prompts, or declaring a pipeline production-ready.
+18. Read [pipeline observability](pipeline-observability.md) to inspect each
+   lifecycle step, parallel child, Cognee call, and safe result metadata.
 
 Research citations are centralized in the [full 2.0 execution plan](archive/sudarshan-2.0-full-execution-plan.md)
 and its [Harness research companion](archive/sudarshan-2.0-harness-research.md). New
@@ -149,24 +153,14 @@ context, not current status.
 
 ## Verification baseline
 
-The repository's recorded local baseline is:
+The latest repository-local Python run passed 500 tests with 8 skips using a
+workspace-local pytest temporary root. Focused provider, pipeline, Harness,
+observability, and memory checks also pass.
 
-- Python: 212 passed, 1 skipped when run with a workspace-local pytest
-  temporary root.
-- Reference frontend: 3 projection/cursor tests passed and JavaScript syntax
-  checks passed.
-- DeepSeek Harness official brand plugin: 6 focused tests passed.
-- Sudarshan brand plugin: 3 focused tests passed.
-- Sudarshan brand and theme bundles: built successfully.
-- Harness client TypeScript project: passed.
-- `git diff --check`: passed.
-
-Audit verification on 2026-09-16 also passed the focused provider/planner
-regression set (5 passed). A full local run reached 367 passed and 8 skipped,
-but one environment-sensitive AntV SSR renderer test exceeded its 30-second
-deadline (`tests/pipeline/test_json_renderer_contracts.py`). That failure is
-not caused by the model-resolution cleanup; AntV SSR availability remains an
-explicit environment gate.
+This is local evidence only. It does not prove live MongoDB, Cognee, Google
+OAuth, OpenAI, AntV SSR, external video workers, or multi-host behavior. Run
+the relevant frontend, gateway, and live-service smoke checks separately before
+calling a pipeline production-ready.
 
 These tests do not prove external MongoDB, Cognee, Google OAuth, OpenAI,
 AntV SSR, or provider reachability. A live smoke test must be run only with

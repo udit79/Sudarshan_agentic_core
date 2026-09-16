@@ -12,6 +12,7 @@ import inspect
 import json
 import sqlite3
 import time
+import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
@@ -140,7 +141,10 @@ class LocalRunScheduler:
                     lease_until REAL,
                     retry_at REAL,
                     dead_letter INTEGER NOT NULL DEFAULT 0,
-                    skill_result_json TEXT
+                    skill_result_json TEXT,
+                    attempt_id TEXT,
+                    lease_token TEXT,
+                    provider_request_id TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_run_queue_status
                     ON run_queue(status, created_at);
@@ -152,6 +156,12 @@ class LocalRunScheduler:
                     message TEXT,
                     created_at REAL NOT NULL,
                     PRIMARY KEY(run_id, sequence)
+                );
+                CREATE TABLE IF NOT EXISTS preparations (
+                    idempotency_key TEXT PRIMARY KEY,
+                    request_fingerprint TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at REAL NOT NULL
                 );
                 """
             )
@@ -169,6 +179,12 @@ class LocalRunScheduler:
                 connection.execute("ALTER TABLE run_queue ADD COLUMN skill_result_json TEXT")
             if "queue_wait_ms" not in columns:
                 connection.execute("ALTER TABLE run_queue ADD COLUMN queue_wait_ms REAL")
+            if "attempt_id" not in columns:
+                connection.execute("ALTER TABLE run_queue ADD COLUMN attempt_id TEXT")
+            if "lease_token" not in columns:
+                connection.execute("ALTER TABLE run_queue ADD COLUMN lease_token TEXT")
+            if "provider_request_id" not in columns:
+                connection.execute("ALTER TABLE run_queue ADD COLUMN provider_request_id TEXT")
 
     @staticmethod
     def _request_hash(payload: Mapping[str, Any]) -> str:
@@ -183,6 +199,10 @@ class LocalRunScheduler:
             return payload
         identity = dict(payload)
         identity.pop("file_path", None)
+        # Object IDs are derived storage handles. A retry may upload the same
+        # verified source to a different immutable object before the scheduler
+        # sees it; logical identity comes from the source hash and scope.
+        identity.pop("source_object_id", None)
         return identity
 
     @staticmethod
@@ -272,6 +292,7 @@ class LocalRunScheduler:
             "run_id": str(row["run_id"]),
             "task_id": str(row["task_id"]),
             "case_id": str(row["case_id"]),
+            "user_id": payload.get("user_id"),
             "status": str(row["status"]),
             "attempt": int(row["attempt"]),
             "error": row["error"],
@@ -297,6 +318,10 @@ class LocalRunScheduler:
             "queue_wait_ms": row["queue_wait_ms"],
             "updated_at": float(row["updated_at"]),
             "dead_letter": bool(row["dead_letter"]),
+            "attempt_id": row["attempt_id"] if "attempt_id" in row.keys() else None,
+            "lease_token": row["lease_token"] if "lease_token" in row.keys() else None,
+            "provider_request_id": row["provider_request_id"] if "provider_request_id" in row.keys() else None,
+            "lineage": payload.get("lineage") or metadata.get("lineage"),
         }
 
     def submit(
@@ -477,6 +502,8 @@ class LocalRunScheduler:
     def _claim(self, run_id: str) -> sqlite3.Row | None:
         now = time.time()
         lease_until = now + self.lease_seconds
+        attempt_id = f"att-{uuid.uuid4()}"
+        lease_token = f"lease-{uuid.uuid4()}"
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -498,10 +525,11 @@ class LocalRunScheduler:
                 SET status = 'running', attempt = attempt + 1,
                     started_at = COALESCE(started_at, ?),
                     queue_wait_ms = COALESCE(queue_wait_ms, ?),
-                    updated_at = ?, lease_until = ?
+                    updated_at = ?, lease_until = ?,
+                    attempt_id = ?, lease_token = ?
                 WHERE run_id = ?
                 """,
-                (now, queue_wait_ms, now, lease_until, run_id),
+                (now, queue_wait_ms, now, lease_until, attempt_id, lease_token, run_id),
             )
             connection.commit()
             claimed = connection.execute("SELECT * FROM run_queue WHERE run_id = ?", (run_id,)).fetchone()
@@ -591,6 +619,7 @@ class LocalRunScheduler:
         dead_letter: bool = False,
         skill_result: Mapping[str, Any] | None = None,
         lease: LeaseToken | None = None,
+        local_lease_token: str | None = None,
     ) -> bool:
         if self.control_plane is not None and lease is not None:
             try:
@@ -613,7 +642,7 @@ class LocalRunScheduler:
                 UPDATE run_queue
                 SET status = ?, error = ?, updated_at = ?, lease_until = NULL,
                     retry_at = NULL, dead_letter = ?, skill_result_json = ?
-                WHERE run_id = ?
+                WHERE run_id = ? AND (lease_token IS NULL OR lease_token = ?)
                 """,
                 (
                     status,
@@ -623,6 +652,7 @@ class LocalRunScheduler:
                     json.dumps(dict(skill_result), ensure_ascii=False, default=str)
                     if skill_result is not None else None,
                     run_id,
+                    local_lease_token,
                 ),
             )
             row = connection.execute(
@@ -695,6 +725,8 @@ class LocalRunScheduler:
         payload: Mapping[str, Any],
         operator_id: str,
         cancel_event: Event,
+        attempt_id: str | None = None,
+        lease_token: str | None = None,
     ) -> Mapping[str, Any]:
         """Call old callbacks unchanged while enabling cooperative cancellation."""
 
@@ -704,11 +736,19 @@ class LocalRunScheduler:
                 parameter.kind == inspect.Parameter.VAR_KEYWORD
                 for parameter in parameters.values()
             )
+            supports_attempt = "attempt_id" in parameters or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
         except (TypeError, ValueError):
             supports_event = False
+            supports_attempt = False
         kwargs: dict[str, Any] = {"operator_id": operator_id}
         if supports_event:
             kwargs["cancel_event"] = cancel_event
+        if supports_attempt:
+            kwargs["attempt_id"] = attempt_id
+            kwargs["lease_token"] = lease_token
         result = self.execute(payload, **kwargs)
         return result if isinstance(result, Mapping) else {"status": "succeeded"}
 
@@ -717,13 +757,15 @@ class LocalRunScheduler:
         payload: Mapping[str, Any],
         operator_id: str,
         cancel_event: Event,
+        attempt_id: str | None = None,
+        lease_token: str | None = None,
     ) -> Mapping[str, Any]:
         if self.execution_timeout_seconds <= 0:
             if cancel_event.is_set():
                 raise SchedulerCancellationError("execution cancelled before admission")
-            return self._invoke_execute(payload, operator_id, cancel_event)
+            return self._invoke_execute(payload, operator_id, cancel_event, attempt_id, lease_token)
         child_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sudarshan-call")
-        future = child_executor.submit(self._invoke_execute, payload, operator_id, cancel_event)
+        future = child_executor.submit(self._invoke_execute, payload, operator_id, cancel_event, attempt_id, lease_token)
         deadline = time.monotonic() + self.execution_timeout_seconds
         try:
             while True:
@@ -770,6 +812,8 @@ class LocalRunScheduler:
                 payload,
                 operator_id=str(row["operator_id"]),
                 cancel_event=cancel_event,
+                attempt_id=row["attempt_id"] if "attempt_id" in row.keys() else None,
+                lease_token=row["lease_token"] if "lease_token" in row.keys() else None,
             )
             if lease_lost.is_set():
                 return
@@ -782,10 +826,11 @@ class LocalRunScheduler:
                 self._failure_message(result.get("error")) if status == "failed" else None,
                 skill_result=result.get("skill_result") if isinstance(result.get("skill_result"), Mapping) else None,
                 lease=lease_holder[0],
+                local_lease_token=row["lease_token"] if "lease_token" in row.keys() else None,
             )
         except SchedulerCancellationError as exc:
             if not lease_lost.is_set():
-                self._set_terminal(run_id, "cancelled", str(exc)[:2000], lease=lease_holder[0])
+                self._set_terminal(run_id, "cancelled", str(exc)[:2000], lease=lease_holder[0], local_lease_token=row["lease_token"] if "lease_token" in row.keys() else None)
         except Exception as exc:
             if lease_lost.is_set():
                 return
@@ -801,6 +846,7 @@ class LocalRunScheduler:
                     error,
                     dead_letter=retryable,
                     lease=lease_holder[0],
+                    local_lease_token=row["lease_token"] if "lease_token" in row.keys() else None,
                 )
         finally:
             heartbeat_stop.set()
@@ -847,6 +893,50 @@ class LocalRunScheduler:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM run_queue WHERE run_id = ?", (str(run_id),)).fetchone()
         return self._row_state(row) if row else None
+
+    def preparation_create_if_absent(
+        self,
+        idempotency_key: str,
+        fingerprint: str,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Persist one immutable preparation record in the scheduler store."""
+
+        key = str(idempotency_key).strip()
+        if not key:
+            raise ValueError("idempotency_key must not be empty")
+        encoded = json.dumps(dict(record), sort_keys=True, ensure_ascii=False, default=str)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT request_fingerprint, record_json FROM preparations WHERE idempotency_key = ?",
+                (key,),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["request_fingerprint"]) != str(fingerprint):
+                    raise ControlPlaneConflict(
+                        "preparation key was already admitted with a different request fingerprint"
+                    )
+                return json.loads(str(existing["record_json"]))
+            connection.execute(
+                "INSERT INTO preparations (idempotency_key, request_fingerprint, record_json, created_at) VALUES (?, ?, ?, ?)",
+                (key, str(fingerprint), encoded, time.time()),
+            )
+            connection.commit()
+        return dict(record)
+
+    def preparation_get(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Load a preparation record after a process restart."""
+
+        key = str(idempotency_key).strip()
+        if not key:
+            return None
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT record_json FROM preparations WHERE idempotency_key = ?",
+                (key,),
+            ).fetchone()
+        return json.loads(str(row["record_json"])) if row else None
 
     def events(self, run_id: str, *, after_sequence: int = 0) -> list[dict[str, Any]]:
         with self._connect() as connection:

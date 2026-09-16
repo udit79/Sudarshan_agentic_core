@@ -8,6 +8,7 @@ HTTP handlers, tests, and future orchestration implementations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any, Literal, Mapping
 
 from memory.scope_policy import AccessContext
@@ -18,6 +19,38 @@ def _required(value: str, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty string")
     return value.strip()
+
+
+def _infer_exact_page_constraint(
+    query: str,
+    metadata: Mapping[str, Any],
+    requested_pipelines: tuple[str, ...] = (),
+) -> dict[str, int] | None:
+    """Infer a slide/page total without confusing source pages with output pages.
+
+    Exact language is always accepted. Bare ``N slides``/``N pages`` is
+    treated as an output constraint only when the request is clearly a
+    presentation request; otherwise ``N pages`` may refer to source material.
+    """
+
+    hints = metadata.get("user_constraints", ())
+    if isinstance(hints, (list, tuple)):
+        hint_text = " ".join(str(item) for item in hints)
+    else:
+        hint_text = str(hints or "")
+    text = f"{query} {hint_text}"
+    match = re.search(r"\b(?:exactly|only|just)\s+(\d+)\s+(?:pages?|slides?)\b", text, re.IGNORECASE)
+    if not match:
+        presentation_request = (
+            any(str(item).strip().lower() in {"presentation", "ppt"} for item in requested_pipelines)
+            or bool(re.search(r"\b(?:pptx?|powerpoint|presentation|deck|slides?)\b", text, re.IGNORECASE))
+        )
+        if presentation_request:
+            match = re.search(r"\b(\d+)\s+(?:pages?|slides?)\b", text, re.IGNORECASE)
+    if not match:
+        return None
+    count = int(match.group(1))
+    return {"slide_count": count, "page_count": count}
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +77,7 @@ class AdvisoryRequest:
     revision_scope: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
     requested_pipelines: tuple[str, ...] = ()
+    constraints: Any = None  # Typed as Any to avoid circular import, acts as RequestConstraints
 
     def __post_init__(self) -> None:
         for name in ("query", "user_id", "case_id", "task_id", "classification_level", "distribution"):
@@ -91,6 +125,14 @@ class AdvisoryRequest:
         if not isinstance(self.metadata, Mapping):
             raise ValueError("metadata must be an object")
         object.__setattr__(self, "metadata", dict(self.metadata))
+        if self.constraints is None:
+            inferred = _infer_exact_page_constraint(
+                self.query,
+                self.metadata,
+                requested_pipelines=self.requested_pipelines,
+            )
+            if inferred:
+                object.__setattr__(self, "constraints", inferred)
 
     @property
     def access_context(self) -> AccessContext:
@@ -114,6 +156,7 @@ class AdvisoryRequest:
             "revision_scope": list(self.revision_scope),
             "request_understanding": self.metadata.get("request_understanding", {}),
             "prompt_plan": self.metadata.get("prompt_plan", {}),
+            "constraints": self.constraints,
         }
 
 
@@ -121,7 +164,7 @@ class AdvisoryRequest:
 class PipelineResponse:
     """Transport-neutral result returned to the harness/application."""
 
-    status: Literal["succeeded", "failed", "pending"]
+    status: Literal["succeeded", "partial", "failed", "pending"]
     pipeline: str
     task_id: str
     run_id: str

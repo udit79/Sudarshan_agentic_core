@@ -59,7 +59,7 @@ def test_scenes_from_package():
 
 @patch("pipelines.video.native_generator._ffmpeg_binary")
 @patch("pipelines.video.native_generator.subprocess.run")
-def test_native_video_generator_fallback(mock_run, mock_ffmpeg):
+def test_native_video_generator_fallback(mock_run, mock_ffmpeg, tmp_path):
     # Mock ffmpeg binary
     mock_ffmpeg.return_value = "ffmpeg"
     
@@ -68,7 +68,7 @@ def test_native_video_generator_fallback(mock_run, mock_ffmpeg):
     
     # Needs to patch out the actual file checks since we are mocking subprocess
     with patch("pathlib.Path.exists", return_value=True):
-        generator = NativeVideoGenerator()
+        generator = NativeVideoGenerator(output_dir=tmp_path / "videos")
         scenes = [
             VideoScene(scene_id="1", narration="test", duration_seconds=5)
         ]

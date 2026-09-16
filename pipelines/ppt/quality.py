@@ -132,9 +132,9 @@ def inspect_flowchart_svg(svg: str, *, required_text: tuple[str, ...] = ()) -> l
         issues.append("SVG output has no closing root")
     if not re.search(r"\b(width|viewBox)=", svg):
         issues.append("SVG output has no dimensions")
-    if not re.search(r"<title>[^<]+</title>", svg):
+    if not re.search(r"<title\b[^>]*>[^<]+</title>", svg):
         issues.append("SVG output is missing an accessible title")
-    if not re.search(r"<desc>[^<]+</desc>", svg):
+    if not re.search(r"<desc\b[^>]*>[^<]+</desc>", svg):
         issues.append("SVG output is missing an accessible description")
     if re.search(r"<script\b|\bon[a-z]+\s*=|javascript:|data:text/html|@import\b", svg, re.IGNORECASE):
         issues.append("SVG output contains executable content")

@@ -56,6 +56,14 @@ class ProgressEvent(BaseModel):
     model: str | None = None
     usage: TelemetryUsage | None = None
     cache_status: Literal["hit", "miss", "wait", "write", "not_applicable"] | None = None
+    source_sequence: int | None = None
+    node_id: str | None = None
+    parent_node_id: str | None = None
+    attempt_id: str | None = None
+    lane_id: str | None = None
+    fallback: bool = False
+    provider_request_id: str | None = None
+    usage_id: str | None = None
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -202,6 +210,14 @@ class ProgressReporter:
         model: str | None = None,
         usage: TelemetryUsage | None = None,
         cache_status: Literal["hit", "miss", "wait", "write", "not_applicable"] | None = None,
+        source_sequence: int | None = None,
+        node_id: str | None = None,
+        parent_node_id: str | None = None,
+        attempt_id: str | None = None,
+        lane_id: str | None = None,
+        fallback: bool = False,
+        provider_request_id: str | None = None,
+        usage_id: str | None = None,
     ) -> ProgressEvent:
         event = ProgressEvent(
             run_id=self.run_id,
@@ -224,6 +240,14 @@ class ProgressReporter:
             model=model,
             usage=usage,
             cache_status=cache_status,
+            source_sequence=source_sequence,
+            node_id=node_id,
+            parent_node_id=parent_node_id,
+            attempt_id=attempt_id,
+            lane_id=lane_id,
+            fallback=fallback,
+            provider_request_id=provider_request_id,
+            usage_id=usage_id,
         )
         self.sink.publish(event)
         return event

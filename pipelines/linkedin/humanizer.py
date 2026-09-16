@@ -200,20 +200,29 @@ def audit_linkedin_text(text: str, *, voice_profile: Mapping[str, Any] | None = 
     # not carry an exact phrase (for example a rhythm or density rule).
     located: list[HumanizerIssue] = []
     for issue in issues:
-        if issue.location:
-            located.append(issue)
-            continue
-        evidence = issue.evidence or ""
-        offset = lowered.find(evidence.casefold()) if evidence else 0
-        paragraph_index = text[:max(offset, 0)].count("\n\n") + 1
-        located.append(issue.model_copy(update={"location": f"paragraph:{paragraph_index}"}))
+        location = issue.location
+        if not location:
+            evidence = issue.evidence or ""
+            offset = lowered.find(evidence.casefold()) if evidence else 0
+            paragraph_index = text[:max(offset, 0)].count("\n\n") + 1
+            location = f"paragraph:{paragraph_index}"
+        rule_id = issue.rule_id or f"HUM-{issue.category.upper()[:8]}-001"
+        issue_id = issue.issue_id or f"{issue.category}-{len(located) + 1}"
+        located.append(issue.model_copy(update={
+            "location": location,
+            "rule_id": rule_id,
+            "issue_id": issue_id,
+        }))
     issues = located
 
     block_count = sum(issue.severity == "block" for issue in issues)
     score = max(0.0, 1.0 - min(1.0, (len(issues) * 0.12) + (block_count * 0.35)))
+    score = round(score, 3)
+    has_blocking = any(issue.severity == "block" for issue in issues)
+    approved = (not has_blocking) and (score >= 0.70)
     return HumanizerReport(
-        approved=not any(issue.severity == "block" for issue in issues),
-        score=round(score, 3),
+        approved=approved,
+        score=score,
         checks=[
             "ai_meta_language", "generic_phrases", "overclaim_language", "adjacent_repetition",
             "emoji_density", "rhythm", "transition_density", "reveal_bridge", "fragment_stack",

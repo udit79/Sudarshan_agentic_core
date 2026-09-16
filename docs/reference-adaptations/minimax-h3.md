@@ -22,9 +22,10 @@ style application. The checked-out repository contains:
   generic MCP/A2A server.
 
 The previous reference audit treated the repository too much like an agent
-runtime. The accurate adoption target is a provider/model adapter plus selected
-prompt-planning ideas. The Hub canvas workflows are product-specific workflow
-instructions, not portable runtime code.
+runtime. MiniMax-H3 is not an active provider target for the current project
+because it is not hosted here. Retain only provider-neutral prompt-planning,
+media-validation, and staged-artifact lessons. The Hub canvas workflows are
+product-specific workflow instructions, not portable runtime code.
 
 ## What actually renders video
 
@@ -98,7 +99,7 @@ as if Hub were available.
 
 | Concern | MiniMax-H3 reference | Sudarshan today | Adoption decision |
 | --- | --- | --- | --- |
-| Generation unit | one 4–15s native audiovisual model job | per-scene package with local/native or legacy provider path | add an H3 provider adapter at scene level |
+| Generation unit | one 4–15s native audiovisual model job | per-scene package with local/native or legacy provider path | do not add an H3 adapter now; retain generic scene/provider lifecycle lessons |
 | Multi-shot film | Hub skills plan shots and assemble them; model/API examples do not | `VideoPackage`, scene manifests, timeline, FFmpeg composition | keep Sudarshan assembly authoritative |
 | Audio | H3 jointly generates stereo audio/video; 32 kHz | native TTS/BGM/FFmpeg path; legacy provider may return media | expose native-audio mode explicitly; do not silently duplicate BGM |
 | 2K | separate hosted regeneration stage from 768p base | no H3 regeneration stage | model it as a dependent child job, not a renderer fallback |
@@ -108,9 +109,10 @@ as if Hub were available.
 | Memory | no case/user/task memory implementation found | `MemoryManager` + Cognee + local store + access policy | H3 receives a bounded context pack only |
 | Orchestration | SGLang/API/Hub-specific | Sudarshan scheduler/DAG/trajectory | do not move orchestration into the provider |
 
-This makes H3 a potentially strong provider, not a replacement for the
-MoneyPrinter-compatible renderer architecture. H3 can improve native video
-quality and native sound, while Sudarshan remains responsible for lifecycle,
+If a separately hosted H3 service is approved in the future, it could be a
+provider behind the generic video contract, not a replacement for the
+MoneyPrinter-compatible renderer architecture. That future provider decision
+is outside the current plan. Sudarshan remains responsible for lifecycle,
 scope, artifacts, retries, and delivery.
 
 ## Memory and context audit
@@ -178,9 +180,16 @@ policy.
   Do not inject all of them into every H3 call. Store them as versioned
   capability-specific guidance and compile only the active mode’s rules.
 
-## Proposed Sudarshan H3 adapter
+## Deferred H3 adapter shape (not in the active plan)
 
-Do not import the H3 checkpoint repository into the application process first.
+The following is a future-provider compatibility sketch only. MiniMax-H3 is
+not hosted by the current project, and the active `docs/next-plan.md`
+deliberately does **not** add an H3-specific adapter or self-hosting layer.
+Keep this section as a boundary reference if a real hosted provider is selected
+later; do not implement it as part of the current video work.
+
+If a future hosted H3 deployment is approved, do not import the checkpoint
+repository into the application process first.
 The scalable path is an external H3 worker/provider:
 
 1. Add a provider adapter with `submit`, `status`, `download`, and `cancel`

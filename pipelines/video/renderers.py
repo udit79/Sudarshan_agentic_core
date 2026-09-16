@@ -42,6 +42,7 @@ class MoneyPrinterCompatibleRenderer:
         package: VideoPackage,
         scenes: Sequence[VideoScene],
         *,
+        attempt_id: str = "1",
         run_id: str,
         cancel_event: Event | None = None,
         authorization_scope: Mapping[str, object] | None = None,
@@ -49,6 +50,7 @@ class MoneyPrinterCompatibleRenderer:
         return self.generator.generate(
             subject=package.subject,
             scenes=scenes,
+            attempt_id=attempt_id,
             artifact_name=f"video-{run_id}",
             package_dir=Path("artifacts") / "videos" / str(run_id),
             cancel_event=cancel_event,

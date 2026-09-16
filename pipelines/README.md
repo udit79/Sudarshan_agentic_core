@@ -1,177 +1,120 @@
-# Sudarshan pipelines
+# Pipelines
 
-These application-specific pipelines turn person-provided case information
-plus permitted memory into controlled outputs. The advisory pipeline produces
-a formal case advisory for authorized review. The LinkedIn and executive-
-summary pipelines return validated drafts; the frontend owns preview, editing,
-and upload. The infographic pipeline produces validated AntV syntax and an SVG
-artifact. None of these pipelines is a cybersecurity generator, and none
-claims to represent an official NTRO template or classified operating
-procedure.
+Pipelines transform authorized case context into typed drafts or artifacts.
+The LangGraph orchestrator owns routing, lifecycle, budgets, retries,
+cancellation, parallel fan-out, and delivery. Pipeline code owns specialist
+generation and pipeline-specific quality checks.
 
-## Ownership boundary
+## Registered routes
+
+The default registry is built in
+[`pipelines/orchestrator/graph.py`](orchestrator/graph.py):
+
+| Route | Implementation | Output | Status |
+| --- | --- | --- | --- |
+| `advisory` | `advisory/crew.py` | Reviewed advisory and Markdown artifact | Local |
+| `executive_summary` | `executive_summary/crew.py` | Evidence-linked summary | Local |
+| `linkedin_post` | `linkedin/crew.py` | Humanized draft and optional image | Draft-only |
+| `presentation` | `ppt/crew.py` | Native PPTX and manifest | Native local path; exact-count, theme, editability, and post-render gates are covered; office visual smoke remains external |
+| `ppt` | Alias of `presentation` | Same as presentation | Compatibility only |
+| `infographic` | `infographic/crew.py` | AntV syntax and SVG | Native/fallback local path |
+| `video` | `video/pipeline.py` | Storyboard, media bundle, and MP4 | Native local path plus optional worker |
+| `visual_flowchart` | `ppt/child_skill.py` | Verified SVG/PPTX child artifact | Child capability |
+
+The `diagram/` package provides semantic diagram IR, validation, import, style,
+and export utilities. It is not a separate top-level pipeline route yet.
+
+## Shared lifecycle
 
 ```text
-MemoryManager.recall(User/Case bounded context)
-             -> RequestUnderstandingAgent
-             -> MemoryManager.recall(User/Case/Task context)
-             -> PromptCrafterAgent -> CrewAI specialist crew
-             -> Pydantic output + QualityReview
-             -> optional artifact renderer
-             -> MemoryManager.remember() [case only after validation/approval]
-             -> DeepSeek harness/application handoff
+authenticated request
+  -> bounded User/Case/Task context
+  -> typed prompt plan
+  -> pipeline or child skill
+  -> Pydantic output validation
+  -> deterministic quality gate and repair
+  -> renderer/provider, when needed
+  -> artifact manifest and safe progress events
+  -> approved Case/Task memory write-back
 ```
 
-The available flows are:
+The current runtime still has a request-understanding graph phase. The planned
+NP-04 migration to a persisted preparation phase is not complete until the
+graph no longer calls `RequestUnderstandingAgent`.
 
-- `AdvisoryFlow`: quality review, human approval, formal Markdown artifact,
-  then Case-memory write-back.
-- `LinkedInPostFlow`: quality review, validated post returned to the frontend;
-  no direct LinkedIn upload. It reads explicit image instructions from the
-  user query and otherwise lets the writer decide whether a visual improves
-  the post. OpenAI image generation is optional.
-- `ExecutiveSummaryFlow`: quality review, validated summary returned to the
-  frontend.
-- `InfographicFlow`: quality review, validated AntV syntax, SVG rendering, and
-  Case-memory write-back. The frontend receives the SVG artifact path and may
-  preview, edit, or upload it.
+Memory access is always through `MemoryManager`; agents never receive Cognee
+credentials or a Cognee client. Case-memory write-back is allowed only after
+the pipeline release gate. Task events may be written during execution.
 
-Updates to an existing output are modeled as revisions. The frontend creates a
-new task with `operation="revise"`, a `parent_artifact_id` or `parent_run_id`,
-the user's `revision_instruction`, and an optional `revision_scope`. The old
-artifact is never overwritten; the new result goes through the same validation
-and approval policy.
+## Pipeline notes
 
-For the central LangGraph router, backend/frontend event contract, approval
-resume flow, and Harness boundary, see
-[`docs/internal/pipeline-orchestration.md`](../docs/internal/pipeline-orchestration.md).
+### Advisory
 
-When the central router is used, a small User/Case memory context is recalled
-before request understanding. Once one or more pipelines are selected, a
-second recall uses the permitted User/Case/Task scopes and the bounded result
-is passed into each child flow's CrewAI tasks. Calling a flow directly remains supported
-for compatibility; in that mode the flow performs its own scoped recall.
+Uses structured intelligence, evidence/provenance checks, a quality critic,
+and an explicit human release gate before writing the approved advisory to
+case memory.
 
-The frontend can stop a run through the orchestrator's cancellation endpoint.
-Cancellation is cooperative: active graph boundaries observe it, record a
-Task-memory cancellation event, and return status `cancelled`. A provider call
-already executing may finish before the worker observes the cancellation.
+### Executive summary
 
-## Video package contract
+Uses the shared text-generation flow. Key findings and factual claims must
+reference evidence IDs. It returns a validated summary; frontend delivery and
+editing remain outside the pipeline.
 
-The video pipeline accepts an optional `metadata.video_package` object. It can
-contain the complete transcript, validated script, ordered storyboard scenes,
-visual terms, and provider options. If no package is supplied, the OpenAI
-planner creates the story and storyboard from the bounded memory context.
+### LinkedIn
 
-The default native path uses OpenAI for script planning, scene images, and TTS;
-local FFmpeg writes a durable package under `artifacts/videos/<run_id>/`:
-`script.txt`, `storyboard.json`, `images/scene_*.png`, `audio/scene_*.mp3`,
-`segments/scene_*.mp4`, `final.mp4`, `manifest.json`, and the final MP4. The DeepSeek Harness
-only calls the application boundary and never calls OpenAI, Cognee, or the
-native renderer directly.
+Produces a draft only. The humanizer checks claim bindings, AI-tell signals,
+and release thresholds. Direct publication is intentionally not implemented.
+Image generation is optional and may return a prompt fallback when no image
+provider is configured.
 
-`MONEYPRINTERTURBO_BASE_URL` is an explicit compatibility mode for deployments
-that still operate the upstream asynchronous worker contract. It is not used
-when blank, and it is not required for the native OpenAI/local path.
+### Presentation/PPT
 
-Example metadata payload:
+The renderer enforces the explicit slide count and maintains stable slide IDs,
+per-slide hashes, dependency invalidation, and manifests. Targeted edits copy
+an existing local PPTX and preserve unrelated slide parts. Structural
+insertion/reordering and true native layer/z-order preservation remain
+explicitly bounded cases. PPT Master is only an optional local bridge: it is
+not hosted or installed by Sudarshan and requires a user-managed checkout via
+`SUDARSHAN_PPT_MASTER_ROOT`.
 
-```json
-{
-  "video_package": {
-    "subject": "Case briefing",
-    "transcript": "The bounded source transcript...",
-    "storyboard": [
-      {
-        "scene_id": "scene-1",
-        "narration": "Verified opening statement.",
-        "visual_description": "A restrained briefing room.",
-        "duration_seconds": 5
-      }
-    ],
-    "video_terms": ["briefing room", "document review"]
-  }
-}
+### Infographic
+
+AntV SSR is the native renderer. The deterministic fallback is marked
+degraded, and unsafe SVG content, missing dimensions, missing text, and
+invalid renderer modes are rejected. Palette validators exist, but a user
+request must still be connected to `required_palette`/`allowed_palette` for
+custom colors to become an enforced pipeline constraint.
+
+### Video
+
+The default path plans a storyboard, creates bounded scene media, composes a
+local package, and records a quality report. MoneyPrinterTurbo is an explicit
+optional compatibility worker, not the default and not a MiniMax provider.
+Provider-pending, retry, cancellation, partial-scene, and reconciliation
+behavior require live worker and media-fixture verification before production.
+
+### Visual flowchart and diagrams
+
+`visual_flowchart` is a typed child skill used by parent skills such as PPT and
+LinkedIn. `pipelines/diagram/` contains the reusable semantic IR and safe SVG/
+HTML exporter. A standalone diagram-agent route, diagram-specific MCP/A2A
+projection, and broad reviewed visual corpus are not complete.
+
+## Run focused checks
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q --basetemp .pytest-tmp-current `
+  pipelines/tests/test_advisory_pipeline.py `
+  pipelines/tests/test_text_pipelines.py `
+  pipelines/tests/test_infographic_pipeline.py `
+  tests/pipeline/test_ppt_tasks.py `
+  tests/pipeline/test_video_pipeline.py `
+  tests/component/test_np06_incremental.py `
+  tests/component/test_np09_pipelines.py
 ```
 
-The router supports fan-out requests such as `Create outputs A and B`. It runs
-registered adapters concurrently, gives every child its own task/run identity,
-and returns `result.responses` keyed by pipeline. A later revision should send
-only the selected pipeline and its `parent_artifact_id`; sibling artifacts are
-not re-run or overwritten. Any new output adapter can be registered through
-the central plugin contract.
-
-CrewAI agents receive a scoped recall tool and injected bounded context. They
-do not receive Cognee credentials or a Cognee client. Task lifecycle output is
-written automatically as task-scoped memory by CrewAI task callbacks. Failed
-and incomplete runs remain visible in Task memory.
-
-## Required request fields
-
-Every run requires `user_id`, `case_id`, and `task_id`. The task ID is not
-optional because it is the audit boundary for agent execution.
-
-```python
-from pipelines import AdvisoryFlow, AdvisoryRequest
-from memory import MemoryManager
-
-request = AdvisoryRequest(
-    query="Assess the reported case information and recommend next actions",
-    user_id="operator-1",
-    case_id="case-1",
-    task_id="task-1",
-)
-result = AdvisoryFlow(MemoryManager.from_env()).run(request)
-```
-
-Configure the CrewAI provider/model through the environment expected by that
-provider and optionally set `CREWAI_MODEL`. Flow checkpoints are stored at
-`CREWAI_FLOW_DB_PATH` (default `artifacts/.state/flow_states.db`) so pending
-human approvals and retries are application-owned and durable. No API key is
-read or printed by the pipeline package. `CREWAI_DISABLE_TELEMETRY=true` is the
-safe default for case-sensitive deployments; enable CrewAI telemetry only if
-your deployment explicitly permits it.
-
-## Human approval and advisory artifact handoff
-
-The quality critic must approve the structured advisory before the Flow opens
-the human release gate. The gate can produce `approved`, `rejected`, or
-`needs_revision`:
-
-- `approved`: renders a formal Markdown advisory in `artifacts/advisories/` and
-  writes the approved artifact to Case memory.
-- `rejected`: produces no artifact and keeps the decision visible in Task
-  memory.
-- `needs_revision`: produces no artifact; the run remains incomplete with the
-  review feedback available for a controlled retry or application-side
-  revision flow.
-
-## LinkedIn image option
-
-The LinkedIn pipeline accepts `metadata={"linkedin_image": {"requested": True}}`
-to force an image or `requested=False` to disable one. If omitted, the user
-query is inspected: explicit image/visual language forces an image, explicit
-no-image language disables it, and otherwise the writer decides. The result
-includes image type, alt text, and a case-grounded generation prompt. An
-OpenAI image adapter can turn that prompt into an asset URI; without it, the
-frontend receives the prompt fallback.
-
-Set `OPENAI_API_KEY` and optionally `OPENAI_IMAGE_MODEL`. The adapter defaults
-to `gpt-image-1` and writes returned base64 image data to
-`artifacts/linkedin/images/`.
-
-## Infographic renderer setup
-
-The root setup command installs AntV Infographic as a deterministic
-syntax-to-SVG renderer. If setting up manually, install its pinned Node
-dependency from this directory:
-
-```bash
-cd pipelines/infographic/antv_renderer
-npm install
-```
-
-`InfographicFlow` owns memory recall, CrewAI syntax generation, validation, and
-provenance. The Node bridge owns only AntV SSR rendering. It does not receive
-Cognee credentials or raw unvalidated agent output.
+Use [pipeline benchmarking](../docs/pipeline-benchmarking.md) for frozen
+fixtures, hard gates, failure injection, latency, tokens, cache behavior, and
+release thresholds. Use [pipeline observability](../docs/pipeline-observability.md)
+to inspect progress, parallel lanes, provider events, and Cognee operation
+metadata.

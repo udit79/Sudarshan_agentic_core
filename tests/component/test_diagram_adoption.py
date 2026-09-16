@@ -42,7 +42,7 @@ def test_export_uses_one_ir_and_writes_safe_svg_and_html(tmp_path) -> None:
     html = export_diagram(spec, DiagramExportRequest(output_path=str(tmp_path / "diagram.html"), format="html"))
 
     assert svg.source_ir_hash == html.source_ir_hash
-    assert "<title>adoption-demo</title>" in (tmp_path / "diagram.svg").read_text(encoding="utf-8")
+    assert "<title id=\"diagram-title\">Sudarshan architecture</title>" in (tmp_path / "diagram.svg").read_text(encoding="utf-8")
     html_text = (tmp_path / "diagram.html").read_text(encoding="utf-8")
     assert 'role="img"' in html_text
     assert "<script" not in html_text.lower()

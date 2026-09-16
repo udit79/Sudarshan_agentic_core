@@ -19,7 +19,13 @@ def _safe_source_type(doc_type: str | None) -> SourceType:
         return SourceType.OTHER
 
 
-def to_knowledge_unit(doc: IngestedDocument) -> KnowledgeUnit:
+def to_knowledge_unit(
+    doc: IngestedDocument,
+    *,
+    review_state: str = "unreviewed",
+    quality_status: str = "passed",
+    classification_level: str = "RESTRICTED",
+) -> KnowledgeUnit:
     content = doc.raw_text.strip() if doc.raw_text else ""
     if not content:
         raise ValueError(f"Cannot create KnowledgeUnit from empty document: {doc.source_path}")
@@ -29,6 +35,23 @@ def to_knowledge_unit(doc: IngestedDocument) -> KnowledgeUnit:
         source_type=_safe_source_type(doc.doc_type),
         source_reference=doc.source_path,
     )
+    first_block = doc.evidence_blocks[0] if doc.evidence_blocks else None
+    source_hash = first_block.source_hash if first_block else ""
+    extractor_version = first_block.extractor_version if first_block else "ingestion@2"
+    model_version = first_block.model_version if first_block else None
+
+    fallbacks = sorted({
+        str(reason)
+        for block in doc.evidence_blocks
+        for reason in (
+            [block.metadata.get("fallback_reason")]
+            if block.metadata.get("fallback_reason")
+            else list(block.metadata.get("fallbacks") or [])
+        )
+        if reason
+    })
+    low_confidence_count = sum(1 for block in doc.evidence_blocks if block.confidence < 0.7)
+
     return KnowledgeUnit(
         unit_id=doc.id,
         content=content,
@@ -37,10 +60,22 @@ def to_knowledge_unit(doc: IngestedDocument) -> KnowledgeUnit:
             "doc_type": doc.doc_type,
             "evidence_ids": [block.evidence_id for block in doc.evidence_blocks],
             "chunk_ids": [chunk.chunk_id for chunk in doc.chunks],
+            "review_state": review_state,
+            "quality_status": quality_status,
+            "classification_level": classification_level,
+            "fallbacks": fallbacks,
+            "low_confidence_count": low_confidence_count,
+            "extractor_version": extractor_version,
+            "model_version": model_version,
+            "source_reference": doc.source_path,
+            "source_hash": source_hash,
         },
         provenance={
             "source_path": doc.source_path,
+            "source_hash": source_hash,
             "ingested_at": doc.ingested_at,
+            "extractor_version": extractor_version,
+            "model_version": model_version,
             "source_map_complete": (
                 bool(doc.evidence_blocks)
                 and len(doc.evidence_blocks)

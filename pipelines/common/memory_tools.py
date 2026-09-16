@@ -52,6 +52,8 @@ class MemoryRuntime:
     task_id: str
     case_id: str
     run_id: str
+    attempt_id: str | None = None
+    lease_token: str | None = None
     attempt: int = 1
     top_k: int = 12
     token_budget: int = 6000

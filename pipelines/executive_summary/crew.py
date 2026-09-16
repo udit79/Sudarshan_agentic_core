@@ -44,3 +44,22 @@ class ExecutiveSummaryFlow(TextTransformationFlow):
             llm=llm,
             progress_callback=progress_callback,
         )
+
+    def quality_output_issues(self, output: Any) -> list[str]:
+        if not isinstance(output, ExecutiveSummaryOutput):
+            return ["Executive summary output is not a validated ExecutiveSummaryOutput"]
+        issues: list[str] = []
+        known_evidence_ids = {e.evidence_id for e in output.evidence}
+        for kf in output.key_findings:
+            if not kf.evidence_ids:
+                issues.append(f"key finding '{kf.finding_id}' must cite at least one evidence ID")
+            for eid in kf.evidence_ids:
+                if eid not in known_evidence_ids:
+                    issues.append(f"key finding '{kf.finding_id}' references unknown evidence ID '{eid}'")
+        for claim in output.claim_bindings:
+            if claim.role == "fact" and not claim.evidence_ids:
+                issues.append(f"factual claim '{claim.claim_id}' must cite at least one evidence ID")
+            for eid in claim.evidence_ids:
+                if eid not in known_evidence_ids:
+                    issues.append(f"claim '{claim.claim_id}' references unknown evidence ID '{eid}'")
+        return issues
