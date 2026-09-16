@@ -1,5 +1,8 @@
 # Harness UI compatibility audit
 
+> Historical audit from 2026-09-12. Check the active status and Harness
+> integration docs before relying on a compatibility claim.
+
 Date: 2026-09-12  
 Scope: the native DeepSeek Harness web profile with
 `integrations/deepseek_harness/sudarshan.cordis.yml` applied, including the

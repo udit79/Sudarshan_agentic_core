@@ -1,5 +1,8 @@
 # Sudarshan 2.0: Native Harness and Agentic Skill Architecture
 
+> Historical research direction. It records rationale and evidence; it does
+> not override the implemented application boundary.
+
 Status: proposed engineering direction
 
 This document answers four questions:
@@ -24,7 +27,7 @@ Sudarshan = mission/application control plane
   artifacts, quality gates, audit, classification, and scale-out workers
 ```
 
-The Harness is valuable because its architecture is plugin-native: the model adapter, tool registry, session log, and agent loop are replaceable plugins, and profiles/bundles/patches compose those plugins at boot. This is a stronger host boundary than treating the Harness as a white-label chat screen. [DeepSeek Harness architecture](../deepseek-harness/docs/architecture.md)
+The Harness is valuable because its architecture is plugin-native: the model adapter, tool registry, session log, and agent loop are replaceable plugins, and profiles/bundles/patches compose those plugins at boot. This is a stronger host boundary than treating the Harness as a white-label chat screen. [DeepSeek Harness architecture](../../deepseek-harness/docs/architecture.md)
 
 However, Harness does not automatically make a pipeline intelligent, cheap, safe, or horizontally scalable. Those properties must be implemented in Sudarshan. In particular, the current Sudarshan MCP `run_sudarshan` path calls the application synchronously; a production version needs an asynchronous submit/observe/resume contract backed by a durable queue and shared state.
 
@@ -46,7 +49,7 @@ This lets Sudarshan provide one MCP application boundary while still using nativ
 
 ### 1.2 Deterministic, lazy skill loading
 
-The Harness skill package supports a `/name` user gesture and a `skills/list` catalog. The host injects one canonical `<skill_content>` block at the pre-step boundary, and the same skill body can be loaded through the model-facing skill tool. This makes skill invocation consistent across menu selection, typed commands, and other clients. [Harness skill UI package](../deepseek-harness/packages/client/ui-skill/README.md)
+The Harness skill package supports a `/name` user gesture and a `skills/list` catalog. The host injects one canonical `<skill_content>` block at the pre-step boundary, and the same skill body can be loaded through the model-facing skill tool. This makes skill invocation consistent across menu selection, typed commands, and other clients. [Harness skill UI package](../../deepseek-harness/packages/client/ui-skill/README.md)
 
 The important engineering implication is that a Sudarshan skill should be a versioned contract and policy package, not a long prompt. The skill body should tell the agent how to select typed tools and produce typed outputs; the backend should enforce those rules independently.
 
@@ -54,7 +57,7 @@ The skill package documentation also makes the token trade-off explicit: invokin
 
 ### 1.3 Native background jobs and wait semantics
 
-The Harness has a generic `ctx.jobs` runtime. Jobs have an owner, kind, label, lifecycle status, start/finish times, bounded output, cancellation, and a `wait` operation. The built-in job tools expose list/output/kill controls and clamp model-supplied waits to a configured maximum. [Harness background task runtime](../deepseek-harness/docs/subsystems/jobs.md)
+The Harness has a generic `ctx.jobs` runtime. Jobs have an owner, kind, label, lifecycle status, start/finish times, bounded output, cancellation, and a `wait` operation. The built-in job tools expose list/output/kill controls and clamp model-supplied waits to a configured maximum. [Harness background task runtime](../../deepseek-harness/docs/subsystems/jobs.md)
 
 This is useful for the interactive host, but the production job of a PPT render, video encode, or external provider call must still be owned by Sudarshan's durable scheduler. Harness-local jobs are process-local in the reference implementation. They are excellent for host interaction and short-lived adapters; they are not a replacement for a shared distributed queue.
 
@@ -62,7 +65,7 @@ This is useful for the interactive host, but the production job of a PPT render,
 
 Yes, we can add new pages and panels. The correct approach is a Sudarshan client plugin/bundle mounted through the Harness profile, with a patch layer for configuration. Do not fork the core UI merely to change colors or insert a page.
 
-The Harness UI supports business-owned registrations for keyed tool views and conversation nodes. A Sudarshan plugin can render a structured run card for `run_sudarshan`, a progress node for durable run events, artifact previews, and an operator view for background jobs. [Harness tool UI package](../deepseek-harness/packages/client/ui-tool/README.md) and [Harness conversation extension model](../deepseek-harness/docs/subsystems/conversation.md)
+The Harness UI supports business-owned registrations for keyed tool views and conversation nodes. A Sudarshan plugin can render a structured run card for `run_sudarshan`, a progress node for durable run events, artifact previews, and an operator view for background jobs. [Harness tool UI package](../../deepseek-harness/packages/client/ui-tool/README.md) and [Harness conversation extension model](../../deepseek-harness/docs/subsystems/conversation.md)
 
 Recommended UI surfaces:
 
@@ -79,7 +82,7 @@ The Background Runs page should be an operator projection, not a raw log viewer.
 
 ### 1.5 Branding and legal boundary
 
-The vendored Harness is MIT-licensed, but its own brand guidance says projects should describe themselves as “built on DeepSeek Harness” or “compatible with DeepSeek Harness,” avoid using the full trademark directly in the product name, and avoid implying official endorsement. Preserve the license and third-party notices in the distribution. [Harness brand guidance](../deepseek-harness/BRAND_GUIDELINES.md) and [Harness license](../deepseek-harness/LICENSE)
+The vendored Harness is MIT-licensed, but its own brand guidance says projects should describe themselves as “built on DeepSeek Harness” or “compatible with DeepSeek Harness,” avoid using the full trademark directly in the product name, and avoid implying official endorsement. Preserve the license and third-party notices in the distribution. [Harness brand guidance](../../deepseek-harness/BRAND_GUIDELINES.md) and [Harness license](../../deepseek-harness/LICENSE)
 
 The defensible product statement is: “Sudarshan is an NTRO-focused, MCP-native agentic production system built on a plugin-composable Harness.” The differentiator is the controlled domain execution system, not the fact that another product also supports skills.
 
@@ -119,7 +122,7 @@ RunEvent
   duration_ms, attempt, artifact_id, requires_action
 ```
 
-The repository already has a frontend-safe `ProgressEvent` shape and recommended SSE endpoints: `POST /runs`, `GET /runs/{run_id}`, `GET /runs/{run_id}/events`, `POST /runs/{run_id}/resume`, and `POST /runs/{run_id}/cancel`. Reuse that contract instead of creating a second dashboard-specific event model. [Sudarshan progress contract](pipeline-orchestration.md) and [frontend integration](frontend-integration.md)
+The repository already has a frontend-safe `ProgressEvent` shape and recommended SSE endpoints: `POST /runs`, `GET /runs/{run_id}`, `GET /runs/{run_id}/events`, `POST /runs/{run_id}/resume`, and `POST /runs/{run_id}/cancel`. Reuse that contract instead of creating a second dashboard-specific event model. [Sudarshan progress contract](../internal/pipeline-orchestration.md) and [frontend integration](../frontend-integration.md)
 
 ### 2.3 UI behaviors
 
@@ -496,9 +499,9 @@ Code      → run tests/type checks → inspect diff → package reproducible ou
 
 ### 9.2 What the Harness sandbox actually protects
 
-The repository's native process sandbox is a file-effect policy seam. It supports `read-only`, `workspace-write`, and `danger-full-access`; the local providers map those modes to Linux, macOS, and Windows mechanisms. The sandbox reports whether enforcement is `full` or `partial`, and confined execution must fail closed when no usable backend exists. [Harness process sandbox](../deepseek-harness/docs/subsystems/sandbox.md)
+The repository's native process sandbox is a file-effect policy seam. It supports `read-only`, `workspace-write`, and `danger-full-access`; the local providers map those modes to Linux, macOS, and Windows mechanisms. The sandbox reports whether enforcement is `full` or `partial`, and confined execution must fail closed when no usable backend exists. [Harness process sandbox](../../deepseek-harness/docs/subsystems/sandbox.md)
 
-The Harness also provides a sandboxed filesystem backend for model file mutations and a managed subprocess seam with bounded output, spill files, explicit working directories, credential scrubbing, and tree-scoped termination. These are good primitives for artifact production. They are not a complete security guarantee: the documented sandbox vocabulary governs file effects, while network access and process visibility require separate policy. [Harness sandboxed filesystem](../deepseek-harness/packages/fs/fs-sandbox/README.md) and [Harness subprocess subsystem](../deepseek-harness/docs/subsystems/subprocess.md)
+The Harness also provides a sandboxed filesystem backend for model file mutations and a managed subprocess seam with bounded output, spill files, explicit working directories, credential scrubbing, and tree-scoped termination. These are good primitives for artifact production. They are not a complete security guarantee: the documented sandbox vocabulary governs file effects, while network access and process visibility require separate policy. [Harness sandboxed filesystem](../../deepseek-harness/packages/fs/fs-sandbox/README.md) and [Harness subprocess subsystem](../../deepseek-harness/docs/subsystems/subprocess.md)
 
 On Windows, the repository documents ACL-based enforcement as potentially `partial` for some ambient ACL boundaries. Sudarshan must display the enforcement fact and reject workflows that require a strong isolation guarantee when the provider reports `partial`. For higher-risk execution, use a separately isolated container or microVM provider and keep the same capability seam.
 
@@ -638,7 +641,7 @@ The Harness has three separate seams:
 2. `dsh-tool-skill` exposes the catalog and the model-facing `skill` loader, or injects a skill when the user types `/name`.
 3. `dsh-subagent` is an optional delegation capability. It supports multiple provider implementations, one-shot child agents, and continuable child sessions with ownership, depth, cancellation, and parent/child lifecycle.
 
-This separation is a strength. It prevents every skill from spawning an invisible agent tree. See [Harness skill registry](../deepseek-harness/packages/skill/skill/README.md), [Harness skill loader](../deepseek-harness/packages/skill/tool-skill/README.md), and [Harness subagent seam](../deepseek-harness/docs/subsystems/subagent.md).
+This separation is a strength. It prevents every skill from spawning an invisible agent tree. See [Harness skill registry](../../deepseek-harness/packages/skill/skill/README.md), [Harness skill loader](../../deepseek-harness/packages/skill/tool-skill/README.md), and [Harness subagent seam](../../deepseek-harness/docs/subsystems/subagent.md).
 
 Sudarshan currently has another important layer: the MCP tool calls the Python `SudarshanApplication`, which calls the LangGraph `PipelineOrchestrator`; selected pipelines then run their CrewAI/provider adapters. The current repository documentation deliberately says the Harness is the session/runtime layer, while Sudarshan owns routing, memory, pipelines, and providers. Keep this ownership boundary.
 
@@ -813,7 +816,7 @@ External Harness host/agent = decides when and how to use them
 
 The MCP specification defines hosts as LLM applications, clients as connectors inside the host, and servers as services that provide context and capabilities. Servers expose tools, resources, and prompts; tools are model-controlled executable functions, resources are application-controlled context, and prompts are user-controlled templates. MCP itself does not decide the plan or guarantee that a model will use a tool correctly. [MCP specification](https://modelcontextprotocol.io/specification/2025-06-18/index)
 
-The current repository already provides the server side. `sudarshan.cordis.yml` configures the DeepSeek Harness MCP client to launch the Python stdio server, and `mcp_server.py` exposes `run_sudarshan`, `get_sudarshan_status`, `resume_sudarshan`, `cancel_sudarshan`, health, pipeline discovery, and bounded memory tools. Any other MCP-capable Harness can connect to the same server if it supports the chosen transport and authentication boundary. [Sudarshan Harness overlay](../integrations/deepseek_harness/sudarshan.cordis.yml) and [Sudarshan MCP server](../integrations/deepseek_harness/mcp_server.py)
+The current repository already provides the server side. `sudarshan.cordis.yml` configures the DeepSeek Harness MCP client to launch the Python stdio server, and `mcp_server.py` exposes `run_sudarshan`, `get_sudarshan_status`, `resume_sudarshan`, `cancel_sudarshan`, health, pipeline discovery, and bounded memory tools. Any other MCP-capable Harness can connect to the same server if it supports the chosen transport and authentication boundary. [Sudarshan Harness overlay](../../integrations/deepseek_harness/sudarshan.cordis.yml) and [Sudarshan MCP server](../../integrations/deepseek_harness/mcp_server.py)
 
 What does not automatically travel to another Harness is the DeepSeek-specific UI, skill catalog presentation, job cards, subagent UX, and profile composition. The external Harness receives the MCP contract; it does not automatically receive the full Sudarshan experience unless we provide equivalent MCP resources, prompts, and client-side adapters.
 

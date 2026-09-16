@@ -1,36 +1,58 @@
 # Diagram Design adaptation ledger
 
-Status: native flowchart SVG/PPTX boundary hardened locally. This ledger
-applies to the checked-out reference at
-`C:\Users\uditj\Downloads\sudarshan\references\diagram-design`.
+**Audit date:** 2026-09-16
+**Reference:** `C:\Users\uditj\Downloads\sudarshan\references\diagram-design`
+**Source classification:** MIT Agent Skill/reference pack with static HTML/SVG
+examples and validation scripts; it is not a general-purpose rendering
+service.
 
-## License boundary
+## Source truth
 
-The reference is MIT licensed. Sudarshan adopts design and validation ideas
-through its typed flowchart IR and native renderers; it does not copy the
-reference plugin marketplace, editor, HTML assets, or controller runtime.
+The reference's shipped diagrams are self-contained static HTML/SVG specimens.
+Its skill separates semantic pattern from layout, keeps static output as the
+default, supports optional motion, and provides bounded Mermaid/draw.io/
+Excalidraw extraction. The import procedures explicitly treat labels, URLs,
+styles, and embedded content as untrusted data; they parse rather than execute
+or fetch it. The repository includes stdlib validators for geometry,
+accessibility/contrast, semantic metadata, and documentation synchronization.
 
-## Adopted concepts and modules
+The “39 types” and many screenshots are a design catalog, not evidence that
+Sudarshan should add 39 independent renderers. The reference itself recommends
+deletion and a low visual density; that principle is more reusable than its
+catalog size.
 
-| Capability | Sudarshan implementation | Adoption boundary |
-|---|---|---|
-| Static-by-default output | `render_flowchart_svg` | SVG contains no executable behavior; motion remains out of scope for this slice |
-| Accessible SVG contract | Native SVG title/description metadata and safety checks | Text and provenance still come from typed, authorized IR |
-| Geometry-first QA | `inspect_flowchart` plus SVG safety inspection | Promotion blocks off-canvas, overlap, crossing, unsafe, and missing-label output |
-| Semantic layout selection | `diagram_type_registry`, `choose_semantic_pattern`, and `DiagramSpec` metadata | Registry is allow-listed; unsupported types do not become arbitrary HTML |
-| Semantic style profiles | `pipelines/diagram/style.py` and `ntro-default` tokens | Profiles are versioned semantic roles; remote brand scraping is not enabled |
-| Import/export ecosystem | `pipelines/diagram/importers.py` and `export.py` | Basic bounded Mermaid/Draw.io/Excalidraw import and HTML/SVG export are implemented; broader fidelity and PNG/browser export remain ticketed |
-| Frontend artifact boundary | `frontend/diagram/preview.js` | Preview consumes authorized artifact URLs and projections; editing and approval remain outside this slice |
+## Adopt
+
+| Idea | Sudarshan treatment |
+| --- | --- |
+| Semantic pattern before layout | Keep `DiagramSpec`/family selection separate from geometry. |
+| Static-first output | Native SVG/PPTX is the default; motion is opt-in and never the only artifact. |
+| Accessible SVG | Require title/description, stable IDs, contrast, and decorative-element handling. |
+| Complexity budget | Reject disconnected, overcrowded, off-canvas, or unreadable graphs before promotion. |
+| Safe import | Parse bounded source text into typed IR; never execute Mermaid, HTML, links, or embedded payloads. |
+| Semantic tokens | Use versioned NTRO style roles; do not scrape a remote website at render time. |
 
 ## Deliberately not copied
 
-- The reference editor, plugin marketplace, and multi-host installation layer
-- Arbitrary generated HTML or JavaScript
-- Its motion controller and animation assets
-- Unvalidated imports or remote assets
+- plugin marketplace and multi-host installation instructions;
+- every catalog type, screenshot, or prompt/reference file;
+- arbitrary HTML/JavaScript output, remote assets, or browser execution;
+- optional motion controller as a replacement for durable artifact state.
 
-## Review rule
+## Current mapping
 
-Every future adaptation must add a row here, retain the upstream license notice
-when code is copied, add a focused regression test, and pass Sudarshan's
-evidence, budget, provenance, security, and quality gates.
+`pipelines/diagram/family.py`, `style.py`, `importers.py`, `export.py`, and
+the native renderer already own the runtime boundary. The reference is best
+used for style/semantic fixtures and validator cases. It does not solve the
+missing DAG return problem; the typed graph must still be returned and checked
+by Sudarshan's orchestrator.
+
+The main remaining gap is a reviewed visual-regression corpus for the selected
+families, not a wholesale port of the repository.
+
+## License and source locations
+
+The checkout includes MIT `LICENSE` and `THIRD_PARTY_LICENSES.md`. Files
+reviewed include `README.md`, `skills/diagram-design/SKILL.md`, the import/export
+references, `scripts/verify-*.py`, and the semantic-pattern ADRs. Any copied
+asset or code needs its own notice.

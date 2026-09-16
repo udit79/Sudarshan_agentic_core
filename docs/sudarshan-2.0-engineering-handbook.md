@@ -5,7 +5,7 @@ and evaluating Sudarshan. It is the connective document between the source
 tree, the execution plan, the API contracts, the DeepSeek Harness integration,
 and the team workflow.
 
-It describes the system as it exists on the `Sudarshan2.0` branch. Statements
+It describes the system as it exists on the current `Sudarshan2.2` branch. Statements
 marked **planned**, **local-only**, or **production gap** must not be presented
 as completed production capabilities.
 
@@ -570,7 +570,7 @@ LinkedIn visual-child reconciliation, and T29/T30 matched evaluations and
 release rollback sign-off.
 
 The [current status](current-status.md), [assumption ledger](sudarshan-2.0-assumptions.md),
-[full execution plan](sudarshan-2.0-full-execution-plan.md), and
+[full execution plan](archive/sudarshan-2.0-full-execution-plan.md), and
 [operations guide](operations.md) are the source of truth when this handbook
 and implementation diverge.
 
@@ -578,8 +578,8 @@ and implementation diverge.
 
 Research citations, competitor comparisons, protocol references, and the
 paper-to-design decisions are intentionally centralized in the [full 2.0
-execution plan](sudarshan-2.0-full-execution-plan.md) and the [Harness research
-companion](sudarshan-2.0-harness-research.md). Do not create another copied
+execution plan](archive/sudarshan-2.0-full-execution-plan.md) and the [Harness research
+companion](archive/sudarshan-2.0-harness-research.md). Do not create another copied
 reference list in a pipeline README. When adding a new external reference,
 record its title, URL/identifier, date accessed, relevant claim, and the
 implementation decision it supports in the full plan.

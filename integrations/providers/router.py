@@ -68,6 +68,21 @@ class ProviderRouter:
         "video_script": "OPENAI_VIDEO_SCRIPT_MODEL",
     }
 
+    @classmethod
+    def configured_model(cls, capability: str, requested: object | None = None) -> object | None:
+        """Return an explicit model or the capability-specific environment value.
+
+        Pipeline agents use this small policy helper so model configuration is
+        resolved in one place.  It intentionally returns ``None`` when no
+        value is configured; callers that need a provider default should use
+        :meth:`select_model` instead.
+        """
+
+        if requested:
+            return requested
+        environment_name = cls._MODEL_ENV.get(capability)
+        return os.getenv(environment_name) if environment_name else None
+
     def __init__(
         self,
         *,
@@ -85,7 +100,8 @@ class ProviderRouter:
     def select_model(self, capability: str, requested: str | None = None) -> ModelRoute:
         """Resolve a model without making a provider call."""
 
-        model = (requested or os.getenv(self._MODEL_ENV.get(capability, ""), "")).strip()
+        configured = self.configured_model(capability, requested)
+        model = str(configured or "").strip()
         if not model:
             defaults = {
                 "text": "openai/gpt-5.4",
@@ -94,8 +110,7 @@ class ProviderRouter:
                 "video_script": "gpt-5.4",
             }
             model = defaults.get(capability, "unknown")
-        provider = "openai" if capability in {"image", "tts", "video_script"} else "openai"
-        return ModelRoute(capability=capability, provider=provider, model=model)
+        return ModelRoute(capability=capability, provider="openai", model=model)
 
     def before_call(self, provider: str, capability: str) -> None:
         with self._lock:

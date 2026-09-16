@@ -1,7 +1,8 @@
 # Sudarshan 2.0 current status
 
-Status is measured against the implementation on the `Sudarshan2.0` branch,
-including the local T43–T60 and H-series integration slices. This document
+Status is measured against the implementation on the current `Sudarshan2.2`
+working branch, including the local T43–T60 and H-series integration slices.
+This document
 separates local capability from
 production readiness so demos, judging material, and engineering work use the
 same claims.
@@ -12,7 +13,7 @@ same claims.
 | --- | --- | --- |
 | Agentic control plane | Implemented locally | LangGraph owns routing and lifecycle; specialist pipelines and typed child skills run behind bounded contracts. |
 | Harness/MCP boundary | Implemented locally | DeepSeek Harness is the authenticated application frontend and the MCP/A2A clients use the same Sudarshan application boundary. |
-| H-series agentic integration | Complete locally; staging gates open | H-01–H-08 implementation, native OperationsBridge, sandbox contract, parity tests, and offline benchmark are present; live container, authenticated staging, external interop, and real-artifact evidence remain. |
+| H-series agentic integration | Complete locally; staging gates open | H-01–H-08 implementation, native OperationsBridge, sandbox contract, parity tests, and offline benchmark are present; live container, authenticated staging, external interop, and real-artifact evidence remain. Harness is one client; portable per-pipeline A2A agents remain the scale-out work. |
 | Python backend | Strong local vertical slice | Ingestion, memory, routing, pipelines, quality gates, artifacts, scheduler, cache, telemetry, audit, and recovery are wired and tested locally. |
 | Frontend shell | Active landing + Harness flow | The new landing/About/sign-in shell is the public entry point; successful sign-in opens the DeepSeek Harness application frontend. |
 | Production deployment | Release-candidate code present; deployment gates open | T43–T52 code paths and local tests are present. Live Redis/object-storage, provider reconciliation, signed-sandbox drills, real-corpus benchmarks, external MCP/A2A, visual approval, backup/restore, and release sign-off remain environment gates. |
@@ -33,12 +34,16 @@ profile use the same Sudarshan application boundary.
 ### H-series handoff
 
 The native Harness/MCP agentic layer is ready for frontend and backend teams to
-consume through the stable projections and MCP contracts. Teams must not
-introduce a second orchestrator or couple browser code to Harness internals.
-The remaining agentic work is integration evidence: wire the real PPT,
-LinkedIn, infographic, and video planners to typed child plans, demonstrate a
-cross-skill run, and validate the same lifecycle through an independent MCP or
-A2A client.
+consume through the stable projections and MCP contracts. Harness is one host,
+not the ownership boundary for the pipelines. Teams must not introduce a
+second orchestrator or couple browser code to Harness internals. The scalable
+agent boundary is the existing typed skill contract: each pipeline may keep a
+local adapter and additionally expose an A2A agent card. A Presentation Agent
+can request an Infographic Agent or Diagram Agent through the orchestrator,
+receive an artifact and quality receipt, and continue its work. The remaining
+agentic work is to add per-pipeline A2A cards, local/A2A adapter selection,
+mediated handoff authorization, and one event stream that renders local and
+remote children consistently in trajectory.
 
 ### Available now
 
@@ -144,6 +149,10 @@ A2A client.
 - DeepSeek Harness JSONL/MCP integration, skill discovery, local skill calls,
   durable background skill jobs, bounded waiting, artifact lookup, health, and
   memory tools.
+- Portable pipeline-agent foundation: `SkillManifest`, `ChildTaskSpec`,
+  `SkillResult`, bounded dependency waves, parent/child lineage, artifact
+  references, quality receipts, and local parallel execution. Per-pipeline A2A
+  cards and remote handoff adapters are not yet promoted as complete.
 - OpenViking-inspired L0/L1/L2 context selection with stage defaults,
   safe legacy fallback, retrieval trace reporting, and typed `ContextPack`
   context levels. Skill manifests also declare bounded reference loading,
@@ -224,8 +233,10 @@ These are real engineering gaps, not cosmetic follow-ups:
 5. Run font/raster/video visual regression snapshots and human approvals. The
    shared deterministic visual-QA and renderer-promotion gate is present.
 6. Wire every production PPT/LinkedIn/video planner to the typed child-plan
-   adapter and run the external MCP/A2A lifecycle smoke test. The contracts,
-   A2A boundary, fallback reconciliation, and monitor are present.
+   adapter; then add per-pipeline A2A cards, local-vs-remote execution
+   selection, mediated cross-agent handoffs, and external MCP/A2A lifecycle
+   smoke tests. The base contracts, global A2A boundary, fallback
+   reconciliation, and monitor are present.
 7. Complete the T34–T38 ingestion workstream in production-like infrastructure:
    shared evidence/object storage, modality provenance, structure-aware
    indexing, Cognee projection, cache/budget controls, security, and benchmark
@@ -298,7 +309,7 @@ multi-host behavior.
 ## Source-of-truth documents
 
 - [Engineering handbook](sudarshan-2.0-engineering-handbook.md)
-- [Full execution plan](sudarshan-2.0-full-execution-plan.md)
+- [Full execution plan](archive/sudarshan-2.0-full-execution-plan.md)
 - [Skill authoring](skill-authoring.md)
 - [Artifact rendering and quality](artifact-rendering-and-quality.md)
 - [Assumption ledger](sudarshan-2.0-assumptions.md)

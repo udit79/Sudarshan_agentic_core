@@ -1,5 +1,9 @@
 # Sudarshan 2.0: Full Agentic Evolution and Execution Plan
 
+> Historical planning baseline. Current implementation truth is maintained in
+> `docs/current-status.md`, `docs/sudarshan-2.0-remaining-work-plan.md`, and
+> `docs/sudarshan-2.0-assumptions.md`.
+
 Status: proposed implementation baseline
 
 This document defines the target architecture, research-backed design decisions, and staged execution plan for evolving Sudarshan into a durable, agentic artifact-production platform built on the native DeepSeek Harness and exposed through MCP.
@@ -3070,7 +3074,7 @@ The final rule for Sudarshan is:
 The workspace structure gives users control. The runtime provides scale. The artifact and evidence contracts provide reliability. Adaptive topology selection prevents the system from paying the cost of multi-agent coordination when a single agent or deterministic stage is better.
 
 The source-to-evidence boundary follows the same rule. The detailed contract
-is maintained in [Ingestion architecture](ingestion-architecture.md). Ingestion
+is maintained in [Ingestion architecture](../ingestion-architecture.md). Ingestion
 is an asynchronous evidence compiler, not a request-time text dump: original
 sources remain immutable, modality plugins produce typed evidence blocks,
 structure and provenance are preserved, Cognee receives governed projections,
@@ -3217,7 +3221,7 @@ This backlog is the operational form of the plan. A coding agent must complete t
 | T38 | Evaluation + all teams | T19,T21,T24,T26,T27,T36,T37 | Build multimodal ingestion/retrieval benchmark and promotion gate using scanned/table-heavy PDFs, PPTX decks, infographics, long videos, paraphrased queries, partial failures, and cross-skill evidence reuse. Compare flat-text baseline with typed evidence. | Release decision records extraction coverage, retrieval recall, evidence faithfulness, tokens, cost, P50/P95 latency, cache hit rate, queue wait, repair rate, and human correction time. |
 
 The post-T38 production and interoperability backlog is maintained in the
-[remaining-work execution plan](sudarshan-2.0-remaining-work-plan.md). It
+[remaining-work execution plan](../sudarshan-2.0-remaining-work-plan.md). It
 continues with T39–T52: shared control-plane leases, durable source/evidence/
 artifact storage, distributed budgets and provider reconciliation, production
 observability and cleanup, frontend execution monitoring, signed sandboxed

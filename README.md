@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge" alt="MIT License">
   <img src="https://img.shields.io/badge/Python-3.13%2B-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white" alt="FastAPI">
@@ -35,6 +36,9 @@ Sudarshan 2.0 currently has a strong, tested local vertical slice: the Python
 application boundary, skill runtime, memory policy, specialist pipelines,
 quality gates, artifact manifests, scheduler, cache, telemetry, audit trail,
 DeepSeek Harness/MCP integration, and reference dashboard are connected.
+Pipelines already support bounded parallel execution and typed child handoffs.
+The next scale-out step is to expose those same pipeline contracts as portable
+per-pipeline A2A agents, with Harness as one optional client and trajectory UI.
 
 It is not yet production-complete for distributed deployment. Shared queue and
 lease infrastructure, object storage, signed skill packages, OS/container
@@ -42,6 +46,27 @@ sandboxing, live external-service smoke tests, final visual regression gates,
 matched evaluation benchmarks, and release/rollback sign-off remain open.
 See the detailed [current status](docs/current-status.md) and
 [assumption ledger](docs/sudarshan-2.0-assumptions.md).
+
+## Agent map
+
+Human/developer documentation is separated under `docs/`. Agent-facing
+navigation, ownership, request flow, local-versus-A2A execution, parallel
+visibility, and safe-edit rules are in [AGENT_MAP.md](AGENT_MAP.md).
+
+| If you need to... | Start with... |
+| --- | --- |
+| understand the whole request flow | [AGENT_MAP.md](AGENT_MAP.md), then `pipelines/orchestrator/graph.py` |
+| add or change a pipeline agent | `pipelines/<name>/`, `skills/`, and [skill authoring](docs/skill-authoring.md) |
+| make agents hand work to each other | `pipelines/orchestrator/contracts.py`, `skill_runtime.py`, `cross_skill.py` |
+| run work in parallel | `pipelines/orchestrator/cross_skill.py`, `graph.py`, `dag.py` |
+| expose a remote agent | `integrations/deepseek_harness/a2a.py` and the A2A section in [AGENT_MAP.md](AGENT_MAP.md) |
+| show child work in Harness | `integrations/deepseek_harness/`, progress contracts, and the trajectory section in [AGENT_MAP.md](AGENT_MAP.md) |
+| change PPT/AntV/diagram behavior | `pipelines/ppt/`, `pipelines/infographic/`, or `pipelines/diagram/` and their quality gates |
+| change memory behavior | `memory/` and `pipelines/common/memory_tools.py`; do not call Cognee directly |
+| understand what is actually complete | [current status](docs/current-status.md) |
+
+Agents should read the map before editing. It is navigation, not a second
+runtime or scheduler.
 
 ## Agent handoff: skills, plugins, and tickets
 
@@ -56,6 +81,11 @@ This repository has two related but different extension concepts:
   skills and projections, but it must not own routing, memory policy, budgets,
   approvals, or artifact authorization. The checked-in Harness integration is
   optional; the native Sudarshan application remains the source of truth.
+- A **pipeline agent** is a reusable Sudarshan capability exposed through the
+  same typed `SkillManifest`, `ChildTaskSpec`, and `SkillResult` contracts. It
+  can run through a local adapter or an A2A endpoint. For example, the
+  Presentation Agent can request an Infographic Agent or Diagram Agent and
+  consume the returned artifact and quality receipt.
 
 Runtime skill discovery is defined by [skills/catalog.py](skills/catalog.py),
 the package manifests under [skills](skills), and `SkillWorkspace`. Do not add
@@ -68,7 +98,7 @@ let the Harness/MCP/plugin layer discover it.
 
 Use these files in this order:
 
-1. [Full 2.0 execution plan](docs/sudarshan-2.0-full-execution-plan.md) —
+1. [Full 2.0 execution plan](docs/archive/sudarshan-2.0-full-execution-plan.md) —
    research-backed architecture, HLD/LLD, original T00–T52 plan, constraints,
    sources, and release principles.
 2. [Remaining-work plan](docs/sudarshan-2.0-remaining-work-plan.md) — the
@@ -76,7 +106,7 @@ Use these files in this order:
    implementation requirements, and acceptance criteria. Its
    **Agentic ticket status** and track tables record what is complete locally,
    what is partial, and what remains open.
-3. [Team-parallel guide](docs/sudarshan-2.0-team-parallel-guide.md) — ownership,
+3. [Team-parallel guide](docs/archive/sudarshan-2.0-team-parallel-guide.md) — ownership,
    branch boundaries, shared contracts, fixtures, and parallel execution order.
 4. [Current status](docs/current-status.md) — honest implementation and
    production-readiness summary; do not infer completion from a passing unit
@@ -119,9 +149,10 @@ skills/<skill-name>/
 ```
 
 The manifest must declare allowed tools, output artifact types, quality gates,
-risk class, model/token budget, wall-time limit, and child skills. Parent
-skills invoke children only through the typed `SkillRuntime` contract with a
-bounded context, budget reservation, cancellation signal, and lineage. A
+risk class, model/token budget, wall-time limit, child skills, and whether a
+child may run locally or through A2A. Parent skills invoke children only
+through the typed `SkillRuntime` contract with a bounded context, budget
+reservation, cancellation signal, idempotency key, deadline, and lineage. A
 child returns structured IR/artifact references; it cannot publish, write
 memory, read credentials, or overwrite a parent artifact by itself.
 
@@ -143,6 +174,11 @@ do not make Sudarshan depend on that repository at runtime.
 | Presentation/PPT | Native PowerPoint deck |
 | Video | Full package: script, storyboard, scene PNG/MP3/MP4 assets, manifest, final MP4 |
 
+Pipelines can be invoked locally, through MCP, or through portable A2A agent
+cards where a separate process or deployment is useful. The durable
+orchestrator remains the authority for policy, memory, budgets, dependencies,
+retries, artifacts, and quality decisions.
+
 The public presentation route is presentation. ppt is its legacy compatibility
 alias and should not be selected as a second pipeline.
 
@@ -153,7 +189,9 @@ flowchart TD
     U[Operator or frontend] --> G[Node gateway]
     G --> API[FastAPI application boundary]
     H[DeepSeek Harness] -->|MCP or JSONL| APP[SudarshanApplication]
+    X[Other systems] -->|A2A| OR[Sudarshan Orchestrator Agent]
     API --> APP
+    APP --> OR
     APP --> L[LangGraph control plane]
     L --> RU[Request understanding]
     RU --> RT[Pipeline router]
@@ -161,21 +199,28 @@ flowchart TD
     MR --> PP[Structured prompt plan]
     PP --> FAN[Pipeline fan-out or dependency waves]
     FAN --> CREW[CrewAI specialist pipelines]
+    CREW -. local or A2A .-> PA[Pipeline Agents]
     CREW --> Q[Schema validation and quality gates]
     Q --> ART[Safe artefact response]
     Q --> MEM[Validated memory write-back]
     MEM --> C[(Cognee)]
+    APP --> TR[Trajectory and safe event bridge]
+    TR --> H
     G --> DB[(MongoDB Atlas)]
 ```
 
 Sudarshan is a hybrid agentic workflow:
 
-- LangGraph owns routing, lifecycle, retries, checkpoints, fan-out/fan-in,
-  cancellation, approval boundaries, and delivery policy.
+- LangGraph/application services own routing, lifecycle, retries, checkpoints,
+  fan-out/fan-in, cancellation, approval boundaries, and delivery policy.
 - CrewAI owns specialist collaboration inside each pipeline.
+- Pipeline agents own specialist execution and can be local adapters or
+  portable A2A services. The orchestrator mediates their handoffs and keeps
+  parent/child scope, budgets, dependencies, and artifact lineage.
 - MemoryManager owns Cognee access and User/Case/Task scope policy.
-- A Harness adapter owns session, MCP, and runtime integration; the checked-in
-  DeepSeek Harness profile is optional and replaceable.
+- A Harness adapter owns session, MCP, trajectory, and runtime integration; the
+  checked-in DeepSeek Harness profile is optional and replaceable. Harness is
+  one client of the orchestrator, not the home of pipeline implementations.
 - The Node gateway owns browser authentication, ownership, quotas, and safe
   delivery.
 - The frontend owns request composition, uploads, previews, and progress display.
@@ -189,13 +234,13 @@ LLM-to-LLM conversations or extra model calls.
 
 ```text
 upload or operator request
-  -> authenticated application boundary
+  -> authenticated application boundary and idempotent run admission
   -> bounded User/Case recall
   -> request understanding and clarification
   -> pipeline routing
   -> bounded User/Case/Task recall
   -> structured prompt plan
-  -> CrewAI pipeline execution
+  -> local or A2A pipeline-agent execution in dependency waves
   -> schema validation and quality critic
   -> renderer/provider adapter
   -> safe result and progress events
@@ -204,6 +249,10 @@ upload or operator request
 
 Writer/critic loops are bounded to two total attempts by default. Video passes
 critic issues and required revisions into its second planning attempt.
+Independent pipelines and child skills may run in parallel up to the parent
+policy. The orchestrator emits one parent run plus child lifecycle events;
+Harness trajectory and other clients can show each child lane, dependency,
+artifact, quality result, retry, and wait reason without becoming the scheduler.
 
 ## Native video path
 
@@ -319,12 +368,19 @@ node --check frontend\api.js
 node --check frontend\login.js
 ```
 
-The current local snapshot is 178 Python tests passed with 1 skipped, 9 Node
-gateway tests passed, 3 frontend projection/cursor tests passed, and frontend
-JavaScript syntax checks passed. External MongoDB, Cognee, Google OAuth,
-OpenAI, AntV SSR, and worker reachability require a separate live smoke test.
+Recorded focused baselines include 178 Python tests passed with 1 skipped, 9
+Node gateway tests passed, 3 frontend projection/cursor tests passed, and
+frontend JavaScript syntax checks passed. The latest audit run reached 367
+Python tests passed and 8 skipped, with one AntV SSR deadline failure; external
+MongoDB, Cognee, Google OAuth, OpenAI, AntV SSR, and worker reachability still
+require separate live smoke tests.
 
 ## Documentation index
+
+Agent-facing navigation is intentionally separate in [AGENT_MAP.md](AGENT_MAP.md)
+and [docs/agent/README.md](docs/agent/README.md). Human/developer documents are
+categorized in [docs/human/README.md](docs/human/README.md). The most-used
+human documents are:
 
 | Document | Use it for |
 | --- | --- |
@@ -342,7 +398,10 @@ OpenAI, AntV SSR, and worker reachability require a separate live smoke test.
 | [Pipelines](pipelines/README.md) | pipeline contracts, video package, images, renderers |
 | [Harness integration](integrations/deepseek_harness/README.md) | MCP and JSONL boundary |
 | [Harness UI composition](docs/harness-ui-plugin.md) | replaceable Sudarshan brand/theme plugins and preview-state security |
-| [Design review](docs/design-review.md) | corrections recommended for the submitted slides |
+| [Reference architecture audit](docs/reference-architecture-audit.md) | what was adopted from local references and what remains separate |
+| [Reference adoption plan](docs/reference-repository-adoption-plan.md) | reference-derived tickets and license boundaries |
+| [Third-party notices](THIRD_PARTY_NOTICES.md) | project, vendored, runtime, and reference licenses |
+| [Design review](docs/archive/design-review.md) | corrections recommended for the submitted slides |
 
 ## Team and credits
 
@@ -395,6 +454,16 @@ The supplied presentation assets are stored in
 
 </details>
 
-Use [docs/design-review.md](docs/design-review.md) to align the slides with the
+Use [docs/archive/design-review.md](docs/archive/design-review.md) to align the slides with the
 implemented routing order, memory boundaries, provider boundaries, and
 production claims.
+
+## Licensing and reference boundary
+
+Original Sudarshan code is released under the MIT License; see
+[LICENSE](LICENSE). The vendored DeepSeek Harness retains its own MIT license.
+External references are not all MIT: agentmemory is Apache-2.0 and the main
+OpenViking repository is AGPL-3.0. Read [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+before copying any upstream code or assets. Sudarshan generally reimplements
+reference ideas behind its own typed contracts rather than importing reference
+runtimes.

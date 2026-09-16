@@ -3,23 +3,35 @@
 This plan extracts proven patterns from the local reference repositories without
 coupling Sudarshan to their runtimes or copying incompatible license models.
 
+License notices are centralized in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+The source-first per-repository notes are indexed in
+[reference-adaptations/README.md](reference-adaptations/README.md).
+The references do not share one license: diagram-design, AntV Infographic,
+linkedin-skills, MoneyPrinterTurbo, and ppt-master are MIT; agentmemory is
+Apache-2.0; and the main OpenViking repository is AGPL-3.0. A design idea is
+not a source-code license grant. Any future copied code or asset needs its own
+notice and review.
+
 ## Decisions
 
 | Reference | Sudarshan adoption | Boundary |
 | --- | --- | --- |
-| agentmemory | Lifecycle events, lessons, hybrid recall evaluation, project/session scope | Cognee remains the semantic backend |
+| agentmemory | Lifecycle events, lessons, hybrid recall evaluation, project/session scope | Cognee remains the semantic backend; do not import its 54-tool coding-agent runtime |
 | OpenViking | L0/L1/L2 context selection, retrieval trajectory, workspace identity | Reimplement contracts; do not copy AGPLv3 code |
 | diagram-design | Semantic visual types, style profiles, complexity budget, self-checker | Native SVG/PPTX adapters own delivery |
 | AntV Infographic | Typed templates, resource/font loaders, SSR/export lifecycle | Node renderer stays behind a Python adapter |
 | ppt-master | Routed workflows, page jobs, style profiles, Plan → Do → Check → Act | Use the concepts, not the whole workflow package |
 | linkedin-skills | Narrow skills, humanizer report, draft-only approval | NTRO evidence and release policy override marketing rules |
-| MoneyPrinterTurbo | Video timeline, material matching, subtitles, scene-level retry/cache | Native Sudarshan video renderer remains default |
+| MoneyPrinterTurbo | Video timeline, material matching, subtitles, scene-level retry/cache | Native Sudarshan video renderer remains default; all fallbacks stay explicit |
+| MiniMax-H3 | External audiovisual provider candidate and prompt/reference ideas | Community License boundary; no model weights/source/assets copied; H3 is not a scheduler or memory agent |
 
 ## Tickets
 
 ### T54 — Hierarchical context selection
 
-Status: implemented locally; full suite green.
+Status: implemented locally; focused/offline tests pass. Full-suite promotion
+still has an environment-sensitive AntV timeout and is not represented as
+green until that run is reproduced and explained.
 
 - Support optional L0/L1/L2 context layers in retrieved memory.
 - Select the layer by stage policy and preserve the selected level in the

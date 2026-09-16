@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from crewai import Agent
 from crewai.tools import BaseTool
 
 from pipelines.common.prompt_policy import NTRO_AGENT_GUARDRAILS
+from integrations.providers.router import ProviderRouter
 
 
 def build_agents(tools: list[BaseTool], *, llm: Any = None) -> dict[str, Agent]:
     common = {"verbose": False, "allow_delegation": False, "tools": tools}
-    configured_llm = llm or os.getenv("CREWAI_MODEL")
+    configured_llm = ProviderRouter.configured_model("text", llm)
     if configured_llm:
         common["llm"] = configured_llm
     return {

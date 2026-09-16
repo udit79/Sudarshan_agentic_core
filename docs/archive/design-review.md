@@ -1,5 +1,7 @@
 # Design review of the SIH presentation
 
+> Historical presentation review. It is not a current software contract.
+
 The supplied presentation assets are included in the root README for project
 context. This review separates visual communication improvements from the
 implemented software contract. The diagrams should be updated before a final

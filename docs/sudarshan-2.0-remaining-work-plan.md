@@ -824,7 +824,7 @@ Acceptance:
 ## T84–T90 — Harness UI compatibility audit tickets
 
 These tickets were generated from the control-by-control audit in
-[Harness UI compatibility audit](harness-ui-compatibility-audit.md). They
+[Harness UI compatibility audit](archive/harness-ui-compatibility-audit-2026-09-12.md). They
 close the gap between a control being present in the web bundle and that
 control being authorized, routed, and observable through Sudarshan's typed
 application boundary.

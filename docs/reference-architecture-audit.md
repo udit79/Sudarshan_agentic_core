@@ -9,13 +9,14 @@ own contracts, policy, scheduler, evidence boundary, and artifact manifests.
 
 | Reference | Adopted in Sudarshan | Remaining gap or deliberate boundary |
 | --- | --- | --- |
-| `agentmemory` | Scoped memory lifecycle, confidence/provenance, retract/forget, plugin-style skills, safe telemetry | Add a reviewed memory-evaluation corpus and optional non-blocking session lifecycle hooks; do not copy its coding-agent hooks into the NTRO backend. |
-| `OpenViking` | L0/L1/L2 context selection, bounded context packs, source references, retrieval trace IDs, lazy skill references | No `viking://` filesystem is needed while Cognee Cloud remains the memory backend. Preserve the useful ideas through `context_uri`, tiered loading, and trajectory telemetry rather than introducing a second memory database. |
-| `MoneyPrinterTurbo` | Provider-neutral video timeline, storyboard/assets ledger, material cache, subtitles, bounded parallel scene work, native renderer fallback | Keep the reference workflow behind Sudarshan's `VideoPackage`, budget, cancellation, object-store, and quality contracts. Do not execute its WebUI or copy its provider credentials. |
-| `ppt-master` | Renderer capability registry, PPT adapter boundary, source/quality manifests, visual QA and editable-output policy | PM-3–PM-9 remain release work: structured SVG/page planning, template/layout validation, dependency-aware slide jobs, and visual regression. The external repository is not imported at runtime. |
-| `infographic` / AntV | Declarative `InfographicIR`, pinned SSR adapter, SVG structural/text QA, deterministic fallback | Complete template registry, NTRO design tokens, streaming preview, and browser visual regression before promotion. |
-| `diagram-design` | Semantic diagram registry, editorial/static-first output, safe HTML/SVG export, bounded imports, accessibility checks | Expand the semantic family and visual regression fixtures; optional motion remains opt-in and cannot change the static default. |
-| `linkedin-skills` | Draft-only LinkedIn skill, humanizer boundary, approval/publish policy, typed child-plan support | Complete reviewed tone/humanizer evaluations and keep publish disabled unless an explicit approval/publish connector is configured. |
+| `agentmemory` | Scoped memory lifecycle, confidence/provenance, retract/forget, plugin-style skills, safe telemetry | Add a reviewed memory-evaluation corpus and optional non-blocking session lifecycle hooks; do not copy its coding-agent hooks or 54-tool surface into the NTRO backend. See [ledger](reference-adaptations/agentmemory.md). |
+| `OpenViking` | L0/L1/L2 context selection, bounded context packs, source references, retrieval trace IDs, lazy skill references | No `viking://` filesystem is needed while Cognee Cloud remains the memory backend. Preserve the useful ideas through `context_uri`, tiered loading, and trajectory telemetry rather than introducing a second memory database. The main checkout is AGPL-3.0; see [ledger](reference-adaptations/openviking.md). |
+| `MoneyPrinterTurbo` | Provider-neutral video timeline, storyboard/assets ledger, material cache, subtitles, bounded parallel scene work, native renderer fallback | Keep the reference workflow behind Sudarshan's `VideoPackage`, budget, cancellation, object-store, and quality contracts. Do not execute its WebUI or copy its provider credentials; make every degradation visible. See [ledger](reference-adaptations/moneyprinterturbo.md). |
+| `MiniMax-H3` | Candidate audiovisual provider: mode-specific prompt shaping, reference anchors, native stereo audio, and optional 768p→2K regeneration as dependent provider stages | Not an agent runtime: the checkout is model/VAE code, API examples, and Hub-only skills with no case memory, durable scheduler, generic MCP/A2A, or application renderer. Use an external H3 worker/provider adapter; keep Sudarshan lifecycle, memory, assembly, and quality authority. See [audit ledger](reference-adaptations/minimax-h3.md). |
+| `ppt-master` | Renderer capability registry, PPT adapter boundary, source/quality manifests, visual QA and editable-output policy | PM-3–PM-9 remain release work: structured SVG/page planning, template/layout validation, dependency-aware slide jobs, and visual regression. Its strongest reference is selective native round-trip; the external package is not imported at runtime. See [ledger](reference-adaptations/ppt-master.md). |
+| `infographic` / AntV | Declarative `InfographicIR`, pinned SSR adapter, SVG structural/text QA, deterministic fallback | Complete template registry, NTRO design tokens, streaming preview, and browser visual regression before promotion. AntV themes/layers are not proof that PPT palette/layer constraints survived export. See [ledger](reference-adaptations/antv-infographic.md). |
+| `diagram-design` | Semantic diagram registry, editorial/static-first output, safe HTML/SVG export, bounded imports, accessibility checks | Expand the semantic family and visual regression fixtures; optional motion remains opt-in and cannot change the static default. The reference is a skill/static-output pack, not a DAG scheduler. See [ledger](reference-adaptations/diagram-design.md). |
+| `linkedin-skills` | Draft-only LinkedIn skill, humanizer boundary, approval/publish policy, typed child-plan support | Complete reviewed tone/humanizer evaluations and keep publish disabled unless an explicit approval/publish connector is configured. See [ledger](reference-adaptations/linkedin-skills.md). |
 
 ## What is connected to native Harness
 
@@ -45,6 +46,33 @@ artifact retrieval while hiding direct evidence/memory-maintenance operations.
 This is the token and policy advantage of the native composition; it is not a
 second orchestrator.
 
+## Portable pipeline-agent boundary
+
+Harness is one client of the Sudarshan orchestrator, not the home of the
+pipeline implementations. The existing `SkillManifest`, `ChildTaskSpec`,
+`SkillResult`, and artifact/quality contracts are the portable boundary for
+local or remote execution. The target scale-out shape is:
+
+```text
+Sudarshan Orchestrator Agent
+  -> Presentation Agent
+       -> Infographic Agent or Diagram Agent
+  -> Video Agent
+  -> LinkedIn Agent
+  -> Advisory Agent
+```
+
+The orchestrator mediates scope, budget, dependency, idempotency,
+cancellation, and artifact lineage. A child may execute through the current
+local adapter or through an A2A agent card without changing the parent task
+contract. Other systems can call the same A2A agents without loading Harness.
+Per-pipeline cards and the local-vs-A2A adapter are still release work; the
+current A2A surface is the global run/status/cancel boundary.
+
+The trajectory improvement is additive: emit the same run, child, dependency,
+artifact, quality, retry, and usage lifecycle to a governed Harness trajectory
+projection. The durable Sudarshan DAG remains the execution authority.
+
 ## Cognee Cloud boundary
 
 Cognee Cloud is now the product default. `MemoryManager` is still the only
@@ -68,7 +96,9 @@ an unrestricted Cognee client.
 4. Benchmark memory retrieval quality and token savings against the current
    L0/L1/L2 policy; do not claim OpenViking or agentmemory performance without
    a reviewed corpus.
-5. Add package-manifest/license checks for any future copied reference asset.
+5. Add per-pipeline A2A cards, local-vs-remote child dispatch, mediated
+   cross-agent handoffs, and a shared local/remote lifecycle event bridge.
+6. Add package-manifest/license checks for any future copied reference asset.
 
 The implementation is therefore reference-informed and portable, but not a
 full copy of any reference system. The strongest production gaps are live

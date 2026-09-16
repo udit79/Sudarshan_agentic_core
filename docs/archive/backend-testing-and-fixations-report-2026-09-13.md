@@ -1,5 +1,8 @@
 # Sudarshan Backend Testing & Fixations Ledger
 
+> Historical ledger from 2026-09-13. Use the active status and test commands
+> for current verification; this record is retained for audit history.
+
 This document serves as an immutable verification and test audit log for the Sudarshan Agentic Core (`sudarshan2.2` branch). It details the test execution records, environment baselines, critical bugs identified, and the architectural fixations applied.
 
 ---

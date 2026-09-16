@@ -43,6 +43,13 @@ T84-T90 in the remaining-work plan. Until then, only the Sudarshan operations
 projection, clarification flow, and manifest-backed artifact actions should
 be treated as product-compatible.
 
+The planned trajectory integration is narrower than re-enabling the generic
+Harness inspector: it will project sanitized Sudarshan run, DAG-child, A2A
+handoff, artifact, quality, retry, and usage events into a governed parent
+trajectory node. Harness remains one client; other systems can use the same
+orchestrator and per-pipeline A2A agents. The durable DAG remains the
+execution source of truth.
+
 ## Harness independence
 
 The reusable skill catalog lives in `skills/catalog.py`, and pipeline

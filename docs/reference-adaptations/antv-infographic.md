@@ -1,33 +1,55 @@
 # AntV Infographic adaptation ledger
 
-Status: native SSR boundary hardened locally. This ledger applies to the
-checked-out reference at `C:\Users\uditj\Downloads\sudarshan\references\infographic`.
+**Audit date:** 2026-09-16
+**Reference:** `C:\Users\uditj\Downloads\sudarshan\references\infographic`
+**Source classification:** MIT TypeScript rendering/runtime package, not only
+documentation.
 
-## License boundary
+## Source truth
 
-The reference is MIT licensed. Sudarshan uses the pinned `@antv/infographic`
-runtime through its own small Node SSR bridge; it does not copy the reference
-editor, site, skill marketplace, or task/runtime layer into the application.
+`package.json` identifies `@antv/infographic` version 0.2.20 and exports a
+runtime, an SSR entry point, and JSX runtime. `src/index.ts` exposes
+`Infographic`, syntax parsing, templates, themes, fonts/palettes/resources,
+SVG/PNG exporters, and editor commands/interactions/plugins.
 
-## Adopted concepts and modules
+`src/runtime/Infographic.tsx` parses options, composes a template, renders an
+SVG tree, optionally creates an editor, waits for SVG resources, and exports
+SVG or PNG. The renderer includes layouts, bounds, text measurement, fonts,
+themes, palettes, gradients/patterns, and resource loaders. The package also
+contains a remote icon-service constant; that is an external dependency risk,
+not a reason to allow arbitrary remote resources in Sudarshan.
 
-| Capability | Sudarshan implementation | Adoption boundary |
-|---|---|---|
-| Declarative infographic syntax | `InfographicOutput` and `InfographicIR` | Syntax is generated from typed, evidence-backed contracts only |
-| High-quality SVG SSR | `pipelines/infographic/antv_renderer` | Node receives validated syntax and bounded render settings only |
-| Templates and structure selection | Current syntax prompts and normalization | Future template registry must be allow-listed and versioned |
-| Themes and design tokens | NTRO prompt guardrails and `InfographicIR.style_tokens` | Future theme packs must be sanitized and evidence-neutral |
-| Editor/export ecosystem | Not copied | Add only through an explicit frontend/plugin ticket |
+## Adopt
 
-## Deliberately not copied
+- declarative, typed visual IR compiled to SVG;
+- template/theme registries as versioned allow-lists;
+- explicit font/resource loading and bounded waiting;
+- deterministic structural and text checks after rendering;
+- SVG as the editable/intermediate artifact, with PNG as a derived export.
 
-- The reference editor, site, and browser state
-- Its AI skill installation/marketplace workflow
-- Unbounded syntax or arbitrary JavaScript execution
-- Reference project orchestration or provider configuration
+## Do not import wholesale
 
-## Review rule
+- editor state and browser interactions into the backend;
+- arbitrary AntV syntax, remote icon URLs, or unbounded resource loaders;
+- the site/dev/marketplace and its task lifecycle;
+- renderer success without SVG integrity, text, bounds, contrast, and evidence
+  checks.
 
-Every future adaptation must add a row here, retain the upstream license notice
-when code is copied, add a focused regression test, and pass Sudarshan's
-evidence, budget, cancellation, provenance, and SVG quality gates.
+## Current mapping
+
+Sudarshan's `InfographicIR`, normalization, `pipelines/infographic/quality.py`,
+and `antv_renderer` bridge are the authority. The Node bridge is a deliberately
+small child-process boundary. The remaining release work is an allow-listed
+template/theme registry, broader browser visual regression, and honest
+fallback receipts—not exposing the AntV editor.
+
+The reference supports custom themes and layered SVG composition, but it does
+not by itself guarantee that a user-requested PPT palette or layer structure
+survives export. Those requirements belong in the post-render/PPT validators.
+
+## License and source locations
+
+The checkout is MIT licensed. Reviewed files include `package.json`,
+`src/index.ts`, `src/runtime/Infographic.tsx`, JSX/SVG renderer and exporter,
+theme/template/resource modules, and README examples. Runtime integration is
+recorded in `THIRD_PARTY_NOTICES.md`.

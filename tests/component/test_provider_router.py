@@ -29,3 +29,11 @@ def test_provider_router_success_resets_health() -> None:
     state = router.snapshot()[0]
     assert state["status"] == "available"
     assert state["failure_count"] == 0
+
+
+def test_provider_router_centralizes_requested_and_environment_model_resolution(monkeypatch) -> None:
+    monkeypatch.setenv("CREWAI_MODEL", "openai/text-test")
+
+    assert ProviderRouter.configured_model("text") == "openai/text-test"
+    assert ProviderRouter.configured_model("text", "explicit-model") == "explicit-model"
+    assert ProviderRouter().select_model("text").model == "openai/text-test"

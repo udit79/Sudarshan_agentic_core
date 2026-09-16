@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from pipelines.common.ntro_policy import require_classification, validate_distribution
 from pipelines.common.prompt_policy import build_ntro_system_prompt
 from pipelines.video.contracts import VideoPackage
+from integrations.providers.router import ProviderRouter
 
 
 class VideoPlanningError(RuntimeError):
@@ -20,8 +20,7 @@ class OpenAIVideoPlanner:
 
     def __init__(self, *, client: Any = None, model: str | None = None) -> None:
         self._client = client
-        configured = model or os.getenv("OPENAI_VIDEO_SCRIPT_MODEL", "")
-        self.model = configured or os.getenv("CREWAI_MODEL", "openai/gpt-5.4").removeprefix("openai/")
+        self.model = ProviderRouter().select_model("video_script", model).model.removeprefix("openai/")
 
     @property
     def client(self) -> Any:

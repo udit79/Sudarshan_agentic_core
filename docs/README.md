@@ -1,10 +1,15 @@
 # Documentation guide
 
-This directory contains the implementation contract for Sudarshan Agentic Core.
-The root README is the orientation and setup document. The engineering
-handbook is the end-to-end guide; the focused documents below are the detailed
-contracts and runbooks. When a document and the code disagree, update the
-document and the assumption ledger in the same change.
+This directory contains human/developer documentation for Sudarshan Agentic
+Core. The compact agent-facing index is separate in
+[`docs/agent/`](agent/README.md), with the root runtime map in
+[`AGENT_MAP.md`](../AGENT_MAP.md). The human architecture and operations index
+is [`docs/human/`](human/README.md). The active documentation was reconciled
+against branch `Sudarshan2.2` on 2026-09-16.
+
+When a document and the code disagree, update the document and the assumption
+ledger in the same change. Do not treat research notes or agent navigation as
+runtime truth.
 
 ## Start here
 
@@ -43,16 +48,20 @@ document and the assumption ledger in the same change.
    release backlog.
 14. Read the [diagram-design adoption plan](diagram-design-adoption-plan.md)
    before extending diagram types, imports, visual QA, or diagram delivery.
+15. Read the [tools, prompts, and Cognee map audit](agent/tools-and-prompts-audit.md)
+   before changing internal MCP tools, task prompts, or graph visualization.
+16. Read the [reference adaptation ledgers](reference-adaptations/README.md)
+   before using code, prompts, assets, or workflow ideas from a local reference.
 
-Research citations are centralized in the [full 2.0 execution plan](sudarshan-2.0-full-execution-plan.md)
-and its [Harness research companion](sudarshan-2.0-harness-research.md). New
+Research citations are centralized in the [full 2.0 execution plan](archive/sudarshan-2.0-full-execution-plan.md)
+and its [Harness research companion](archive/sudarshan-2.0-harness-research.md). New
 documents should link to those sources instead of copying reference lists.
 
 ## Documentation map
 
 | Question | Primary document | Supporting source |
 | --- | --- | --- |
-| What is the architecture? | [Engineering handbook](sudarshan-2.0-engineering-handbook.md) | [Full execution plan](sudarshan-2.0-full-execution-plan.md) |
+| What is the architecture? | [Engineering handbook](sudarshan-2.0-engineering-handbook.md) | [Full execution plan](archive/sudarshan-2.0-full-execution-plan.md) |
 | How does a request run? | [Backend integration](backend-integration.md) | [Pipeline orchestration](internal/pipeline-orchestration.md) |
 | How do I add a skill? | [Skill authoring](skill-authoring.md) | `skills/*/manifest.json`, `skills/*/SKILL.md` |
 | How do I add a visual output? | [Rendering and quality](artifact-rendering-and-quality.md) | `pipelines/ppt`, `pipelines/infographic`, `pipelines/video` |
@@ -65,6 +74,15 @@ documents should link to those sources instead of copying reference lists.
 | How do I deploy and troubleshoot? | [Operations](operations.md) | [Assumptions](sudarshan-2.0-assumptions.md) |
 | What is actually complete? | [Current status](current-status.md) | [Assumptions](sudarshan-2.0-assumptions.md) |
 | What remains before production? | [Remaining-work plan](sudarshan-2.0-remaining-work-plan.md) | [Current status](current-status.md) |
+| What did the external references actually provide? | [Reference adaptation ledgers](reference-adaptations/README.md) | [Third-party notices](../THIRD_PARTY_NOTICES.md) |
+
+For machine-facing work, use [`docs/agent/README.md`](agent/README.md) and
+[`AGENT_MAP.md`](../AGENT_MAP.md), not this long-form index. For a human-oriented
+category view, use [`docs/human/README.md`](human/README.md).
+
+Historical plans, dated audits, and presentation reviews are intentionally kept
+out of the active folder view in [`docs/archive/`](archive/README.md). They are
+context, not current status.
 
 ## System ownership
 
@@ -117,13 +135,13 @@ documents should link to those sources instead of copying reference lists.
 
 - [Operations](operations.md) records setup, configuration, testing,
   troubleshooting, and deployment requirements.
-- [Design review](design-review.md) records factual improvements for the
+- [Design review](archive/design-review.md) records factual improvements for the
   submitted architecture slides.
-- [Full execution plan](sudarshan-2.0-full-execution-plan.md) records the
+- [Full execution plan](archive/sudarshan-2.0-full-execution-plan.md) records the
   research-backed architecture, phases, team roles, and release gates.
-- [Harness research](sudarshan-2.0-harness-research.md) records the research
+- [Harness research](archive/sudarshan-2.0-harness-research.md) records the research
   and comparison behind the native Harness/MCP/ADK/A2A direction.
-- [Team parallel guide](sudarshan-2.0-team-parallel-guide.md) divides work
+- [Team parallel guide](archive/sudarshan-2.0-team-parallel-guide.md) divides work
   across backend, agentic, frontend, rendering, and evaluation teams.
 - [Assumption ledger](sudarshan-2.0-assumptions.md) records deployment risks and
   evidence still required.
@@ -132,7 +150,7 @@ documents should link to those sources instead of copying reference lists.
 
 ## Verification baseline
 
-The repository's current local baseline is:
+The repository's recorded local baseline is:
 
 - Python: 212 passed, 1 skipped when run with a workspace-local pytest
   temporary root.
@@ -143,6 +161,13 @@ The repository's current local baseline is:
 - Sudarshan brand and theme bundles: built successfully.
 - Harness client TypeScript project: passed.
 - `git diff --check`: passed.
+
+Audit verification on 2026-09-16 also passed the focused provider/planner
+regression set (5 passed). A full local run reached 367 passed and 8 skipped,
+but one environment-sensitive AntV SSR renderer test exceeded its 30-second
+deadline (`tests/pipeline/test_json_renderer_contracts.py`). That failure is
+not caused by the model-resolution cleanup; AntV SSR availability remains an
+explicit environment gate.
 
 These tests do not prove external MongoDB, Cognee, Google OAuth, OpenAI,
 AntV SSR, or provider reachability. A live smoke test must be run only with

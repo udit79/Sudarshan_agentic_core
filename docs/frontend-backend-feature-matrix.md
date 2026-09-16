@@ -1,6 +1,8 @@
 # Sudarshan 2.0 frontend/backend feature matrix
 
-Updated: 2026-09-11
+Last reviewed: 2026-09-16. Current implementation truth is in
+[current status](current-status.md); this matrix is the boundary contract, not
+a release checklist.
 
 This document translates the active execution tickets into parallel work for
 the backend/platform and frontend teams. It is an implementation contract, not

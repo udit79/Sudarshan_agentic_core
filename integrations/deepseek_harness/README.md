@@ -48,6 +48,26 @@ The server uses the configured SQLite LangGraph checkpointer, so these tools
 share a durable run identity within the service process instead of creating a
 new in-memory orchestrator for every call.
 
+## Portable pipeline agents
+
+Harness is one optional client of the Sudarshan orchestrator. The scalable
+agent boundary is not the Harness plugin: each governed pipeline can expose a
+portable A2A agent card while retaining the same local adapter. The
+orchestrator can mediate a typed handoff such as Presentation → Infographic or
+Presentation → Diagram, then pass the returned artifact and quality receipt
+back to the parent.
+
+The portable handoff uses the existing `SkillManifest`, `ChildTaskSpec`, and
+`SkillResult` contracts. A remote child must preserve parent/child IDs, case
+scope, idempotency, deadline, cancellation, budget, dependencies, artifact
+references, and quality/usage receipts. The current `a2a.py` exposes the
+global Sudarshan run/status/cancel boundary; per-pipeline cards and remote
+child dispatch remain staged work.
+
+Local and A2A children should emit the same lifecycle events. Harness
+trajectory is one projection of those events and can show the parent run with
+parallel child lanes; it is not the scheduler or source of truth.
+
 Use the checked-in overlay at
 `integrations/deepseek_harness/sudarshan.cordis.yml` with the Harness MCP
 client. On Linux, use `.venv/bin/python` for `command` instead of the Windows
@@ -79,7 +99,7 @@ command-palette controls. The Sudarshan operations drawer and clarification
 support remain available. The inherited attachment, workspace, generic
 approval, trajectory, model/provider, and permission controls are not yet
 Sudarshan-compatible; the control-by-control findings and follow-up tickets
-are recorded in `docs/harness-ui-compatibility-audit.md` and T84-T90. This is
+are recorded in `docs/archive/harness-ui-compatibility-audit-2026-09-12.md` and T84-T90. This is
 a composition-level restriction in the replaceable Cordis profile; the
 vendored Harness core is not modified.
 

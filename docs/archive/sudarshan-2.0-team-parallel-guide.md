@@ -1,5 +1,8 @@
 # Sudarshan 2.0: Team-Parallel Implementation Guide
 
+> Historical team handoff. Use current status and the remaining-work plan for
+> live ownership and ticket state.
+
 This guide is the execution companion to [Sudarshan 2.0 Full Execution Plan](sudarshan-2.0-full-execution-plan.md). It defines how the frontend, backend, agentic, rendering, memory, and evaluation teams can work in parallel on the `Sudarshan2.0` branch.
 
 ## 0. Post-H-series handoff
@@ -23,8 +26,8 @@ work is deployment evidence and product integration:
 Before starting work after the integration commit:
 
 1. Pull the committed baseline and create a short-lived branch from it.
-2. Read this guide, the [remaining-work plan](sudarshan-2.0-remaining-work-plan.md),
-   and the [frontend/backend matrix](frontend-backend-feature-matrix.md).
+2. Read this guide, the [remaining-work plan](../sudarshan-2.0-remaining-work-plan.md),
+   and the [frontend/backend matrix](../frontend-backend-feature-matrix.md).
 3. Run the affected contract/component tests using a writable pytest root on
    locked-down Windows:
 
@@ -181,7 +184,7 @@ The current compatibility tool is `run_sudarshan`. The target asynchronous MCP s
 - **Memory gateway:** keep `MemoryManager` as the only Cognee gateway; add scopes, provenance, freshness, confidence, retrieval traces, and reviewed writes.
 - **Ingestion boundary:** keep the current `/ingest` compatibility path while
   adding the asynchronous manifest/job path described in
-  [Ingestion architecture](ingestion-architecture.md). The backend owns source
+  [Ingestion architecture](../ingestion-architecture.md). The backend owns source
   validation, bounded staging, job status, idempotency, cancellation, and safe
   ingestion events. It must not pass raw files or unrestricted extraction text
   directly to the Harness.
