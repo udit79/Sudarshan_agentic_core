@@ -31,6 +31,9 @@ pipelines/infographic/antv_renderer/node_modules/
 # Runtime-generated pipeline artifacts
 artifacts/
 
+# Optional user-managed PPT Master checkout; never vendor it into this repository.
+/ppt_master_reference/
+
 # DeepSeek Harness local preview state (credentials, sessions, caches, and
 # machine-specific profile links must never be committed).
 .dsh-preview/

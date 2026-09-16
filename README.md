@@ -1,5 +1,19 @@
 # Sudarshan Agentic Core
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Smart%20India%20Hackathon-2026-ff6b00?style=flat-square" alt="Smart India Hackathon 2026">
+  <img src="https://img.shields.io/badge/Problem%20Statement-SIH26154-2457a6?style=flat-square" alt="SIH26154">
+  <img src="https://img.shields.io/badge/Adversarial%20Brains-6f42c1?style=flat-square" alt="Adversarial Brains">
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.13%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.13 or newer">
+  <img src="https://img.shields.io/badge/Node.js-22%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white" alt="Node.js 22 or newer">
+  <img src="https://img.shields.io/badge/FastAPI-API-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/LangGraph-Control%20Plane-1f6feb?style=flat-square" alt="LangGraph control plane">
+  <img src="https://img.shields.io/badge/CrewAI-Pipeline%20Workers-6f42c1?style=flat-square" alt="CrewAI pipeline workers">
+  <img src="https://img.shields.io/badge/OpenAI-Provider-412991?style=flat-square&logo=openai&logoColor=white" alt="OpenAI provider">
+</p>
+
 Sudarshan is a governed, case-grounded agent platform. It ingests source
 material, builds bounded User/Case/Task context, routes requests to typed
 pipelines, validates outputs, and returns classified artifacts with progress
@@ -10,7 +24,7 @@ India Hackathon 2026 NTRO problem statement SIH26154. It is not an official
 NTRO system and must not be connected to classified production data without
 approved identity, storage, network, security, and operating controls.
 
-## Current truth
+## Project status
 
 The Python application boundary, LangGraph orchestrator, memory policy,
 specialist pipelines, quality gates, artifacts, scheduler, telemetry, and
