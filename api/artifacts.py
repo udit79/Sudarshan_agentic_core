@@ -278,7 +278,12 @@ class ArtifactStore:
 
         registry = default_renderer_registry()
         selection = registry.resolve(renderer_id, artifact_kind, "inspect")
-        report = registry.inspect(selection.selected_renderer_id, path, required_text=required_text)
+        report = registry.inspect(
+            selection.selected_renderer_id,
+            path,
+            kind=artifact_kind,
+            required_text=required_text,
+        )
         quality_report_id = "quality-" + hashlib.sha256(
             f"{run_id}:{kind}:{selection.renderer_version}:{source_ir_hash or Path(path).name}".encode("utf-8")
         ).hexdigest()[:24]

@@ -25,6 +25,8 @@ from pipelines.linkedin.schemas import LinkedInPostOutput
 from pipelines.orchestrator.contracts import RequestConstraints
 from pipelines.ppt.schemas import PresentationOutput, SlideContent
 from pipelines.video.contracts import VideoPackage, VideoScene
+from pipelines.video.planner import OpenAIVideoPlanner, VideoPlanningError
+from pipelines.orchestrator.understanding import PromptCrafterAgent, RequestUnderstandingAgent
 
 
 # ``ppt`` is a compatibility alias of ``presentation``.  It is included in
@@ -283,6 +285,50 @@ def test_video_contract_enforces_scene_duration_boundaries() -> None:
         VideoScene(scene_id="scene-3", duration_seconds=0)
     with pytest.raises(ValidationError):
         VideoScene(scene_id="scene-4", duration_seconds=601)
+
+
+def test_video_planner_reports_missing_provider_credentials_clearly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    planner = OpenAIVideoPlanner(client=None)
+    with pytest.raises(VideoPlanningError, match="OPENAI_API_KEY is required"):
+        planner.plan(
+            subject="Contract fixture",
+            query="Create a case-grounded video",
+            memory_context="",
+        )
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_empty_memory_is_explicitly_labelled_in_the_prompt_plan(route: str) -> None:
+    request = make_request(route)
+    understanding = RequestUnderstandingAgent().run(request)
+    plan = PromptCrafterAgent().run(request, understanding, "")
+
+    assert plan.memory_context == ""
+    assert "No permitted memory was recalled" in plan.prompt_text
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_declared_missing_information_requests_clarification_before_generation(route: str) -> None:
+    request = AdvisoryRequest(
+        query=f"Create a {route} for the case.",
+        user_id="user-contract",
+        case_id="case-contract",
+        task_id=f"task-{route}",
+        metadata={
+            "pipeline": route,
+            "missing_information": ["the case objective"],
+        },
+    )
+
+    understanding = RequestUnderstandingAgent().run(request)
+
+    assert understanding.clarification_required is True
+    assert understanding.missing_information == ["the case objective"]
+    assert understanding.clarification_questions == ["Please provide the case objective."]
 
 
 @pytest.mark.parametrize("route", ROUTES)

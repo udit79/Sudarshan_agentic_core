@@ -2,7 +2,7 @@
 
 Date: 2026-09-17  
 Scope: deterministic component and pipeline-contract boundaries only  
-Source of truth: [`docs/pipeline-benchmarking.md`](pipeline-benchmarking.md)
+Source of truth: [`docs/pipeline-benchmarking.md`](../pipeline-benchmarking.md)
 
 ## Mentor summary
 
@@ -27,9 +27,12 @@ authorized context, and pipeline-specific constraints.
 **TEST** — `tests/component/test_pipeline_contract_matrix.py` plus the
 existing focused pipeline and lifecycle tests listed below.
 
-**RESULT** — The new deterministic matrix passed **62 tests**. The existing
-focused pipeline baseline passed **42 tests**. No provider credentials were
-used and no product code was changed in this phase.
+**RESULT** — The deterministic contract matrix now passes **79 tests** after
+the low-context/provider regression additions. The affected regression suite
+passes **154 tests**. The existing focused pipeline baseline passed **42
+tests**. No provider credentials were used. One narrow product fix was made:
+`pipelines/video/planner.py` now imports `os`, allowing its existing
+missing-credential error to work as designed.
 
 ## Actual routes
 
@@ -89,7 +92,7 @@ no safe, explicit test seam or product policy for that behavior.
 
 ## Tests added
 
-`tests/component/test_pipeline_contract_matrix.py` adds 62 deterministic tests
+`tests/component/test_pipeline_contract_matrix.py` adds deterministic tests
 covering:
 
 - all public routes, including the `ppt` compatibility alias;
@@ -102,6 +105,9 @@ covering:
 - AntV syntax requirements;
 - presentation slide identity;
 - video scene duration boundaries;
+- explicit empty-memory labeling and declared-missing-information
+  clarification;
+- clear missing-provider-credential handling for video planning;
 - explicit success/failure `PipelineResponse` transport semantics.
 
 Existing supporting tests remain important:
@@ -122,10 +128,13 @@ Existing supporting tests remain important:
 
 ### PASS
 
-- Deterministic route/request contract matrix: 62 passed.
+- Deterministic route/request/low-context contract matrix: **79 passed**.
+- Affected Phase 5 regression suite: **154 passed**.
 - Existing focused pipeline baseline: 42 passed.
 - Typed output validation and pipeline-specific deterministic gates.
-- No product-code fix was required by this phase.
+- One product fix was required and verified: the video planner now reports a
+  clear `VideoPlanningError` when `OPENAI_API_KEY` is absent instead of
+  raising an unrelated `NameError`.
 
 ### FAIL
 
@@ -146,6 +155,26 @@ Existing supporting tests remain important:
 - Should conflicts prefer newest evidence, require human review, or produce a
   partial result?
 - What claim/evidence binding is required for free-form narrative fields?
+
+## Future API and live-flow testing map
+
+The current repository is FastAPI-oriented at the HTTP boundary. Later testing
+should use two complementary views:
+
+| View | Tool | What it proves |
+| --- | --- | --- |
+| HTTP/API smoke and visual inspection | Postman or PowerShell `Invoke-RestMethod` | A real client can submit requests, poll status, retrieve artifacts, and observe safe errors |
+| Automated HTTP contract | FastAPI `TestClient` with `pytest` | Routes, headers, validation, status codes, response shapes, and isolation remain repeatable |
+| Python orchestration | Direct `pytest` tests around `PipelineOrchestrator`, DAG, provider seams, and memory doubles | Routing, context scope, retries, cancellation, concurrency, and recovery without a browser |
+| Frontend end-to-end | Running frontend + API + local/test providers | The user-visible upload → run → status → artifact journey works as a finished product |
+
+These are different layers, not competing approaches. Postman is useful for
+human observation; automated API and orchestration tests are the repeatable
+proof required before merging. The repository already contains an Express
+gateway in `backend-node/` with JavaScript tests in `backend-node/test/`, and a
+separate JavaScript/TypeScript `deepseek-harness/` workspace. They are separate
+from the Python transformation routes and should receive their own API and
+integration test suites when that layer is started.
 
 ## Board update recommendation
 

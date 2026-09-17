@@ -28,10 +28,10 @@ multi-agent, load, or human-review scenario is complete.
 ## Not started
 
 - [x] 17. Pipeline contracts (deterministic route/request/output matrix; live provider lifecycle remains pending)
-- [ ] 18. Insufficient-context generation
+- [ ] 18. Insufficient-context generation (partial: explicit missing-information clarification passes; empty-context policy remains open)
 - [x] 19. Malformed model output (typed schema boundary; live model injection remains pending)
-- [ ] 20. Artifact correctness
-- [ ] 21. Artifact quality
+- [x] 20. Artifact correctness (PPTX/SVG/PNG/PDF/video integrity, manifest provenance, tamper detection)
+- [ ] 21. Artifact quality (objective proxies exist; human visual review and final-slide evidence policy remain open)
 - [ ] 22. PPT benchmarking
 - [ ] 23. Provider failure
 - [ ] 24. Timeout
@@ -59,14 +59,15 @@ multi-agent, load, or human-review scenario is complete.
 
 ## Evidence
 
-- Ingestion evidence: `docs/ingestion-testing-progress.md`
-- Memory evidence: `docs/memory-testing-progress.md`
+- Ingestion evidence: `ingestion-testing-progress.md`
+- Memory evidence: `memory-testing-progress.md`
 - Memory matrix: `tests/component/test_memory_behaviour_matrix.py`
 - Latest memory matrix result: **20 passed**
 - Latest memory-focused regression result: **53 passed**
 - Isolation matrix: `tests/component/test_case_isolation_matrix.py`
 - Pipeline contract matrix: `tests/component/test_pipeline_contract_matrix.py`
-- Pipeline contract report: `docs/pipeline-contract-testing-report.md`
+- Pipeline contract report: `pipeline-contract-testing-report.md`
+- Artifact report: `artifact-testing-report.md`
 - Latest isolation result: **8 passed**; artifact-evidence ownership validation
   is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and
