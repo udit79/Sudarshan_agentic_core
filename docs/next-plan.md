@@ -1,6 +1,6 @@
 # Sudarshan next execution plan
 
-**Status:** audit-derived plan, 2026-09-16  
+**Status:** audit-derived plan, 2026-09-17
 **Scope:** reliability, artifact correctness, memory, MCP/A2A portability, and
 DeepSeek Harness trajectory integration.  
 **Authority:** current source and tests; reference repositories remain design
@@ -38,7 +38,14 @@ NP-04 request preparation and case memory
 NP-09 pipeline-specific release correctness
 NP-10 governed ingestion and evidence memory
 NP-11 MCP/A2A capability surface
-NP-12 evaluation and release gates
+NP-13 fail-closed memory scope and case grounding
+  ├─ NP-14 artifact ownership and case authorization
+  ├─ NP-15 explicit user preferences and typed visual style
+  │   └─ NP-19 consented preference feedback learning
+  ├─ NP-16 stale-data lifecycle and source supersession
+  ├─ NP-17 large-source resource controls
+  └─ NP-18 artifact failure recovery
+NP-12 evaluation and release gates (after NP-01–NP-18)
 ```
 
 ## Tickets
@@ -316,11 +323,184 @@ orchestrator.
 - Tool-selection evaluations cover create, revise-one-slide, wait, resume,
   approve, cancel, and artifact retrieval.
 
+### NP-13 — Fail-closed memory scope and case grounding
+
+**Owner:** memory/backend/security | **Priority:** P0 | **Depends on:** NP-04 and NP-10
+
+The platform currently has User/Case/Task scope rules, but a memory result
+without scope metadata can be accepted when the backend is assumed to have
+applied its node filter. This ticket turns the claimed isolation boundary into
+an explicit, testable contract for every pipeline, including Presentation.
+
+**Acceptance criteria**
+
+- Every generation and ingestion request has an authenticated `user_id` and
+  `case_id`; task scope is accepted only when it belongs to that case.
+- A recalled result without verifiable scope metadata is rejected, except for
+  an explicitly typed and verified system record.
+- `ContextPack.scope`, every record, and the request context agree on User,
+  Case, and Task identity before a pipeline starts.
+- Cross-case identical queries and same-named sources never enter the current
+  case context, cache, prompt, or task memory.
+- Presentation tests prove that its output memory and evidence references are
+  bound to the requested case, not merely to the run ID.
+- A Cognee/node-filter failure produces a blocked or failed run; it cannot
+  silently widen retrieval.
+
+### NP-14 — Artifact ownership and case authorization
+
+**Owner:** artifacts/backend/security | **Priority:** P0 | **Depends on:** NP-08 and NP-13
+
+Generated artifacts currently carry run and classification metadata, while
+artifact retrieval checks classification but does not consistently enforce the
+owning User/Case/Task. Add the same authorization strength used by evidence
+and source objects.
+
+**Acceptance criteria**
+
+- Artifact manifests and durable object metadata carry authenticated owner,
+  case, task, and run lineage, or resolve them through an authorized durable
+  run record.
+- Manifest, preview, download, and run-artifact routes require matching
+  operator/user/case scope before returning artifact metadata or bytes.
+- A caller from another case cannot retrieve an artifact even when it knows
+  the artifact ID and has sufficient classification clearance.
+- Artifact IDs, quality reports, evidence IDs, and source hashes remain
+  immutable and case-bound.
+- Cross-case HTTP/MCP tests cover manifest, preview, download, and artifact
+  retrieval by run.
+
+### NP-15 — Explicit user preferences and typed visual style
+
+**Owner:** request preparation/memory/PPT | **Priority:** P1 | **Depends on:** NP-04, NP-05, and NP-13
+
+Natural-language statements such as “I like pink” are not currently converted
+into a durable preference or a deterministic PPT theme. Add an explicit,
+bounded preference path without treating every mention of a color as a saved
+instruction.
+
+**Acceptance criteria**
+
+- A confirmed preference operation stores a versioned User-scoped profile with
+  provenance and lifecycle metadata; ordinary case facts do not become style
+  preferences.
+- The user can view a bounded list of saved preferences showing the category,
+  normalized value, version, scope, source, and last-updated time; raw memory
+  graph content is never shown.
+- The user can explicitly update or revoke a preference, and revocation takes
+  effect for all future preparations without rewriting historical artifacts.
+- Preparation may propose a preference from natural language, but only a
+  confirmed typed value is persisted.
+- Supported color names normalize through a fixed allow-list to canonical hex
+  tokens; unsupported or ambiguous colors require clarification.
+- A confirmed preference is injected as style guidance only and never as case
+  evidence or a factual claim.
+- Presentation rendering and post-render inspection prove that the selected
+  palette reaches actual PPT objects and does not leak across users or cases.
+- The MCP/API surface exposes one read operation for the current user's
+  preferences and one explicit idempotent write/revoke operation; neither
+  accepts arbitrary memory queries or another user's `user_id`.
+
+### NP-16 — Stale-data lifecycle and source supersession
+
+**Owner:** ingestion/data/memory | **Priority:** P0 | **Depends on:** NP-10 and NP-13
+
+Parser-cache expiry exists, but durable evidence summaries do not consistently
+expire or supersede older versions when a source changes. Make freshness an
+explicit part of case evidence rather than relying on retrieval ranking.
+
+**Acceptance criteria**
+
+- Every indexed source has a stable identity based on authenticated scope and
+  source hash; identical re-ingestion is idempotent.
+- A changed source creates a new version and marks the prior evidence and
+  projected memory as superseded or stale for that same case.
+- Recall excludes expired, superseded, retracted, and unreviewed records by
+  default, including records returned by Cognee without local cache state.
+- A scheduled or worker-owned lifecycle pass applies expiry and records safe
+  audit events; cleanup is not test-only.
+- Tests prove that old case content cannot reappear after replacement and that
+  another case’s source version is never considered a replacement.
+
+### NP-17 — Large-source resource controls
+
+**Owner:** ingestion/runtime/operations | **Priority:** P1 | **Depends on:** NP-10
+
+The 50 MiB admission limit and stage budgets are real, but extraction and
+parser-cache payloads can still hold large raw text and evidence structures in
+memory. Bound post-admission resource use before increasing file limits.
+
+**Acceptance criteria**
+
+- Extraction enforces configured decompressed bytes, extracted characters,
+  chunk count, temporary-disk, and wall-time limits per ingestion.
+- Text and archive processing does not require retaining an unbounded full raw
+  document in process memory or the stage cache.
+- Cancellation and budget exhaustion leave no orphaned staged source or
+  partially committed evidence/index state.
+- Oversized-but-admitted sources return a visible partial/blocked status with
+  a safe reason and no misleading successful artifact.
+- Tests cover the 50 MiB boundary, archive expansion, extracted-text limits,
+  cache cleanup, cancellation, and concurrent large ingestions.
+
+### NP-18 — User-facing artifact failure recovery
+
+**Owner:** pipeline/release/frontend | **Priority:** P1 | **Depends on:** NP-05, NP-07, NP-09, and NP-14
+
+Quality gates correctly block invalid artifacts, but a failed run does not
+always provide a usable next action or an explicit safe preview. Improve the
+delivery contract without promoting degraded or failed output as successful.
+
+**Acceptance criteria**
+
+- Every artifact failure returns a stable issue code, quality report reference,
+  safe explanation, and next action such as repair, retry, clarification, or
+  download of an explicitly labelled draft.
+- Automatic repair is bounded by the run attempt and budget policy; it cannot
+  loop or create duplicate artifacts.
+- Draft previews are clearly marked as failed/degraded and never enter durable
+  Case memory as approved output.
+- If no valid artifact exists, the UI/MCP response remains actionable and
+  includes progress, failure state, and retry/revision guidance.
+- Failure-injection tests cover renderer failure, child failure, quality
+  rejection, timeout, and partial delivery for every artifact pipeline.
+
+### NP-19 — Consented preference feedback learning
+
+**Owner:** preference/memory/product  | **Priority:** P1 | **Depends on:** NP-15
+
+The current system does not monitor user feedback or update preferences. This
+ticket adds a controlled learning loop without silently profiling users or
+turning case-specific edits into global preferences.
+
+**Acceptance criteria**
+
+- Explicit signals such as “I dislike pink,” a thumbs-down reason, or “always
+  use dark themes” create a typed preference candidate tied to the
+  authenticated user and the originating run/case.
+- Repeated implicit signals such as manual revisions, rejected colors, or
+  repeated retries may create a bounded suggestion, but never directly change
+  the saved User Profile.
+- Auto-learning is disabled by default and can be enabled only through an
+  explicit user setting with a visible explanation of what signals are used.
+- Before an inferred preference is saved, the user can accept, reject, edit,
+  or dismiss the suggestion; every decision is auditable and reversible.
+- Case/task feedback remains local to that case/task unless the user confirms
+  promotion to a global User Profile preference.
+- Silence, abandonment, one-off edits, and successful delivery without
+  feedback are never treated as a dislike or preference update.
+- Preference candidates and saved preferences are bounded, user-authorized,
+  and excluded from evidence, factual case memory, provider prompts, and
+  trajectory output unless the user explicitly asks to see them.
+- Tests cover explicit like/dislike feedback, repeated edits, opt-in and
+  opt-out behavior, cross-user isolation, case-to-user promotion, revocation,
+  and duplicate feedback events.
+
 ### NP-12 — Evaluation and release gate
 
 **Owner:** evaluation/release/security  
 **Priority:** P0  
-**Depends on:** NP-01 through NP-11
+**Depends on:** NP-01 through NP-19
 
 Run the authoritative regression matrix before calling any ticket complete.
 
@@ -332,7 +512,10 @@ A2A parity.
 
 **Release gate**
 
-- No known P0 remains open.
+- Release is permitted only when no known P0 remains open.
+- NP-13, NP-14, and NP-16 are known P0 memory/data-integrity gates and
+  must be closed before the repository can claim complete User/Case/Task
+  isolation.
 - Full repository suite passes without hidden fallback success.
 - Every ticket has source evidence, focused tests, and a verified status.
 - Reference repositories remain unchanged.
@@ -343,7 +526,10 @@ A2A parity.
 2. NP-02 and NP-03: make trajectory and token accounting trustworthy.
 3. NP-05, NP-06, and NP-07: enforce artifact correctness.
 4. NP-08: expose the real DAG and child state.
-5. NP-04, NP-09, and NP-10: close memory and pipeline release gaps.
-6. NP-11: promote portable MCP/A2A boundaries.
-7. NP-12: run the release matrix and update status from evidence.
+5. NP-13 and NP-14: close the case-memory and artifact authorization gaps.
+6. NP-16: make stale-data handling explicit and automatic.
+7. NP-04, NP-09, NP-10, NP-15, NP-17, NP-18, and NP-19: close remaining memory,
+   pipeline, ingestion, preference, resource, and recovery gaps.
+8. NP-11: promote portable MCP/A2A boundaries.
+9. NP-12: run the release matrix and update status from evidence.
 

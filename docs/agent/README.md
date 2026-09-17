@@ -17,7 +17,7 @@ runtime source set for a change.
 - [Tools, prompts, and Cognee map audit](tools-and-prompts-audit.md) — source-
   backed audit of the internal MCP surface, pipeline prompts, and the safe
   graph-projection plan.
-- [Next execution plan](../next-plan.md) — active NP-01–NP-12 tickets derived
+- [Next execution plan](../next-plan.md) — active NP-01–NP-19 tickets derived
   from the source audit.
 - [Reference adaptation ledgers](../reference-adaptations/README.md) — source-
   backed truth for every local reference checkout, adoption boundaries,

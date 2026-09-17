@@ -5,5 +5,5 @@ and has been moved to
 [`docs/archive/sudarshan-2.0-remaining-work-plan-legacy-2026-09-16.md`](archive/sudarshan-2.0-remaining-work-plan-legacy-2026-09-16.md).
 
 Use the active [next execution plan](next-plan.md). It replaces the old ticket
-IDs with audit-derived NP-01–NP-12 tickets and records current acceptance
+IDs with audit-derived NP-01–NP-19 tickets and records current acceptance
 criteria, dependencies, and release gates.
