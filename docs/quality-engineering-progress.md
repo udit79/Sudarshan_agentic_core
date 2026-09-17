@@ -27,9 +27,9 @@ multi-agent, load, or human-review scenario is complete.
 
 ## Not started
 
-- [ ] 17. Pipeline contracts
+- [x] 17. Pipeline contracts (deterministic route/request/output matrix; live provider lifecycle remains pending)
 - [ ] 18. Insufficient-context generation
-- [ ] 19. Malformed model output
+- [x] 19. Malformed model output (typed schema boundary; live model injection remains pending)
 - [ ] 20. Artifact correctness
 - [ ] 21. Artifact quality
 - [ ] 22. PPT benchmarking
@@ -65,6 +65,8 @@ multi-agent, load, or human-review scenario is complete.
 - Latest memory matrix result: **20 passed**
 - Latest memory-focused regression result: **53 passed**
 - Isolation matrix: `tests/component/test_case_isolation_matrix.py`
+- Pipeline contract matrix: `tests/component/test_pipeline_contract_matrix.py`
+- Pipeline contract report: `docs/pipeline-contract-testing-report.md`
 - Latest isolation result: **8 passed**; artifact-evidence ownership validation
   is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and
