@@ -106,16 +106,40 @@ full provider payloads in benchmark output.
 
 ## Phase 11 status
 
+### Live diagnostic checkpoint — 2026-09-17
+
+The first real API run for G01 (`run-g01-live-03`) returned HTTP-level and
+orchestration success, including real provider-backed agent stages. However,
+its event stream reported `Loaded 0 bounded User/Case memory records` and
+`Recalled 0 permitted memory records`, so the generated summary correctly
+avoided inventing facts but did not use the ingested G01 evidence. This is a
+content-grounding failure, not a successful golden-case result.
+
+The cause was isolated to the Cognee recall adapter: graph completion with
+`only_context=true` returned plain context text without the explicit scope
+metadata required by Sudarshan's fail-closed memory policy. The adapter now
+uses Cognee's non-generative `CHUNKS` retrieval and recovers the returned
+`belongs_to_set` marker into the existing scope/provenance fields. The live
+same-case check then returned bounded `case:golden-g01` context, while a
+different-case check returned zero results and no G01 content.
+
+The FastAPI end-to-end rerun is still required after restarting the server so
+the running process loads this adapter fix. No raw source text, credentials,
+or provider payloads are stored in this report.
+
 ### PASS
 
 - Sanitized case catalogue defined for all ten requested golden scenarios.
 - Separate three-case holdout set defined.
 - Expected evidence, pipeline, constraints, artifact properties, and failure
   conditions are recorded.
+- Live Cognee same-case recall recovered bounded G01 context after the adapter
+  fix; a different-case recall returned no G01 content.
 
 ### NOT YET IMPLEMENTED
 
 - Actual live execution of these cases.
+- Post-fix G01 pipeline execution through the restarted FastAPI process.
 - Automated benchmark runner and p50/p95 aggregation.
 - Final claim/evidence scoring rubric and human review scores.
 

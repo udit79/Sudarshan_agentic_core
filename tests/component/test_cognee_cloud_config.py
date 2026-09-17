@@ -46,3 +46,39 @@ def test_local_cognee_requires_explicit_opt_in(monkeypatch) -> None:
 
     assert config.backend == "local"
     assert config.base_url == "http://localhost:8011"
+
+
+def test_cognee_recall_uses_scope_preserving_chunk_search(monkeypatch) -> None:
+    config = CogneeConfig(
+        backend="cloud",
+        base_url="https://tenant.aws.cognee.ai",
+        api_key="cloud-key",
+        tenant_id="tenant-1",
+        dataset_name="sudarshan_memory",
+    )
+    adapter = CogneeHttpAdapter(config)
+    captured = {}
+
+    def fake_request(method, path, body, content_type, *, retry, max_retries=None):
+        captured.update({
+            "method": method,
+            "path": path,
+            "payload": __import__("json").loads(body.decode("utf-8")),
+            "content_type": content_type,
+            "retry": retry,
+        })
+        return []
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+
+    assert adapter.recall(
+        query="case finding",
+        node_sets=["sudarshan:scope:case:case-a"],
+        dataset_name="sudarshan_memory",
+        top_k=4,
+    ) == []
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/v1/recall"
+    assert captured["payload"]["search_type"] == "CHUNKS"
+    assert captured["payload"]["only_context"] is False
+    assert captured["payload"]["node_name"] == ["sudarshan:scope:case:case-a"]

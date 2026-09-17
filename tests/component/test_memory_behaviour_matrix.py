@@ -217,6 +217,37 @@ def test_relevant_memory_is_ranked_and_recalled() -> None:
     assert "pink visual palette" in response.context.text
 
 
+def test_cognee_chunk_scope_marker_is_admitted_and_isolated() -> None:
+    """Live CHUNKS payloads carry scope in belongs_to_set, not metadata."""
+    backend = RecordingBackend()
+    backend.forced_results = [{
+        "kind": "chunks",
+        "metadata": {"data_id": "provider-document"},
+        "raw": {
+            "id": "provider-chunk",
+            "belongs_to_set": ["sudarshan:scope:case:case-alpha"],
+            "document_name": "memory-summary.json",
+            "text": "case-alpha verified finding",
+        },
+        "text": "case-alpha verified finding",
+    }]
+    manager = MemoryManager(backend)
+
+    same_case = manager.recall(
+        "verified finding",
+        AccessContext(user_id="user-a", case_id="case-alpha"),
+    )
+    other_case = manager.recall(
+        "verified finding",
+        AccessContext(user_id="user-a", case_id="case-beta"),
+    )
+
+    assert same_case.context.items[0].scope_type is ScopeType.CASE
+    assert same_case.context.items[0].scope_id == "case-alpha"
+    assert same_case.context.items[0].provenance["node_set"] == "sudarshan:scope:case:case-alpha"
+    assert other_case.context.items == ()
+
+
 def test_clearly_irrelevant_zero_score_memory_is_not_injected() -> None:
     manager, backend = setup_memory()
     context = AccessContext(user_id="user-a", case_id="case-a")

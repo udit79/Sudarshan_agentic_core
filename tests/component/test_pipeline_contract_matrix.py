@@ -204,6 +204,13 @@ def test_pipeline_specific_optional_constraints_are_not_silently_reinterpreted()
     assert request.constraints["theme_tokens"]["accent"] == "#38BDF8"
 
 
+def test_request_inputs_normalize_omitted_constraints_to_an_empty_object() -> None:
+    request = make_request("executive_summary")
+
+    assert request.constraints is None
+    assert request.as_inputs()["constraints"] == {}
+
+
 @pytest.mark.parametrize(
     ("pipeline", "builder", "missing_field"),
     [
