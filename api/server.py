@@ -6,6 +6,7 @@ import mimetypes
 import os
 import tempfile
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from uuid import uuid4
 from pathlib import Path
 import uvicorn
@@ -240,34 +241,57 @@ def _manifest_for_run_artifact(run_id: str, artifact_key: str):
     if artifact_path is None:
         raise HTTPException(status_code=404, detail="Artifact is not available for this run")
     try:
-        return ARTIFACT_STORE.register(
+        manifest = ARTIFACT_STORE.register(
             artifact_path,
             run_id=run_id,
             kind=artifact_key.strip().lower(),
             classification_level=str(status.get("classification_level", "RESTRICTED")),
+            user_id=str(status.get("user_id") or "") or None,
+            case_id=str(status.get("case_id") or "") or None,
+            task_id=str(status.get("task_id") or "") or None,
         )
+        return manifest, status
     except (ArtifactNotFound, PermissionError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-def _check_artifact_access(request: Request, classification_level: str) -> None:
+def _check_artifact_access(request: Request, manifest) -> None:
     """Apply the request clearance check before returning an artifact."""
 
     try:
         require_classification_access(
             request.headers.get("x-classification-level", "RESTRICTED"),
-            classification_level,
+            manifest.classification_level,
         )
     except (PermissionError, ValueError) as exc:
         raise HTTPException(status_code=403, detail="Artifact classification is not accessible") from exc
+
+    if not all((manifest.user_id, manifest.case_id, manifest.task_id)):
+        raise HTTPException(status_code=403, detail="Artifact ownership is unavailable")
+    requester = (request.headers.get("x-user-id") or request.headers.get("x-operator-id") or "").strip()
+    if not requester or requester != manifest.user_id:
+        raise HTTPException(status_code=403, detail="Artifact owner is not authorized")
+    requested_case = request.headers.get("x-case-id", "").strip()
+    if not requested_case or requested_case != manifest.case_id:
+        raise HTTPException(status_code=403, detail="Artifact case is not authorized")
+    if manifest.task_id is not None and request.headers.get("x-task-id", "").strip() not in {manifest.task_id}:
+        raise HTTPException(status_code=403, detail="Artifact task is not authorized")
 
 
 @app.get("/artifacts/{run_id}/{artifact_key}/manifest")
 async def get_run_artifact_manifest(request: Request, run_id: str, artifact_key: str):
     """Register or return the immutable manifest for a run artifact."""
 
-    manifest = _manifest_for_run_artifact(run_id, artifact_key)
-    _check_artifact_access(request, manifest.classification_level)
+    manifest, status = _manifest_for_run_artifact(run_id, artifact_key)
+    _check_artifact_access(
+        request,
+        SimpleNamespace(
+            classification_level=manifest.classification_level,
+            user_id=status.get("user_id") or manifest.user_id,
+            case_id=status.get("case_id") or manifest.case_id,
+            task_id=status.get("task_id") or manifest.task_id,
+        ),
+    )
     return manifest.model_dump(mode="json")
 
 
@@ -277,7 +301,7 @@ async def get_artifact_manifest(request: Request, artifact_id: str):
         manifest, _ = ARTIFACT_STORE.get(artifact_id)
     except (ArtifactNotFound, PermissionError, ValueError, KeyError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=404, detail="Artifact manifest is not available") from exc
-    _check_artifact_access(request, manifest.classification_level)
+    _check_artifact_access(request, manifest)
     return manifest.model_dump(mode="json")
 
 
@@ -287,7 +311,7 @@ async def download_artifact(request: Request, artifact_id: str):
         manifest, source = ARTIFACT_STORE.get(artifact_id)
     except (ArtifactNotFound, PermissionError, ValueError, KeyError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=404, detail="Artifact is not available") from exc
-    _check_artifact_access(request, manifest.classification_level)
+    _check_artifact_access(request, manifest)
     return FileResponse(source, filename=manifest.name)
 
 
@@ -299,7 +323,7 @@ async def preview_artifact(request: Request, artifact_id: str):
         manifest, preview = ARTIFACT_STORE.preview(artifact_id)
     except (ArtifactNotFound, ArtifactPreviewUnavailable, PermissionError, ValueError, KeyError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=404, detail="Artifact preview is not available") from exc
-    _check_artifact_access(request, manifest.classification_level)
+    _check_artifact_access(request, manifest)
     media_type = mimetypes.guess_type(preview.name)[0] or "application/octet-stream"
     return FileResponse(preview, media_type=media_type, filename=preview.name)
 
@@ -312,7 +336,15 @@ async def serve_artifact(request: Request, run_id: str, artifact_key: str):
     artifact_path = _artifact_path_from_status(status, artifact_key.strip().lower())
     if artifact_path is None:
         raise HTTPException(status_code=404, detail="Artifact is not available for this run")
-    _check_artifact_access(request, str(status.get("classification_level", "RESTRICTED")))
+    _check_artifact_access(
+        request,
+        SimpleNamespace(
+            classification_level=str(status.get("classification_level", "RESTRICTED")),
+            user_id=status.get("user_id"),
+            case_id=status.get("case_id"),
+            task_id=status.get("task_id"),
+        ),
+    )
     return FileResponse(artifact_path)
 
 

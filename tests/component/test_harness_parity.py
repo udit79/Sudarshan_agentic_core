@@ -42,7 +42,7 @@ def test_native_mcp_facade_matches_replaceable_adapter(monkeypatch) -> None:
         mcp_server.wait_sudarshan("run-parity", timeout_ms=10, after_sequence=2),
         mcp_server.resume_sudarshan("run-parity", "task-parity", {"approved": True}),
         mcp_server.cancel_sudarshan("run-parity", "task-parity"),
-        mcp_server.get_sudarshan_artifact("artifact-parity"),
+        mcp_server.get_sudarshan_artifact("artifact-parity", "u", "c", "t"),
     ]
     external = [
         external_adapter.call("submit", {
@@ -55,7 +55,10 @@ def test_native_mcp_facade_matches_replaceable_adapter(monkeypatch) -> None:
         external_adapter.call("wait", "run-parity", timeout_ms=10, after_sequence=2),
         external_adapter.call("resume", "run-parity", "task-parity", {"approved": True}),
         external_adapter.call("cancel", "run-parity", "task-parity"),
-        external_adapter.call("get_artifact", "artifact-parity", classification_level="RESTRICTED"),
+        external_adapter.call(
+            "get_artifact", "artifact-parity", classification_level="RESTRICTED",
+            user_id="u", case_id="c", task_id="t",
+        ),
     ]
 
     assert [item["operation"] for item in native] == [item["operation"] for item in external]

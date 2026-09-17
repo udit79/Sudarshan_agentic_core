@@ -7,6 +7,7 @@ bounded, provenance-bearing summary through ``MemoryManager``.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import sqlite3
 import time
@@ -69,6 +70,16 @@ class EvidenceIndex:
                     ON evidence_blocks(user_id, case_id, task_id, classification_level);
                 CREATE INDEX IF NOT EXISTS idx_evidence_modality
                     ON evidence_blocks(modality, document_id);
+                CREATE TABLE IF NOT EXISTS evidence_sources (
+                    source_identity TEXT PRIMARY KEY,
+                    source_hash TEXT NOT NULL,
+                    source_reference TEXT NOT NULL,
+                    user_id TEXT,
+                    case_id TEXT,
+                    task_id TEXT,
+                    version INTEGER NOT NULL,
+                    updated_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS evidence_chunks (
                     chunk_id TEXT PRIMARY KEY,
                     document_id TEXT NOT NULL,
@@ -94,6 +105,18 @@ class EvidenceIndex:
             if "object_id" not in columns:
                 connection.execute("ALTER TABLE evidence_blocks ADD COLUMN object_id TEXT")
 
+    @staticmethod
+    def _source_identity(document: IngestedDocument) -> str:
+        """Return the stable owner-scoped identity of a logical source."""
+
+        material = "|".join((
+            str(document.user_id or ""),
+            str(document.case_id or ""),
+            str(document.task_id or ""),
+            str(document.source_path),
+        ))
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
     def index_document(
         self,
         document: IngestedDocument,
@@ -113,11 +136,47 @@ class EvidenceIndex:
             }
         source_reference = str(document.source_path)
         source_hash = document.evidence_blocks[0].source_hash
+        source_identity = self._source_identity(document)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute(
+                "SELECT source_hash, version FROM evidence_sources WHERE source_identity = ?",
+                (source_identity,),
+            ).fetchone()
+            # A source reference identifies a logical document within its
+            # owner scope. Replace every prior version before writing the new
+            # rows so stale evidence cannot remain searchable after re-ingest.
+            old_documents = connection.execute(
+                """
+                SELECT DISTINCT document_id FROM evidence_blocks
+                WHERE user_id IS ? AND case_id IS ? AND task_id IS ?
+                  AND source_reference = ?
+                """,
+                (document.user_id, document.case_id, document.task_id, source_reference),
+            ).fetchall()
+            old_document_ids = [str(row[0]) for row in old_documents]
             connection.execute("DELETE FROM evidence_blocks WHERE document_id = ?", (document.id,))
             connection.execute("DELETE FROM evidence_chunks WHERE document_id = ?", (document.id,))
             connection.execute("DELETE FROM evidence_relationships WHERE document_id = ?", (document.id,))
+            for old_document_id in old_document_ids:
+                connection.execute("DELETE FROM evidence_blocks WHERE document_id = ?", (old_document_id,))
+                connection.execute("DELETE FROM evidence_chunks WHERE document_id = ?", (old_document_id,))
+                connection.execute("DELETE FROM evidence_relationships WHERE document_id = ?", (old_document_id,))
+            version = int(previous[1]) + 1 if previous else 1
+            connection.execute(
+                """
+                INSERT INTO evidence_sources
+                    (source_identity, source_hash, source_reference, user_id,
+                     case_id, task_id, version, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_identity) DO UPDATE SET
+                    source_hash = excluded.source_hash,
+                    version = excluded.version,
+                    updated_at = excluded.updated_at
+                """,
+                (source_identity, source_hash, source_reference, document.user_id,
+                 document.case_id, document.task_id, version, time.time()),
+            )
             now = time.time()
             for block in document.evidence_blocks:
                 object_id = None
@@ -204,11 +263,24 @@ class EvidenceIndex:
         return {
             "document_id": document.id,
             "source_hash": source_hash,
+            "source_identity": source_identity,
+            "source_version": version,
+            "superseded_source_hash": previous[0] if previous and previous[0] != source_hash else None,
             "evidence_count": len(document.evidence_blocks),
             "chunk_count": len(document.chunks),
             "relationship_count": len(document.relationships),
             "indexed": True,
         }
+
+    def source_version(self, document: IngestedDocument) -> int:
+        """Return the current version for a scope-bound logical source."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT version FROM evidence_sources WHERE source_identity = ?",
+                (self._source_identity(document),),
+            ).fetchone()
+        return int(row[0]) if row else 0
 
     def _scope_rows(
         self,
@@ -266,8 +338,20 @@ class EvidenceIndex:
                 "source_reference": str(row["source_reference"]),
                 "extractor_version": str(row["extractor_version"]),
                 "model_version": row["model_version"],
+                "source_identity": EvidenceIndex._source_identity_from_values(
+                    row["user_id"], row["case_id"], row["task_id"], row["source_reference"]
+                ),
             },
         }
+
+    @staticmethod
+    def _source_identity_from_values(
+        user_id: Any, case_id: Any, task_id: Any, source_reference: Any
+    ) -> str:
+        material = "|".join((
+            str(user_id or ""), str(case_id or ""), str(task_id or ""), str(source_reference),
+        ))
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
     def search(
         self,
@@ -409,6 +493,8 @@ class EvidenceIndex:
         )
         first_block = document.evidence_blocks[0] if document.evidence_blocks else None
         source_hash = first_block.source_hash if first_block else ""
+        source_identity = self._source_identity(document)
+        source_version = self.source_version(document)
         extractor_version = first_block.extractor_version if first_block else "evidence-index@1.0.0"
         model_version = first_block.model_version if first_block else None
         fallbacks = sorted({
@@ -425,7 +511,10 @@ class EvidenceIndex:
         quality_status = "partial" if fallbacks or low_confidence_count else "passed"
 
         unit = KnowledgeUnit(
-            unit_id=f"evidence-summary:{document.id}",
+            # Stable across re-ingestion of the same logical source.  A new
+            # source version updates this memory record instead of creating a
+            # second active summary that could pollute recall.
+            unit_id=f"evidence-summary:{source_identity}",
             content=summary,
             source=Source(document.id, source_type, str(document.source_path)),
             metadata={
@@ -438,6 +527,8 @@ class EvidenceIndex:
                 "extractor_version": extractor_version,
                 "model_version": model_version,
                 "source_hash": source_hash,
+                "source_identity": source_identity,
+                "source_version": source_version,
                 "source_reference": str(document.source_path),
                 "evidence_ids": [block.evidence_id for block in document.evidence_blocks],
                 "chunk_ids": [chunk.chunk_id for chunk in document.chunks],
@@ -449,6 +540,8 @@ class EvidenceIndex:
                 "extractor_version": extractor_version,
                 "model_version": model_version,
                 "exact_evidence_store": "EvidenceIndex",
+                "source_identity": source_identity,
+                "source_version": source_version,
             },
         )
         receipt = memory_manager.remember(

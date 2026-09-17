@@ -167,6 +167,13 @@ class ArtifactManifest(ContractModel):
 
     artifact_id: str = Field(min_length=1)
     run_id: str = Field(min_length=1)
+    # Ownership is part of the artifact contract, not inferred from a path or
+    # from classification alone.  Optional values preserve read compatibility
+    # with manifests created before NP-14; new application registrations must
+    # provide them.
+    user_id: str | None = None
+    case_id: str | None = None
+    task_id: str | None = None
     kind: str = Field(min_length=1)
     name: str = Field(min_length=1)
     uri: str = Field(min_length=1)
@@ -186,6 +193,13 @@ class ArtifactManifest(ContractModel):
     evidence_ids: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=_utc_now)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_ownership_tuple(self) -> "ArtifactManifest":
+        ownership = (self.user_id, self.case_id, self.task_id)
+        if any(value is not None for value in ownership) and not all(ownership):
+            raise ValueError("artifact ownership must include user_id, case_id, and task_id together")
+        return self
 
     @field_validator("sha256", "source_ir_hash")
     @classmethod

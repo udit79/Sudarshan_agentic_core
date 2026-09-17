@@ -103,6 +103,9 @@ class ArtifactStore:
         run_id: str,
         kind: str,
         classification_level: str,
+        user_id: str,
+        case_id: str,
+        task_id: str,
         quality_status: QualityStatus = "pending",
         renderer_version: str = "unknown",
         schema_version: str = "1",
@@ -113,6 +116,8 @@ class ArtifactStore:
         degraded: bool = False,
         fallback_renderer: str | None = None,
     ) -> ArtifactManifest:
+        if not all(str(value).strip() for value in (user_id, case_id, task_id)):
+            raise ValueError("artifact registration requires user_id, case_id, and task_id")
         source = self._safe_source(path)
         digest = self._sha256(source)
         artifact_id = "artifact-" + hashlib.sha256(
@@ -129,6 +134,9 @@ class ArtifactStore:
                 kind=f"artifact:{kind}",
                 media_type="application/octet-stream",
                 classification_level=classification_level,
+                owner_id=user_id,
+                case_id=case_id,
+                task_id=task_id,
                 run_id=run_id,
                 retention_class="artifact",
             )
@@ -138,6 +146,9 @@ class ArtifactStore:
         manifest = ArtifactManifest(
             artifact_id=artifact_id,
             run_id=run_id,
+            user_id=user_id,
+            case_id=case_id,
+            task_id=task_id,
             kind=kind,
             name=source.name,
             uri=f"/artifacts/{artifact_id}/download",
@@ -178,6 +189,9 @@ class ArtifactStore:
         artifact_kind: str,
         renderer_id: str,
         classification_level: str,
+        user_id: str,
+        case_id: str,
+        task_id: str,
         schema_version: str = "1",
         evidence_ids: list[str] | None = None,
         source_ir_hash: str | None = None,
@@ -212,6 +226,9 @@ class ArtifactStore:
             run_id=run_id,
             kind=kind,
             classification_level=classification_level,
+            user_id=user_id,
+            case_id=case_id,
+            task_id=task_id,
             quality_status="passed" if report.approved else "failed",
             renderer_version=selection.renderer_version,
             schema_version=schema_version,
@@ -242,7 +259,9 @@ class ArtifactStore:
             if not object_id or self.object_store is None:
                 raise
             source = self.object_store.get(
-                str(object_id), access_level="TOP SECRET", include_path=True
+                str(object_id), access_level="TOP SECRET", include_path=True,
+                owner_id=manifest.user_id, case_id=manifest.case_id,
+                task_id=manifest.task_id,
             ).path
         if self._sha256(source) != manifest.sha256:
             raise ValueError("artifact checksum does not match its manifest")

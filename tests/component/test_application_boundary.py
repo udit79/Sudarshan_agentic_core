@@ -42,7 +42,7 @@ def test_harness_tool_schemas_are_external_client_compatible() -> None:
     assert wait_parameters["after_sequence"]["default"] == 0
 
     artifact_parameters = tools["get_sudarshan_artifact"].parameters
-    assert artifact_parameters["required"] == ["artifact_id"]
+    assert artifact_parameters["required"] == ["artifact_id", "user_id", "case_id", "task_id"]
     assert artifact_parameters["properties"]["classification_level"]["default"] == "RESTRICTED"
 
     skill_parameters = tools["invoke_sudarshan_skill"].parameters

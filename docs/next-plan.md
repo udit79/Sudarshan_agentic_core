@@ -332,6 +332,13 @@ without scope metadata can be accepted when the backend is assumed to have
 applied its node filter. This ticket turns the claimed isolation boundary into
 an explicit, testable contract for every pipeline, including Presentation.
 
+**Implementation update (2026-09-17):** `MemoryManager` now rejects provider
+results lacking explicit scope metadata, including results that only appear
+inside an allowed Cognee node set. Focused regression coverage is present.
+The graph and preparation boundary also validate ContextPack scope and every
+serialized record before use. Provider-failure blocking remains a release
+test for the complete ticket.
+
 **Acceptance criteria**
 
 - Every generation and ingestion request has an authenticated `user_id` and
@@ -355,6 +362,13 @@ Generated artifacts currently carry run and classification metadata, while
 artifact retrieval checks classification but does not consistently enforce the
 owning User/Case/Task. Add the same authorization strength used by evidence
 and source objects.
+
+**Implementation update (2026-09-17):** New `ArtifactManifest` registrations
+carry User/Case/Task ownership; object-store copies receive the same scope;
+manifest, preview, download, run-artifact, and MCP retrieval paths enforce the
+tuple. New registrations reject missing or partial ownership, and unowned
+legacy sidecars are denied by the API/MCP boundary and must be inventoried and
+quarantined or removed before release.
 
 **Acceptance criteria**
 
@@ -408,6 +422,15 @@ instruction.
 Parser-cache expiry exists, but durable evidence summaries do not consistently
 expire or supersede older versions when a source changes. Make freshness an
 explicit part of case evidence rather than relying on retrieval ranking.
+
+**Implementation update (2026-09-17):** `EvidenceIndex` now maintains a
+scope-bound logical source identity and version ledger, atomically replaces
+prior indexed rows for a revised source reference, and uses the same identity
+for its projected memory summary so re-ingestion does not create a second
+active summary. Scheduler-owned local expiry runs at execution boundaries, and
+remote records with expired or malformed expiry metadata are rejected during
+recall. Live worker scheduling and remote-Cognee lifecycle verification remain
+deployment gates.
 
 **Acceptance criteria**
 

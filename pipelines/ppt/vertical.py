@@ -108,6 +108,7 @@ class PresentationVerticalSlice:
                 "classification_level": classification_level,
                 "distribution": distribution,
                 "operator_id": operator_id,
+                "user_id": operator_id,
                 "artifacts": [],
                 "quality_report": None,
             }
@@ -220,6 +221,9 @@ class PresentationVerticalSlice:
                     run_id=run_id,
                     kind=kind,
                     classification_level=state["classification_level"],
+                    user_id=state.get("user_id"),
+                    case_id=state.get("case_id"),
+                    task_id=state.get("task_id"),
                     quality_status="passed" if report.approved else "failed",
                     renderer_version=renderer_version,
                     schema_version="flowchart-ir@1",
