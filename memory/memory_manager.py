@@ -7,7 +7,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
 
 from memory.cognee_adapter import CogneeConfig, CogneeHttpAdapter, MemoryBackend
@@ -146,6 +146,7 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
             context_layers or item.context_layers,
             _context_level(metadata.get("context_level", item.context_level)),
             metadata.get("context_uri") or item.context_uri,
+            metadata.get("expires_at") or item.expires_at,
         ) for item in nested]
     if result is None:
         result = raw.get("content", "")
@@ -159,7 +160,7 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
         metadata.get("source_reference") or metadata.get("source"), score, provenance,
         metadata.get("memory_id"), str(metadata.get("lifecycle", "active")),
         context_layers, _context_level(metadata.get("context_level", "L2")),
-        metadata.get("context_uri"),
+        metadata.get("context_uri"), metadata.get("expires_at"),
     )]
 
 
@@ -190,8 +191,11 @@ def _bounded_metric(value: Any, name: str) -> float:
 
 
 def _allowed(result: RetrievedMemory, context: AccessContext) -> bool:
+    # A provider-side node-set filter is not an authorization proof.  Results
+    # without explicit scope metadata cannot be tied to this request's
+    # user/case/task and must not enter a ContextPack.
     if result.scope_type is None or result.scope_id is None:
-        return True  # Cognee's node_name filter is authoritative when metadata is absent.
+        return False
     allowed = {(ScopeType.SYSTEM, "system")}
     if context.user_id:
         allowed.add((ScopeType.USER, context.user_id))
@@ -200,6 +204,20 @@ def _allowed(result: RetrievedMemory, context: AccessContext) -> bool:
     if context.task_id:
         allowed.add((ScopeType.TASK, context.task_id))
     return (result.scope_type, result.scope_id) in allowed
+
+
+def _not_expired(result: RetrievedMemory) -> bool:
+    """Apply expiry even when the provider has no local MemoryStore row."""
+
+    if not result.expires_at:
+        return True
+    try:
+        expiry = datetime.fromisoformat(str(result.expires_at).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return expiry > datetime.now(timezone.utc)
 
 
 def _scope_accessible(memory: Memory, context: AccessContext) -> bool:
@@ -503,6 +521,7 @@ class MemoryManager:
             and _allowed(result, context)
             and self.store.is_recallable(result.memory_id)
             and result.lifecycle == MemoryLifecycle.ACTIVE.value
+            and _not_expired(result)
         )
         response = RecallResponse(
             self.context_builder.build(

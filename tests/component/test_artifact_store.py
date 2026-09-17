@@ -17,6 +17,9 @@ def test_artifact_store_registers_and_verifies_immutable_manifest(tmp_path) -> N
         run_id="run-1",
         kind="presentation",
         classification_level="RESTRICTED",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
         renderer_version="ppt-test@1",
     )
     loaded, resolved = store.get(manifest.artifact_id)
@@ -40,6 +43,9 @@ def test_artifact_store_register_checked_saves_quality_report_and_renderer_metad
         artifact_kind="svg",
         renderer_id="diagram.native-svg",
         classification_level="RESTRICTED",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
         required_text=("ok",),
     )
 
@@ -61,6 +67,9 @@ def test_artifact_store_rejects_source_outside_root(tmp_path) -> None:
             run_id="run-1",
             kind="binary",
             classification_level="RESTRICTED",
+            user_id="user-1",
+            case_id="case-1",
+            task_id="task-1",
         )
     except PermissionError:
         pass
@@ -78,10 +87,18 @@ def test_application_returns_verified_manifest_without_filesystem_path(tmp_path,
         run_id="run-1",
         kind="text",
         classification_level="RESTRICTED",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
     )
     monkeypatch.setenv("SUDARSHAN_ARTIFACT_ROOT", str(root))
 
-    result = object.__new__(SudarshanApplication).get_artifact(manifest.artifact_id)
+    result = object.__new__(SudarshanApplication).get_artifact(
+        manifest.artifact_id,
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
+    )
 
     assert result["artifact_id"] == manifest.artifact_id
     assert result["integrity_verified"] is True
@@ -102,11 +119,35 @@ def test_artifact_store_creates_direct_image_preview(tmp_path) -> None:
         run_id="run-preview",
         kind="image",
         classification_level="RESTRICTED",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
     )
     loaded, preview = store.preview(manifest.artifact_id)
 
     assert loaded.preview_uri == f"/artifacts/{manifest.artifact_id}/preview"
     assert preview == source.resolve()
+
+
+def test_artifact_manifest_preserves_user_case_task_ownership(tmp_path) -> None:
+    root = tmp_path / "artifacts"
+    source = root / "brief.txt"
+    source.parent.mkdir(parents=True)
+    source.write_text("case-owned artifact", encoding="utf-8")
+
+    manifest = ArtifactStore(root).register(
+        source,
+        run_id="run-owned",
+        kind="text",
+        classification_level="RESTRICTED",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
+    )
+
+    assert manifest.user_id == "user-1"
+    assert manifest.case_id == "case-1"
+    assert manifest.task_id == "task-1"
 
 
 def test_artifact_store_can_copy_into_restart_safe_object_store(tmp_path, monkeypatch) -> None:
@@ -121,6 +162,9 @@ def test_artifact_store_can_copy_into_restart_safe_object_store(tmp_path, monkey
         run_id="run-durable",
         kind="text",
         classification_level="RESTRICTED",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
     )
     loaded, resolved = ArtifactStore(root).get(manifest.artifact_id)
 

@@ -218,6 +218,9 @@ def get_sudarshan_status(run_id: str) -> StatusResponse:
 )
 def get_sudarshan_artifact(
     artifact_id: str,
+    user_id: str,
+    case_id: str,
+    task_id: str,
     classification_level: str = "RESTRICTED",
 ) -> ArtifactResponse:
     """Read one integrity-checked artifact manifest through the application boundary."""
@@ -226,6 +229,9 @@ def get_sudarshan_artifact(
         "get_artifact",
         artifact_id,
         classification_level=classification_level,
+        user_id=user_id,
+        case_id=case_id,
+        task_id=task_id,
     )
     if isinstance(raw, ArtifactResponse):
         return raw

@@ -178,6 +178,61 @@ def _context_pack(manager: MemoryManagerLike, *, query: str, context: AccessCont
     return pack.model_dump(mode="json")
 
 
+def _validate_context_scope(
+    pack: Mapping[str, Any],
+    request: AdvisoryRequest,
+    *,
+    allow_missing_task: bool = False,
+) -> None:
+    """Reject packs or records that are not explicitly bound to this request."""
+
+    expected = {
+        "user_id": request.user_id,
+        "case_id": request.case_id,
+        "task_id": request.task_id,
+    }
+    scope = pack.get("scope")
+    if not isinstance(scope, Mapping):
+        raise PermissionError("ContextPack scope is missing")
+    if scope.get("user_id") != expected["user_id"] or scope.get("case_id") != expected["case_id"]:
+        raise PermissionError("ContextPack scope does not match the request")
+    scoped_task = scope.get("task_id")
+    if scoped_task is not None and scoped_task != expected["task_id"]:
+        raise PermissionError("ContextPack task scope does not match the request")
+    if scoped_task is None and not allow_missing_task:
+        raise PermissionError("task-scoped ContextPack is required for grounding")
+
+    records = pack.get("records", [])
+    if not isinstance(records, list):
+        raise PermissionError("ContextPack records are invalid")
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise PermissionError("ContextPack record is invalid")
+        scope_type = str(record.get("scope_type") or "").strip().lower()
+        scope_id = str(record.get("scope_id") or "").strip()
+        if not scope_type or not scope_id:
+            raise PermissionError("ContextPack record has no verifiable scope")
+        if scope_type == "system" and scope_id == "system":
+            continue
+        if scope_type == "user" and scope_id == expected["user_id"]:
+            continue
+        if scope_type == "case" and scope_id == expected["case_id"]:
+            continue
+        if scope_type == "task" and scope_id == expected["task_id"] and not allow_missing_task:
+            continue
+        raise PermissionError("ContextPack record is outside the request scope")
+
+
+def _validate_memory_records(records: list[dict[str, Any]], request: AdvisoryRequest) -> None:
+    """Apply the same scope proof to the legacy serialized recall path."""
+
+    _validate_context_scope(
+        {"scope": {"user_id": request.user_id, "case_id": request.case_id, "task_id": request.task_id},
+         "records": records},
+        request,
+    )
+
+
 def build_default_pipeline_registry(
     memory_manager: MemoryManagerLike,
     *,
@@ -788,6 +843,8 @@ class PipelineOrchestrator:
         reporter = self._reporter(state)
         prepared_pack = state.get("request_context_pack") or {}
         if prepared_pack:
+            request = _request_from_dict(state["request"])
+            _validate_context_scope(prepared_pack, request, allow_missing_task=True)
             records = prepared_pack.get("records", [])
             context_text = str(prepared_pack.get("context_text", ""))
             reporter.emit(
@@ -832,6 +889,7 @@ class PipelineOrchestrator:
                 token_budget=min(request.token_budget, 1200),
             )
             if pack is not None:
+                _validate_context_scope(pack, request, allow_missing_task=True)
                 records = list(pack.get("records", []))
                 context_text = str(pack.get("context_text", ""))
             else:
@@ -844,6 +902,7 @@ class PipelineOrchestrator:
                 )
                 records = _memory_records(recalled)
                 context_text = str(recalled.context.text or "")
+                _validate_memory_records(records, request)
             reporter.emit(
                 stage="request_memory_recall",
                 status="succeeded",
@@ -995,6 +1054,7 @@ class PipelineOrchestrator:
                 token_budget=min(request.token_budget, 2600),
             )
             if pack is not None:
+                _validate_context_scope(pack, request)
                 records = list(pack.get("records", []))
                 context_text = str(pack.get("context_text", ""))
             else:
@@ -1007,6 +1067,7 @@ class PipelineOrchestrator:
                 )
                 records = _memory_records(recalled)
                 context_text = str(recalled.context.text or "")
+                _validate_memory_records(records, request)
             reporter.emit(
                 stage="memory_recall",
                 status="succeeded",

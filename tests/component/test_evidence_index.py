@@ -107,3 +107,54 @@ def test_evidence_index_reindex_idempotent(tmp_path):
     assert receipt2["indexed"] is True
     assert receipt2["evidence_count"] == receipt1["evidence_count"]
 
+
+def test_evidence_index_replaces_prior_source_version(tmp_path):
+    first_source = tmp_path / "first.txt"
+    second_source = tmp_path / "second.txt"
+    first_source.write_text("old incident assessment", encoding="utf-8")
+    second_source.write_text("new incident assessment", encoding="utf-8")
+    index = EvidenceIndex(tmp_path / "evidence.db")
+    first = ingest_file(
+        str(first_source), user_id="operator-1", case_id="case-1",
+        task_id="task-1", source_reference="case-brief.txt",
+    )
+    second = ingest_file(
+        str(second_source), user_id="operator-1", case_id="case-1",
+        task_id="task-1", source_reference="case-brief.txt",
+    )
+
+    index.index_document(first)
+    index.index_document(second)
+    context = AccessContext(user_id="operator-1", case_id="case-1", task_id="task-1")
+
+    assert index.search_text("old", context) == []
+    assert index.search_text("new", context)
+
+
+def test_projected_memory_identity_is_stable_across_source_versions(tmp_path):
+    first_source = tmp_path / "first.txt"
+    second_source = tmp_path / "second.txt"
+    first_source.write_text("old case summary", encoding="utf-8")
+    second_source.write_text("new case summary", encoding="utf-8")
+    index = EvidenceIndex(tmp_path / "evidence.db")
+    first = ingest_file(
+        str(first_source), user_id="operator-1", case_id="case-1",
+        task_id="task-1", source_reference="case-brief.txt",
+    )
+    second = ingest_file(
+        str(second_source), user_id="operator-1", case_id="case-1",
+        task_id="task-1", source_reference="case-brief.txt",
+    )
+    index.index_document(first)
+    backend = _Backend()
+    manager = MemoryManager(backend)
+    first_projection = index.project_to_memory(first, manager)
+    index.index_document(second)
+    second_projection = index.project_to_memory(second, manager)
+
+    assert first_projection["memory_id"] == second_projection["memory_id"]
+    assert backend.writes[0]["metadata"]["source_version"] == 1
+    assert backend.writes[1]["metadata"]["source_version"] == 2
+    assert "new case summary" in manager.store.get_memory(second_projection["memory_id"]).content
+    assert "old case summary" not in manager.store.get_memory(second_projection["memory_id"]).content
+

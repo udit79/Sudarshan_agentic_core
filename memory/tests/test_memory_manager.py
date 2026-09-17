@@ -81,6 +81,45 @@ def test_user_scope_does_not_include_child_case_memories():
     assert response.results == ()
 
 
+def test_recall_rejects_provider_results_without_explicit_scope_metadata():
+    backend = FakeBackend()
+    manager = MemoryManager(backend)
+    backend.documents.append({
+        "content": "latency is the primary risk",
+        "node_sets": ["sudarshan:scope:case:case-1"],
+        "metadata": {},
+    })
+
+    response = manager.recall(
+        "latency",
+        AccessContext(user_id="user-1", case_id="case-1"),
+    )
+
+    assert response.results == ()
+
+
+def test_recall_rejects_expired_or_malformed_provider_expiry_metadata():
+    backend = FakeBackend()
+    manager = MemoryManager(backend)
+    for expires_at in ("2000-01-01T00:00:00+00:00", "not-a-timestamp"):
+        backend.documents.append({
+            "content": "stale case context",
+            "node_sets": ["sudarshan:scope:case:case-1"],
+            "metadata": {
+                "scope_type": "case",
+                "scope_id": "case-1",
+                "expires_at": expires_at,
+            },
+        })
+
+    response = manager.recall(
+        "stale",
+        AccessContext(user_id="user-1", case_id="case-1"),
+    )
+
+    assert response.results == ()
+
+
 def test_context_injection_is_explicitly_delimited():
     backend = FakeBackend()
     manager = MemoryManager(backend)

@@ -14,6 +14,8 @@ from integrations.deepseek_harness.a2a import (
 from integrations.deepseek_harness.application import SudarshanApplication
 from integrations.deepseek_harness.contracts import PreparationResponse
 from pipelines.orchestrator.contracts import ContextPack
+from pipelines.common.contracts import AdvisoryRequest
+from pipelines.orchestrator.graph import _validate_context_scope
 
 
 class _PreparationStore:
@@ -47,6 +49,7 @@ def _preparation_app() -> SudarshanApplication:
             stage_id=kwargs["stage_id"],
             query=args[0],
             retrieval_trace_id="memory-snapshot-1",
+            scope={"user_id": "user-1", "case_id": "case-1"},
             context_text="bounded case context",
         )
 
@@ -105,6 +108,36 @@ def test_prepare_exposes_clarification_and_rejection_without_creating_a_run() ->
     assert clarification.clarification_questions
     assert rejected.status == "rejected"
     assert rejected.rejection_code == "INVALID_REQUEST"
+
+
+def test_context_pack_scope_is_checked_before_graph_use() -> None:
+    request = AdvisoryRequest(
+        query="Create a case briefing",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
+    )
+    pack = {
+        "scope": {"user_id": "user-1", "case_id": "case-2"},
+        "records": [],
+    }
+    try:
+        _validate_context_scope(pack, request, allow_missing_task=True)
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("cross-case ContextPack should be rejected")
+
+    unscoped = {
+        "scope": {"user_id": "user-1", "case_id": "case-1"},
+        "records": [{"content": "unverified", "scope_type": None, "scope_id": None}],
+    }
+    try:
+        _validate_context_scope(unscoped, request, allow_missing_task=True)
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("unscoped ContextPack record should be rejected")
 
 
 class _A2AApplication:

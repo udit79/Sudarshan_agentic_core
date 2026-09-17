@@ -169,18 +169,25 @@ def test_artifact_manifest_and_download_routes_use_stable_artifact_id(tmp_path, 
                 "status": "succeeded",
                 "pipeline": "presentation",
                 "classification_level": "RESTRICTED",
+                "user_id": "user-1",
+                "case_id": "case-1",
+                "task_id": "task-1",
                 "response": {"pipeline": "presentation", "artifact": {"path": str(source)}},
             }
 
     with patch("api.server.get_application", return_value=FakeApplication()):
-        manifest_response = client.get("/artifacts/run-api/presentation/manifest")
+        manifest_response = client.get(
+            "/artifacts/run-api/presentation/manifest",
+            headers={"x-operator-id": "user-1", "x-case-id": "case-1", "x-task-id": "task-1"},
+        )
 
     assert manifest_response.status_code == 200
     manifest = manifest_response.json()
     artifact_id = manifest["artifact_id"]
 
-    manifest_by_id = client.get(f"/artifacts/{artifact_id}/manifest")
-    download = client.get(f"/artifacts/{artifact_id}/download")
+    headers = {"x-operator-id": "user-1", "x-case-id": "case-1", "x-task-id": "task-1"}
+    manifest_by_id = client.get(f"/artifacts/{artifact_id}/manifest", headers=headers)
+    download = client.get(f"/artifacts/{artifact_id}/download", headers=headers)
 
     assert manifest_by_id.status_code == 200
     assert manifest_by_id.json()["sha256"] == manifest["sha256"]
@@ -205,12 +212,50 @@ def test_artifact_preview_route_returns_safe_image_preview(tmp_path, monkeypatch
         run_id="run-preview",
         kind="image",
         classification_level="RESTRICTED",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
     )
     monkeypatch.setattr("api.server.ARTIFACT_ROOT", root.resolve())
     monkeypatch.setattr("api.server.ARTIFACT_STORE", store)
 
-    response = client.get(f"/artifacts/{manifest.artifact_id}/preview")
+    response = client.get(
+        f"/artifacts/{manifest.artifact_id}/preview",
+        headers={"x-operator-id": "user-1", "x-case-id": "case-1", "x-task-id": "task-1"},
+    )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/png")
     assert response.content == source.read_bytes()
+
+
+def test_owned_artifact_route_rejects_cross_case_request(tmp_path, monkeypatch):
+    root = tmp_path / "artifacts"
+    source = root / "images" / "brief.png"
+    source.parent.mkdir(parents=True)
+    Image.new("RGB", (10, 10), color=(20, 30, 40)).save(source)
+    store = ArtifactStore(root)
+    manifest = store.register(
+        source,
+        run_id="run-owned",
+        kind="image",
+        classification_level="RESTRICTED",
+        user_id="user-1",
+        case_id="case-1",
+        task_id="task-1",
+    )
+    monkeypatch.setattr("api.server.ARTIFACT_ROOT", root.resolve())
+    monkeypatch.setattr("api.server.ARTIFACT_STORE", store)
+
+    headers = {
+        "x-operator-id": "user-1",
+        "x-case-id": "case-2",
+        "x-task-id": "task-1",
+    }
+    for path in (
+        f"/artifacts/{manifest.artifact_id}/manifest",
+        f"/artifacts/{manifest.artifact_id}/download",
+        f"/artifacts/{manifest.artifact_id}/preview",
+    ):
+        response = client.get(path, headers=headers)
+        assert response.status_code == 403

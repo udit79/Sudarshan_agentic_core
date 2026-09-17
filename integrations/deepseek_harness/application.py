@@ -212,6 +212,16 @@ class SudarshanApplication:
         self._dag: Any | None = None  # type: DependencyDAG | None
         self._dag_lock = Lock()
 
+    def _run_memory_lifecycle_pass(self) -> None:
+        """Apply local expiry at a scheduler-owned execution boundary."""
+
+        # Provider records still carry lifecycle metadata and are filtered in
+        # MemoryManager.recall.  This pass keeps the local audit/store state in
+        # sync for records whose explicit expiry has elapsed.
+        expire_due = getattr(self.orchestrator.memory_manager, "expire_due", None)
+        if callable(expire_due):
+            expire_due()
+
     @staticmethod
     def _build_control_plane() -> RedisControlPlane | None:
         """Build the optional shared control plane without changing local defaults."""
@@ -355,7 +365,7 @@ class SudarshanApplication:
         import hashlib
         import json
         from datetime import datetime, timedelta, timezone
-        from pipelines.orchestrator.graph import _context_pack
+        from pipelines.orchestrator.graph import _context_pack, _validate_context_scope
         from api.control_plane import ControlPlaneConflict
         from pipelines.orchestrator.contracts import RequestConstraints
 
@@ -400,6 +410,8 @@ class SudarshanApplication:
             top_k=min(request.top_k, 8),
             token_budget=min(request.token_budget, 1200),
         )
+        if pack is not None:
+            _validate_context_scope(pack, request, allow_missing_task=True)
 
         fingerprint = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
         selected_pipelines = list(request.requested_pipelines)
@@ -491,6 +503,7 @@ class SudarshanApplication:
         attempt_id: str | None = None,
         lease_token: str | None = None,
     ) -> dict[str, Any]:
+        self._run_memory_lifecycle_pass()
         request, run_id = self._prepare_request(payload)
         operator = (operator_id or request.user_id).strip()
         if operator != request.user_id:
@@ -623,6 +636,7 @@ class SudarshanApplication:
     ) -> dict[str, Any]:
         """Execute one admitted ingestion job without exposing source paths."""
 
+        self._run_memory_lifecycle_pass()
         if cancel_event is not None and cancel_event.is_set():
             return {"status": "cancelled", "error": "ingestion cancelled before extraction"}
         try:
@@ -1537,6 +1551,8 @@ class SudarshanApplication:
         status_response = {
             "run_id": run_id,
             "task_id": values.get("task_id"),
+            "user_id": (values.get("request") or {}).get("user_id") or self._run_contexts.get(run_id, {}).get("user_id"),
+            "case_id": (values.get("request") or {}).get("case_id") or self._run_contexts.get(run_id, {}).get("case_id"),
             "status": values.get("status"),
             "stage": values.get("stage"),
             "pipeline": values.get("pipeline"),
@@ -1656,6 +1672,9 @@ class SudarshanApplication:
         artifact_id: str,
         *,
         classification_level: str = "RESTRICTED",
+        user_id: str | None = None,
+        case_id: str | None = None,
+        task_id: str | None = None,
     ) -> dict[str, Any]:
         """Return a verified, frontend-safe artifact manifest.
 
@@ -1671,6 +1690,14 @@ class SudarshanApplication:
         root = os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts")
         manifest, _source = ArtifactStore(root).get(str(artifact_id).strip())
         require_classification_access(classification_level, manifest.classification_level)
+        if not all((manifest.user_id, manifest.case_id, manifest.task_id)):
+            raise PermissionError("artifact ownership is unavailable")
+        if not user_id or user_id != manifest.user_id:
+            raise PermissionError("artifact owner is not authorized")
+        if not case_id or case_id != manifest.case_id:
+            raise PermissionError("artifact case is not authorized")
+        if task_id != manifest.task_id:
+            raise PermissionError("artifact task is not authorized")
         # ArtifactManifest intentionally stores only the portable contract; it
         # does not expose filesystem-derived MIME/provenance attributes. Infer
         # the public media type from the manifest name and keep provenance in

@@ -70,6 +70,22 @@ Cognee boundary. The Harness is a client, not the scheduler or source of
 truth. Local child handoffs and future remote A2A handoffs use the same typed
 contracts.
 
+## HLD and LLD
+
+The README stays at the system level; detailed design remains in the human
+documentation set:
+
+| Level | Document | Covers |
+| --- | --- | --- |
+| HLD | [Engineering handbook](docs/sudarshan-2.0-engineering-handbook.md) | System boundaries, lifecycle, memory, pipelines, security, deployment, and team workflow |
+| LLD | [Pipeline orchestration](docs/internal/pipeline-orchestration.md) | Request flow, routing, memory recall, child execution, parallelism, cancellation, and delivery |
+| LLD | [Backend integration](docs/backend-integration.md) | Application/API/MCP contracts, ingestion, status, resume, and cancellation |
+| LLD | [Artifact rendering and quality](docs/artifact-rendering-and-quality.md) | PPT, infographic, diagram, video, repair, manifests, and quality gates |
+| LLD | [Ingestion architecture](docs/ingestion-architecture.md) | Extraction, evidence, provenance, budgets, cache, and Cognee projection |
+
+For navigation, use the [human documentation index](docs/human/README.md).
+The code and tests are authoritative when a document and implementation differ.
+
 ## Quick start
 
 Requirements: Windows PowerShell 7, Python 3.13+, Node.js, and configured
@@ -109,7 +125,7 @@ npm run check
 Pop-Location
 ```
 
-The latest local Python run passed 500 tests with 8 skips. This does not prove
+The latest local Python run passed 510 tests with 8 skips. This does not prove
 live MongoDB, Cognee, OpenAI, AntV SSR, external worker, or multi-host
 behavior.
 
@@ -140,6 +156,61 @@ behavior.
   duplicate admission, unauthorized scope, and degraded/fallback results.
 - Treat passing unit tests as local evidence, not production certification.
 - Keep reference repositories and their licenses separate from runtime code.
+
+## Team and credits
+
+### Adversarial Brains
+
+- **Sarthak Singh — Team Leader** · [GitHub](https://github.com/keyboard-warrior-777)
+- **Udit Jain — Agentic system design and implementation; FigmaJam pipeline design** · [GitHub](https://github.com/udit79)
+- **Ayush Gupta — Backend and frontend; backend system design** · [GitHub](https://github.com/DevDripCodes)
+- **Abhishek Padi — Ingestion pipeline and testing** · [GitHub](https://github.com/GokalaIsCool)
+- **Gaurav — PPT and frontend ideas** · [GitHub](https://github.com/Gaurav123456789000)
+- **Asmee — Communication, frontend images, and Figma designs** · [GitHub](https://github.com/asmeesaxena0777-oss)
+
+Design board: [FigmaJam](https://www.figma.com/board/Wry8irwQqC5NayI5fDqyYH/SIH26154?t=tzArXaqZqowMYnAq-0).
+
+## PPT design gallery
+
+The presentation assets are stored in
+[docs/assets/presentation](docs/assets/presentation).
+
+<details>
+<summary>Open the presentation gallery</summary>
+
+### Title page
+
+![Sudarshan title page](docs/assets/presentation/01-title-page.png)
+
+### Proposed solution
+
+![Sudarshan proposed solution](docs/assets/presentation/02-proposed-solution.png)
+
+### Technical approach and memory
+
+![Sudarshan technical approach](docs/assets/presentation/03-technical-approach-memory.png)
+
+### System architecture
+
+![Sudarshan system architecture](docs/assets/presentation/04-system-architecture.png)
+
+### Feasibility and viability
+
+![Sudarshan feasibility and viability](docs/assets/presentation/05-feasibility-viability.png)
+
+### Impact and benefits
+
+![Sudarshan impact and benefits](docs/assets/presentation/06-impact-benefits.png)
+
+### Research and references
+
+![Sudarshan research and references](docs/assets/presentation/07-research-references.png)
+
+</details>
+
+Use [the design review](docs/archive/design-review.md) to align the slides
+with the implemented routing order, memory boundaries, provider boundaries,
+and production claims.
 
 ## License
 

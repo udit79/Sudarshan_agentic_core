@@ -69,6 +69,9 @@ def run_visual_flowchart(request: AdvisoryRequest, *, cancel_event: Event | None
             artifact_kind=artifact_kind,
             renderer_id=renderer_id,
             classification_level=request.classification_level,
+            user_id=request.user_id,
+            case_id=request.case_id,
+            task_id=request.task_id,
             schema_version="flowchart-ir@1",
             source_ir_hash=stable_hash(visual.model_dump(mode="json")),
         )
