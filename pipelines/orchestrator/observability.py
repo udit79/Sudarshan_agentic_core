@@ -134,6 +134,8 @@ def runtime_event(name: str, payload: Mapping[str, Any]) -> ObservabilityEvent |
         status = "waiting"
     elif name.endswith("cancelled"):
         status = "cancelled"
+    elif name.endswith("partial"):
+        status = "partial"
     elif name.endswith(("failed", "blocked")):
         status = "failed"
     elif name.endswith("completed"):

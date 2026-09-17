@@ -1115,6 +1115,7 @@ class SudarshanApplication:
             "skill.started": ("running", 10, False),
             "skill.waiting": ("pending", 50, True),
             "skill.completed": ("succeeded", 100, False),
+            "skill.partial": ("partial", 100, False),
             "skill.failed": ("failed", 100, False),
             "skill.blocked": ("failed", 100, True),
             "skill.cancelled": ("cancelled", 100, False),

@@ -33,14 +33,14 @@ multi-agent, load, or human-review scenario is complete.
 - [x] 20. Artifact correctness (PPTX/SVG/PNG/PDF/video integrity, manifest provenance, tamper detection)
 - [ ] 21. Artifact quality (objective proxies exist; human visual review and final-slide evidence policy remain open)
 - [ ] 22. PPT benchmarking
-- [ ] 23. Provider failure
-- [ ] 24. Timeout
-- [ ] 25. Cancellation
-- [ ] 26. Retry
-- [ ] 27. Duplicate retry
-- [ ] 28. Partial/degraded output
-- [ ] 29. Memory outage (live provider integration)
-- [ ] 30. Cache miss
+- [x] 23. Provider failure (deterministic provider/HTTP boundary; live provider failures remain pending)
+- [x] 24. Timeout
+- [x] 25. Cancellation
+- [x] 26. Retry (bounded deterministic retry paths)
+- [x] 27. Duplicate retry (admission/cache protection)
+- [x] 28. Partial/degraded output
+- [x] 29. Memory outage (deterministic fallback; live backend outage remains pending)
+- [x] 30. Cache miss
 - [ ] 31. Concurrent execution
 - [ ] 32. Restart/recovery
 - [ ] 33. Artifact duplication
@@ -68,6 +68,7 @@ multi-agent, load, or human-review scenario is complete.
 - Pipeline contract matrix: `tests/component/test_pipeline_contract_matrix.py`
 - Pipeline contract report: `pipeline-contract-testing-report.md`
 - Artifact report: `artifact-testing-report.md`
+- Failure/recovery report: `failure-recovery-testing-report.md`
 - Latest isolation result: **8 passed**; artifact-evidence ownership validation
   is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and
