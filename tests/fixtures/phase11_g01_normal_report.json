@@ -1,0 +1,22 @@
+{
+  "case_id": "golden-g01",
+  "source_id": "DOC-G01",
+  "source_reference": "G01-normal-report.txt",
+  "pipeline": "executive_summary",
+  "operator_request": "Summarize the verified findings and list the unknowns.",
+  "content": "G01 Normal Report\n\nSource ID: DOC-G01\nDate: 2026-09-01\nLocation: SITE-ALPHA\n\nVerified observation 1: Three scheduled checks completed successfully.\nVerified observation 2: No service interruption was recorded.\nVerified observation 3: One follow-up review remains pending.\n\nUnknowns:\n- The source does not identify the responsible team.\n- The source does not provide the next review date.",
+  "expected_facts": [
+    "Three scheduled checks completed successfully.",
+    "No service interruption was recorded.",
+    "One follow-up review remains pending."
+  ],
+  "expected_unknowns": [
+    "The source does not identify the responsible team.",
+    "The source does not provide the next review date."
+  ],
+  "forbidden_context": [
+    "No permitted memory was recalled",
+    "SITE-BETA",
+    "User B"
+  ]
+}

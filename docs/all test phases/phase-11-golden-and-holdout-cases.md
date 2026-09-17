@@ -123,9 +123,13 @@ uses Cognee's non-generative `CHUNKS` retrieval and recovers the returned
 same-case check then returned bounded `case:golden-g01` context, while a
 different-case check returned zero results and no G01 content.
 
-The FastAPI end-to-end rerun is still required after restarting the server so
-the running process loads this adapter fix. No raw source text, credentials,
-or provider payloads are stored in this report.
+The restarted FastAPI end-to-end rerun was completed as
+`run-g01-live-04`. Memory recall recovered one bounded permitted record and
+the real executive-summary agents ran twice. The quality gate rejected both
+drafts, so no artifact was released. The rejected response was preserved for
+diagnosis, but it was not treated as a successful result or written back as a
+case summary. No raw source text, credentials, or provider payloads are stored
+in this report.
 
 ### PASS
 
@@ -135,11 +139,25 @@ or provider payloads are stored in this report.
   conditions are recorded.
 - Live Cognee same-case recall recovered bounded G01 context after the adapter
   fix; a different-case recall returned no G01 content.
+- The offline G01 replay fixture can build a task-scoped, case-scoped
+  grounding ContextPack with the expected facts, unknowns, and source
+  reference (`tests/component/test_phase11_g01_fixture.py`).
+
+### FAIL
+
+- `run-g01-live-04` ended with `status=failed` after two quality-gate attempts.
+  The live model output made unsupported conclusions, treated tasking metadata
+  as evidence, and overstated confidence. `artifact_count=0` and no rejected
+  draft was released as a successful artifact.
+- The live run's aggregate telemetry reported zero provider tokens and zero
+  latency despite real memory/provider work. This is a measurement gap, not
+  evidence that the request was free.
 
 ### NOT YET IMPLEMENTED
 
 - Actual live execution of these cases.
-- Post-fix G01 pipeline execution through the restarted FastAPI process.
+- Successful live execution of G01 with a grounded artifact.
+- Live execution of G02-G10 and the holdout cases.
 - Automated benchmark runner and p50/p95 aggregation.
 - Final claim/evidence scoring rubric and human review scores.
 
@@ -148,6 +166,10 @@ or provider payloads are stored in this report.
 - Exact insufficient-context status and whether a blocked case may produce a
   clarification artifact.
 - Minimum evidence coverage score for each pipeline.
+- Whether operational task-event memory should be excluded from grounding
+  context or carried with an explicit non-evidence type.
+- Whether live quality rejection should expose a safe failure summary and
+  quality status in the standard run projection.
 - Whether G10 child failure makes the parent `partial` or `failed`.
 - Exact visual-quality rubric for PPTX and infographic output.
 
