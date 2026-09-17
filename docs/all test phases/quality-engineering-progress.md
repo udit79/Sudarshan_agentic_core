@@ -74,6 +74,7 @@ multi-agent, load, or human-review scenario is complete.
 - Latest Phase 9 matrix result: **7 passed**; affected regression: **149 passed, 1 warning**
 - First-half audit: `first-half-quality-audit.md`
 - Latest full deterministic local regression: **677 passed, 8 skipped, 32 warnings**
+- Phase 11 golden/holdout catalogue: `phase-11-golden-and-holdout-cases.md`; live execution pending
 - Latest isolation result: **8 passed**; artifact-evidence ownership validation
   is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and
