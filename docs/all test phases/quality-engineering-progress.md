@@ -41,9 +41,9 @@ multi-agent, load, or human-review scenario is complete.
 - [x] 28. Partial/degraded output
 - [x] 29. Memory outage (deterministic fallback; live backend outage remains pending)
 - [x] 30. Cache miss
-- [ ] 31. Concurrent execution
-- [ ] 32. Restart/recovery
-- [ ] 33. Artifact duplication
+- [x] 31. Concurrent execution (duplicate submission and parallel case-scoped runs)
+- [x] 32. Restart/recovery (deterministic durable queue/DAG/progress fixtures; live process-kill test remains pending)
+- [x] 33. Artifact duplication (stable same-run/content manifest identity)
 - [ ] 34. Status
 - [ ] 35. DAG
 - [ ] 36. Trajectory
@@ -69,6 +69,7 @@ multi-agent, load, or human-review scenario is complete.
 - Pipeline contract report: `pipeline-contract-testing-report.md`
 - Artifact report: `artifact-testing-report.md`
 - Failure/recovery report: `failure-recovery-testing-report.md`
+- Execution safety report: `execution-safety-testing-report.md`
 - Latest isolation result: **8 passed**; artifact-evidence ownership validation
   is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and
