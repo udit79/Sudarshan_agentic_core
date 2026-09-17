@@ -17,6 +17,7 @@ from typing import Any, Mapping
 from api.artifacts import ArtifactStore
 from api.control_plane import ControlPlane
 from api.dag_scheduler import DAGSchedulerBridge
+from ingestion_pipelines.evidence_index import EvidenceIndex
 from pipelines.orchestrator.contracts import NodeSpec
 from pipelines.orchestrator.dag import DAGNodeState, DependencyDAG
 from pipelines.ppt.flowchart import layout_flowchart, render_flowchart_pptx, render_flowchart_svg
@@ -41,8 +42,19 @@ class PresentationVerticalSlice:
         queue_db_path: str | Path | None = None,
         max_workers: int | None = None,
         control_plane: ControlPlane | None = None,
+        evidence_index: EvidenceIndex | None = None,
     ) -> None:
-        self.artifact_store = ArtifactStore(artifact_root or os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts"))
+        resolved_artifact_root = Path(artifact_root or os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts"))
+        self.evidence_index = evidence_index or EvidenceIndex(
+            os.getenv(
+                "SUDARSHAN_EVIDENCE_INDEX_DB_PATH",
+                str(resolved_artifact_root / ".state" / "evidence_index.db"),
+            )
+        )
+        self.artifact_store = ArtifactStore(
+            resolved_artifact_root,
+            evidence_scope_verifier=self.evidence_index,
+        )
         dag_path = dag_db_path or os.getenv("SUDARSHAN_PPT_DAG_DB_PATH", "artifacts/.state/presentation_dag.db")
         queue_path = queue_db_path or os.getenv("SUDARSHAN_PPT_DAG_QUEUE_DB_PATH", "artifacts/.state/presentation_dag_queue.db")
         worker_count = max_workers or int(os.getenv("SUDARSHAN_PPT_DAG_MAX_WORKERS", "2"))

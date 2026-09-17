@@ -64,6 +64,9 @@ multi-agent, load, or human-review scenario is complete.
 - Memory matrix: `tests/component/test_memory_behaviour_matrix.py`
 - Latest memory matrix result: **20 passed**
 - Latest memory-focused regression result: **53 passed**
+- Isolation matrix: `tests/component/test_case_isolation_matrix.py`
+- Latest isolation result: **8 passed**; artifact-evidence ownership validation
+  is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and
   multi-agent consistency are intentionally later phases.
 
