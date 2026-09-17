@@ -257,6 +257,7 @@ class SQLiteObservabilityStore:
             wait_reason=event.wait_reason or (event.message if event.requires_action else ""),
             error_code=event.error_code,
             usage=event.usage,
+            usage_id=event.usage_id,
         ))
 
     def events(
@@ -287,40 +288,7 @@ class SQLiteObservabilityStore:
         operator_id: str | None = None,
     ) -> TelemetrySummary:
         events = self.events(run_id, access_level=access_level, operator_id=operator_id)
-        artifact_ids: set[str] = set()
-        child_ids: set[str] = set()
-        quality_ids: set[str] = set()
-        summary = TelemetrySummary(event_count=len(events))
-        for event in events:
-            artifact_ids.update(event.artifact_ids)
-            if event.child_id:
-                child_ids.add(event.child_id)
-            if event.quality_report_id:
-                quality_ids.add(event.quality_report_id)
-            if event.cache_status == "hit":
-                summary.cache_hits += 1
-            elif event.cache_status == "miss":
-                summary.cache_misses += 1
-            elif event.cache_status == "wait":
-                summary.cache_waits += 1
-            if event.status in {"waiting", "waiting_for_input", "waiting_for_approval", "pending"} or event.wait_reason:
-                summary.wait_count += 1
-            if event.usage is not None:
-                summary.input_tokens += event.usage.input_tokens
-                summary.output_tokens += event.usage.output_tokens
-                summary.reasoning_tokens += event.usage.reasoning_tokens
-                summary.tool_calls += event.usage.tool_calls
-                summary.latency_ms += event.usage.latency_ms
-                summary.estimated_cost += event.usage.estimated_cost
-                summary.usage_is_estimate = summary.usage_is_estimate or event.usage.is_estimate
-            summary.last_stage = event.stage
-            summary.last_status = event.status
-        return summary.model_copy(update={
-            "child_count": len(child_ids),
-            "artifact_count": len(artifact_ids),
-            "quality_report_count": len(quality_ids),
-            "estimated_cost": round(summary.estimated_cost, 8),
-        })
+        return _summary_from_events(events)
 
     def safe_dashboard(
         self,

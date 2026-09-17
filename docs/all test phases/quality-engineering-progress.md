@@ -44,11 +44,11 @@ multi-agent, load, or human-review scenario is complete.
 - [x] 31. Concurrent execution (duplicate submission and parallel case-scoped runs)
 - [x] 32. Restart/recovery (deterministic durable queue/DAG/progress fixtures; live process-kill test remains pending)
 - [x] 33. Artifact duplication (stable same-run/content manifest identity)
-- [ ] 34. Status
-- [ ] 35. DAG
-- [ ] 36. Trajectory
-- [ ] 37. Observability
-- [ ] 38. Telemetry
+- [x] 34. Status (deterministic projection agreement; crash-authority policy remains open)
+- [x] 35. DAG (public dependency/status/output projection)
+- [x] 36. Trajectory (safe event timeline and parallel lanes)
+- [x] 37. Observability (memory/provider/error visibility with redaction)
+- [x] 38. Telemetry (latency/usage/cost projection with duplicate receipt protection)
 - [ ] 39. Full regression
 - [ ] 40. Golden cases
 - [ ] 41. Holdout cases
@@ -70,6 +70,8 @@ multi-agent, load, or human-review scenario is complete.
 - Artifact report: `artifact-testing-report.md`
 - Failure/recovery report: `failure-recovery-testing-report.md`
 - Execution safety report: `execution-safety-testing-report.md`
+- Observability/telemetry report: `observability-telemetry-testing-report.md`
+- Latest Phase 9 matrix result: **7 passed**; affected regression: **149 passed, 1 warning**
 - Latest isolation result: **8 passed**; artifact-evidence ownership validation
   is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and
