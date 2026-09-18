@@ -1,0 +1,67 @@
+{
+  "dataset": "benchmark-results.json",
+  "charts": [
+    {
+      "file": "objective-test-outcomes.png",
+      "record_ids": [
+        "suite-ingestion-matrix-20260917",
+        "suite-memory-matrix-20260917",
+        "suite-artifact-pipeline-precommit-20260917",
+        "suite-phase11-focused-20260918",
+        "suite-full-regression-20260918"
+      ],
+      "data_columns": [
+        "test_counts.passed",
+        "test_counts.failed",
+        "test_counts.skipped"
+      ]
+    },
+    {
+      "file": "offline-test-suite-duration.png",
+      "record_ids": [
+        "suite-ingestion-matrix-20260917",
+        "suite-memory-matrix-20260917",
+        "suite-artifact-pipeline-precommit-20260917",
+        "suite-phase11-focused-20260918",
+        "suite-full-regression-20260918"
+      ],
+      "data_columns": [
+        "duration_ms"
+      ]
+    },
+    {
+      "file": "live-g01-token-usage.png",
+      "record_ids": [
+        "case-g01-live-usage-20260918"
+      ],
+      "data_columns": [
+        "objective_metrics.token_usage.input",
+        "objective_metrics.token_usage.output",
+        "objective_metrics.token_usage.reasoning"
+      ]
+    },
+    {
+      "file": "live-g01-timing.png",
+      "record_ids": [
+        "case-g01-live-usage-20260918"
+      ],
+      "data_columns": [
+        "operational_measurements.admission_ms",
+        "operational_measurements.memory_recall_ms_first",
+        "operational_measurements.memory_recall_ms_second",
+        "duration_ms"
+      ]
+    },
+    {
+      "file": "offline-harness-capabilities.png",
+      "record_ids": [
+        "benchmark-harness-boundary-20260918"
+      ],
+      "data_columns": [
+        "operational_measurements.full_mcp_tools",
+        "operational_measurements.artifact_profile_tools",
+        "operational_measurements.renderer_count"
+      ]
+    }
+  ]
+}

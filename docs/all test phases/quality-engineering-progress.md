@@ -53,8 +53,8 @@ multi-agent, load, or human-review scenario is complete.
 - [ ] 40. Golden cases (G01 live recall recovered; quality gate rejected the final draft; replay fixture added)
 - [ ] 41. Holdout cases
 - [ ] 42. External AI baseline
-- [ ] 43. Quality metrics
-- [ ] 44. Matplotlib charts
+- [x] 43. Quality metrics (sanitized objective dataset separates measured, unavailable, and human-review fields; live quality remains open)
+- [x] 44. Matplotlib charts (traceable CSV/PNG export and chart manifest; repeated live percentiles remain open)
 - [ ] 45. Final test report
 
 ## Evidence
@@ -73,7 +73,7 @@ multi-agent, load, or human-review scenario is complete.
 - Observability/telemetry report: `observability-telemetry-testing-report.md`
 - Latest Phase 9 matrix result: **7 passed**; affected regression: **149 passed, 1 warning**
 - First-half audit: `first-half-quality-audit.md`
-- Latest full deterministic local regression: **697 passed, 8 skipped, 32 warnings**
+- Latest full deterministic local regression: **703 passed, 8 skipped, 32 warnings**
 - Phase 11 golden/holdout catalogue: `phase-11-golden-and-holdout-cases.md`
 - Agentic performance/cost measurement report: `agentic-system-performance-and-cost-report.md`
 - Live G01 checkpoint: same-case bounded context recovered and other-case
@@ -98,6 +98,10 @@ multi-agent, load, or human-review scenario is complete.
   is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and
   multi-agent consistency are intentionally later phases.
+- Benchmark results checkpoint: `benchmark-results/benchmark-results-report.md`
+- Benchmark source dataset: `benchmark-results/benchmark-results.json`
+- Benchmark charts and traceability manifest: `benchmark-results/*.png`,
+  `benchmark-results/benchmark-results.csv`, and `benchmark-results/chart-manifest.json`
 
 ## Open decisions carried forward
 

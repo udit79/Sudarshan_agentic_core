@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "classification": "RESTRICTED",
+  "sanitized": true,
+  "golden": [
+    {
+      "case_id": "G01",
+      "name": "normal-report",
+      "source_information": "Fictional field report with three verified observations and two explicit unknowns.",
+      "source_document_ids": ["DOC-G01"],
+      "operator_request": "Summarize the verified findings and list the unknowns.",
+      "expected_evidence": ["DOC-G01 verified observations", "DOC-G01 explicit unknowns"],
+      "pipelines": ["executive_summary"],
+      "constraints": ["250-400 words", "preserve uncertainty", "no new facts"],
+      "artifact_properties": ["readable text", "source references", "no placeholders"],
+      "failure_conditions": ["invented fact", "omitted unknown", "missing provenance"]
+    },
+    {
+      "case_id": "G02",
+      "name": "incident-report",
+      "source_information": "Fictional incident timeline containing detection, containment, impact estimate, and recovery timestamps.",
+      "source_document_ids": ["DOC-G02"],
+      "operator_request": "Create an incident briefing for the duty operator.",
+      "expected_evidence": ["detection event", "containment action", "impact estimate", "recovery status"],
+      "pipelines": ["executive_summary"],
+      "constraints": ["chronological order", "label estimates", "do not overstate recovery"],
+      "artifact_properties": ["structured headings", "timestamps", "source-linked claims"],
+      "failure_conditions": ["reordered timeline", "estimate stated as fact", "overstated recovery"]
+    },
+    {
+      "case_id": "G03",
+      "name": "advisory",
+      "source_information": "Fictional verified observations and three response options with stated trade-offs.",
+      "source_document_ids": ["DOC-G03"],
+      "operator_request": "Recommend the safest next action and explain alternatives.",
+      "expected_evidence": ["observation IDs", "option trade-offs", "labelled recommendation"],
+      "pipelines": ["advisory"],
+      "constraints": ["evidence-linked recommendation", "human approval where configured"],
+      "artifact_properties": ["recommendation", "rationale", "risks", "approval state"],
+      "failure_conditions": ["unsupported recommendation", "missing trade-off", "automatic publication"]
+    },
+    {
+      "case_id": "G04",
+      "name": "research-document",
+      "source_information": "Fictional research note with definitions, method, limitations, and a comparison table.",
+      "source_document_ids": ["DOC-G04"],
+      "operator_request": "Produce a concise research brief for a technical reviewer.",
+      "expected_evidence": ["definitions", "comparison values", "method", "limitations"],
+      "pipelines": ["executive_summary"],
+      "constraints": ["preserve limitations", "do not upgrade notes into certainty"],
+      "artifact_properties": ["sections", "table preserved or safely represented"],
+      "failure_conditions": ["omitted limitation", "changed table value", "unsupported conclusion"]
+    },
+    {
+      "case_id": "G05",
+      "name": "multi-document",
+      "source_information": "Three fictional documents with distinct baseline, follow-up, and glossary content.",
+      "source_document_ids": ["DOC-G05-A", "DOC-G05-B", "DOC-G05-C"],
+      "operator_request": "Combine these documents into one case brief.",
+      "expected_evidence": ["facts retain source document IDs", "glossary is not new evidence"],
+      "pipelines": ["executive_summary", "presentation"],
+      "constraints": ["cross-document synthesis", "one fixed case scope"],
+      "artifact_properties": ["summary", "PPTX", "manifest links to all three documents"],
+      "failure_conditions": ["wrong attribution", "foreign-case content", "missing manifest link"]
+    },
+    {
+      "case_id": "G06",
+      "name": "stale-updated",
+      "source_information": "Fictional old deadline superseded by a later update with a new deadline.",
+      "source_document_ids": ["DOC-G06-OLD", "DOC-G06-UPDATE"],
+      "operator_request": "Report the current deadline and explain the change.",
+      "expected_evidence": ["new deadline", "update date", "supersession relationship", "old value as history"],
+      "pipelines": ["executive_summary"],
+      "constraints": ["latest active evidence wins", "preserve stale provenance"],
+      "artifact_properties": ["current value", "historical replacement explanation"],
+      "failure_conditions": ["old value presented as current", "ignored update", "invented supersession"]
+    },
+    {
+      "case_id": "G07",
+      "name": "low-context",
+      "source_information": "One fictional sentence with no date, subject, source, or supporting evidence.",
+      "source_document_ids": ["DOC-G07"],
+      "operator_request": "Create a complete operational briefing.",
+      "expected_evidence": ["insufficient evidence", "clarification requirement"],
+      "pipelines": ["executive_summary"],
+      "constraints": ["must not hallucinate", "no forced artifact"],
+      "artifact_properties": ["waiting_for_input or blocked result according to final policy"],
+      "failure_conditions": ["successful-looking invented briefing"]
+    },
+    {
+      "case_id": "G08",
+      "name": "large-input",
+      "source_information": "Sanitized fictional numbered corpus near the configured ingestion limit.",
+      "source_document_ids": ["DOC-G08-CORPUS"],
+      "operator_request": "Extract recurring verified findings and produce a bounded summary.",
+      "expected_evidence": ["sampled or chunked evidence", "correct source references", "bounded claims"],
+      "pipelines": ["executive_summary"],
+      "constraints": ["bounded context", "token budget", "preserve source map"],
+      "artifact_properties": ["complete text artifact", "safe chunk/source counts"],
+      "failure_conditions": ["memory exhaustion", "truncated provenance", "silent partial success"]
+    },
+    {
+      "case_id": "G09",
+      "name": "conflicting-evidence",
+      "source_information": "Two fictional observations report different counts at different times without explicit supersession.",
+      "source_document_ids": ["DOC-G09-A", "DOC-G09-B"],
+      "operator_request": "Explain the discrepancy and advise what must be verified.",
+      "expected_evidence": ["both claims", "timestamps", "explicit unresolved conflict"],
+      "pipelines": ["advisory"],
+      "constraints": ["do not select a winner without evidence", "recommend verification"],
+      "artifact_properties": ["conflict marked", "no definitive unsupported count"],
+      "failure_conditions": ["silent selection", "hidden conflict", "fabricated resolution"]
+    },
+    {
+      "case_id": "G10",
+      "name": "multiple-deliverables",
+      "source_information": "One fictional case brief with verified findings, timeline, and a small trend table.",
+      "source_document_ids": ["DOC-G10"],
+      "operator_request": "Create a summary, two-slide presentation, and infographic for review.",
+      "expected_evidence": ["shared permitted evidence set", "matching facts across deliverables"],
+      "pipelines": ["executive_summary", "presentation", "infographic"],
+      "constraints": ["exactly 2 slides", "consistent title and theme", "safe SVG rules"],
+      "artifact_properties": ["three distinct artifacts", "stable manifests", "shared case/task ownership"],
+      "failure_conditions": ["wrong slide count", "inconsistent facts", "duplicate or foreign artifact", "hidden child failure"]
+    }
+  ],
+  "holdout": [
+    {
+      "case_id": "H01",
+      "name": "inspection-uncertainty",
+      "source_information": "Fictional infrastructure inspection note with two confirmed observations and one unavailable measurement.",
+      "source_document_ids": ["DOC-H01"],
+      "operator_request": "Prepare a reviewer brief and identify what cannot yet be concluded.",
+      "expected_evidence": ["two observations", "unavailable measurement", "uncertainty boundary"],
+      "pipelines": ["executive_summary"],
+      "constraints": ["preserve uncertainty", "no invented measurement"],
+      "artifact_properties": ["source references", "explicit unknowns"],
+      "failure_conditions": ["invented measurement", "unsupported conclusion"]
+    },
+    {
+      "case_id": "H02",
+      "name": "ambiguous-maintenance-status",
+      "source_information": "Fictional maintenance log and follow-up note with changed status but no explicit supersession field.",
+      "source_document_ids": ["DOC-H02-LOG", "DOC-H02-FOLLOWUP"],
+      "operator_request": "State the current status and flag any ambiguity.",
+      "expected_evidence": ["both status values", "dates", "ambiguity"],
+      "pipelines": ["advisory"],
+      "constraints": ["conservative stale/conflict handling", "clarify when needed"],
+      "artifact_properties": ["status explanation", "verification recommendation"],
+      "failure_conditions": ["silent status choice", "invented supersession"]
+    },
+    {
+      "case_id": "H03",
+      "name": "multilingual-source",
+      "source_information": "Fictional multilingual snippets containing a date, count, and internal code.",
+      "source_document_ids": ["DOC-H03"],
+      "operator_request": "Create a short case brief with source references.",
+      "expected_evidence": ["exact date", "exact count", "internal code", "source reference"],
+      "pipelines": ["executive_summary"],
+      "constraints": ["preserve Unicode", "do not invent translation claims"],
+      "artifact_properties": ["short brief", "provenance", "exact values"],
+      "failure_conditions": ["changed number", "lost Unicode", "unsupported translation claim"]
+    }
+  ]
+}

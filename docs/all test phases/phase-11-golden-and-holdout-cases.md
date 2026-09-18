@@ -148,6 +148,12 @@ in this report.
   wall, provider, usage, cache, artifact, and quality fields separate. Its
   focused matrix passed 3/3 tests; unavailable values remain `null` rather
   than being reported as zero.
+- The machine-readable catalogue at
+  `tests/fixtures/phase11_case_catalog.json` contains all 10 golden and 3
+  holdout cases. `tests/component/test_phase11_case_catalog.py` passed **3
+  tests in 0.06 seconds**, including disjointness, supported-pipeline
+  assignment, required evaluation contracts, and secret-free catalogue
+  checks.
 - An explicit `provider_token_budget` now admits one provider attempt and
   denies retry admission after that attempt. The offline spend-guard matrix
   passed 5/5 tests. This contains retry multiplication but is not yet a
