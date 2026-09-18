@@ -49,7 +49,7 @@ multi-agent, load, or human-review scenario is complete.
 - [x] 36. Trajectory (safe event timeline and parallel lanes)
 - [x] 37. Observability (memory/provider/error visibility with redaction)
 - [x] 38. Telemetry (latency/usage/cost projection with duplicate receipt protection)
-- [x] 39. Full regression (697 passed, 8 skipped, 32 warnings in documented local mode; Cloud-configured API run remains pending)
+- [x] 39. Full regression (latest: 705 passed, 8 skipped, 32 warnings; Cloud-configured API run remains pending)
 - [ ] 40. Golden cases (G01 live recall recovered; quality gate rejected the final draft; replay fixture added)
 - [ ] 41. Holdout cases
 - [ ] 42. External AI baseline
@@ -73,7 +73,7 @@ multi-agent, load, or human-review scenario is complete.
 - Observability/telemetry report: `observability-telemetry-testing-report.md`
 - Latest Phase 9 matrix result: **7 passed**; affected regression: **149 passed, 1 warning**
 - First-half audit: `first-half-quality-audit.md`
-- Latest full deterministic local regression: **703 passed, 8 skipped, 32 warnings**
+- Latest full deterministic local regression: **705 passed, 8 skipped, 32 warnings**
 - Phase 11 golden/holdout catalogue: `phase-11-golden-and-holdout-cases.md`
 - Agentic performance/cost measurement report: `agentic-system-performance-and-cost-report.md`
 - Live G01 checkpoint: same-case bounded context recovered and other-case
@@ -92,6 +92,9 @@ multi-agent, load, or human-review scenario is complete.
 - Offline retry-spend guard matrix: **5 passed**; explicit provider budgets
   deny a second provider attempt, while provider-native first-request caps
   remain open.
+- GPT-5 provider-parameter compatibility: **14 focused tests passed**; the
+  budgeted GPT-5 request contains `max_completion_tokens` and no legacy
+  `max_tokens`, while legacy model routing remains unchanged.
 - Budgeted prompt/output-bound matrix: **9 passed**; dynamic fields are
   bounded and completion caps are applied without changing the default path.
 - Latest isolation result: **8 passed**; artifact-evidence ownership validation
@@ -111,3 +114,23 @@ multi-agent, load, or human-review scenario is complete.
 - Define semantic relevance thresholds for positive provider scores.
 - Provide Cognee Cloud credentials before live integration tests; the current
   deterministic memory phase does not require them.
+- Re-run one controlled G01 generation request after the compatibility fix;
+  only then record real provider latency, usage, cost, and artifact quality.
+- Corrected live G01 rerun: **provider parameter accepted; 1,385 provider-
+  reported tokens; 23,559 ms wall time; structured response hit the 240-token
+  cap; no artifact**. The remaining issue is budget allocation, not the old
+  `max_tokens` incompatibility.
+- G01 budget experiments: **600-token cap failed after 33,247 ms; 1,200-token
+  cap failed after 59,266 ms**. The first two analysis stages completed at
+  1,200, but the final structured response still exceeded the cap. A
+  contract-specific `provider_output_token_budget` override is now tested
+  offline; no further paid run was started.
+- Final G01 controlled budget run: **12,000 configured vs 66,084 observed
+  provider tokens; 55,399 ms wall time; no artifact**. All four pipeline
+  stages reached completion events, but the spend guard correctly failed the
+  run. Phase 11 live artifact generation remains open and cost-bounding is now
+  the priority.
+- Phase 11A token-optimization route: `phase-11-token-optimization.md`.
+  Documentation is complete; additive preflight/reservation implementation and
+  offline tests are the next checkpoint. The LLM key should remain disabled
+  until that checkpoint passes.

@@ -112,3 +112,51 @@ def test_text_flow_keeps_default_inputs_unchanged_without_provider_budget() -> N
 
     assert inputs["query"] == state.query
     assert inputs["memory_context"] == state.memory_context
+
+
+def test_budgeted_gpt5_request_uses_provider_native_completion_token_parameter(monkeypatch) -> None:
+    monkeypatch.setenv("CREWAI_MODEL", "openai/gpt-5.4")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-no-network-key")
+    flow = SimpleNamespace(
+        state=TaskState(provider_token_budget=1200),
+        llm=None,
+    )
+
+    llm = TextTransformationFlow._budgeted_llm(flow)
+    params = llm._prepare_completion_params("test")
+
+    assert params["max_completion_tokens"] == 240
+    assert "max_tokens" not in params
+
+
+def test_budgeted_non_gpt5_request_keeps_legacy_max_tokens(monkeypatch) -> None:
+    monkeypatch.setenv("CREWAI_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-no-network-key")
+    flow = SimpleNamespace(
+        state=TaskState(provider_token_budget=1200),
+        llm=None,
+    )
+
+    llm = TextTransformationFlow._budgeted_llm(flow)
+    params = llm._prepare_completion_params("test")
+
+    assert params["max_tokens"] == 240
+    assert "max_completion_tokens" not in params
+
+
+def test_pipeline_can_declare_a_contract_specific_completion_budget(monkeypatch) -> None:
+    monkeypatch.setenv("CREWAI_MODEL", "openai/gpt-5.4")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-no-network-key")
+    flow = SimpleNamespace(
+        state=TaskState(
+            provider_token_budget=6000,
+            pipeline_options={"provider_output_token_budget": 2400},
+        ),
+        llm=None,
+    )
+
+    llm = TextTransformationFlow._budgeted_llm(flow)
+    params = llm._prepare_completion_params("test")
+
+    assert params["max_completion_tokens"] == 2400
+    assert "max_tokens" not in params

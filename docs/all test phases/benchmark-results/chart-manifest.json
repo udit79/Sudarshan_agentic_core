@@ -8,7 +8,8 @@
         "suite-memory-matrix-20260917",
         "suite-artifact-pipeline-precommit-20260917",
         "suite-phase11-focused-20260918",
-        "suite-full-regression-20260918"
+        "suite-full-regression-20260918",
+        "suite-gpt5-token-compatibility-20260918"
       ],
       "data_columns": [
         "test_counts.passed",
@@ -23,7 +24,8 @@
         "suite-memory-matrix-20260917",
         "suite-artifact-pipeline-precommit-20260917",
         "suite-phase11-focused-20260918",
-        "suite-full-regression-20260918"
+        "suite-full-regression-20260918",
+        "suite-gpt5-token-compatibility-20260918"
       ],
       "data_columns": [
         "duration_ms"

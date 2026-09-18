@@ -139,6 +139,10 @@ class TextTransformationFlow(Flow[TaskState]):
             "resolved_memory_records": request.metadata.get("resolved_memory_records", []),
             **dict(request.metadata.get("pipeline_options", {})),
         }
+        if "provider_output_token_budget" in request.metadata:
+            self.state.pipeline_options["provider_output_token_budget"] = request.metadata.get(
+                "provider_output_token_budget"
+            )
         if "provider_input_token_budget" in request.metadata:
             self.state.pipeline_options["provider_input_token_budget"] = request.metadata.get(
                 "provider_input_token_budget"
@@ -352,17 +356,51 @@ class TextTransformationFlow(Flow[TaskState]):
 
         if self.state.provider_token_budget is None:
             return self.llm
-        cap = output_tokens_per_call(self.state.provider_token_budget)
+        raw_output_budget = self.state.pipeline_options.get("provider_output_token_budget")
+        if isinstance(raw_output_budget, int) and raw_output_budget >= 256:
+            cap = raw_output_budget
+        else:
+            cap = output_tokens_per_call(self.state.provider_token_budget)
         configured = ProviderRouter.configured_model("text", self.llm)
         if isinstance(configured, str) and configured.strip():
             from crewai import LLM
 
-            return LLM(model=configured.strip(), max_tokens=cap)
+            model = configured.strip()
+            if TextTransformationFlow._uses_completion_token_parameter(model):
+                # CrewAI's normal ``max_completion_tokens`` field is translated
+                # back to ``max_tokens`` by its request builder.  Keep both
+                # fields empty and inject the provider-native parameter so
+                # GPT-5-family APIs receive only ``max_completion_tokens``.
+                return LLM(
+                    model=model,
+                    max_tokens=None,
+                    max_completion_tokens=None,
+                    additional_params={"max_completion_tokens": cap},
+                )
+            return LLM(model=model, max_tokens=cap)
         if self.llm is not None and callable(getattr(self.llm, "model_copy", None)):
+            if TextTransformationFlow._uses_completion_token_parameter(self.llm):
+                additional_params = dict(getattr(self.llm, "additional_params", {}) or {})
+                additional_params["max_completion_tokens"] = cap
+                return self.llm.model_copy(
+                    update={
+                        "max_tokens": None,
+                        "max_completion_tokens": None,
+                        "additional_params": additional_params,
+                    }
+                )
             return self.llm.model_copy(update={"max_tokens": cap})
         raise RuntimeError(
             "PROVIDER_BUDGET_UNAPPLIED: explicit provider budget requires a cloneable or configured LLM"
         )
+
+    @staticmethod
+    def _uses_completion_token_parameter(model: object) -> bool:
+        """Identify model families that reject the legacy ``max_tokens`` key."""
+
+        model_name = str(getattr(model, "model", model) or "").strip().lower()
+        model_name = model_name.rsplit("/", 1)[-1]
+        return model_name.startswith(("gpt-5", "o1", "o3", "o4"))
 
     def _crew_inputs(self, quality_feedback: str) -> dict[str, Any]:
         """Bound dynamic prompt fields without changing the default path."""

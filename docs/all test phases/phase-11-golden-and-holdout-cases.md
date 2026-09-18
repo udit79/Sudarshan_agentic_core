@@ -144,6 +144,9 @@ in this report.
   reference (`tests/component/test_phase11_g01_fixture.py`).
 - The first controlled live run returned non-zero provider counters and wall
   time through the sanitized telemetry projection.
+- A fresh live G01 ingestion retry succeeded after the API was restarted in a
+  network-capable process context: HTTP 201, evidence indexed, one chunk,
+  complete source map, and `memory_persisted=true`.
 - A sanitized Phase 11 benchmark-record builder now keeps admission, queue,
   wall, provider, usage, cache, artifact, and quality fields separate. Its
   focused matrix passed 3/3 tests; unavailable values remain `null` rather
@@ -174,11 +177,84 @@ in this report.
   evidence that the request was free.
 - The measured run's quality gate rejected the output and released no artifact;
   Phase 11 is not a successful golden-case result yet.
+- The next controlled G01 generation request was admitted with HTTP 202 but
+  stopped after 4,061 ms with `PROVIDER_TOKEN_BUDGET_EXCEEDED:
+  retry admission denied`. No artifact or provider request ID was returned;
+  telemetry recorded zero tokens. The server log identifies the root cause:
+  the configured GPT-5.4 route rejected `max_tokens` and requires
+  `max_completion_tokens`; the spend guard then prevented a retry. This is a
+  genuine compatibility defect at `pipelines/common/text_generation.py`, not
+  a successful artifact result.
 - `token_budget=1200` did not cap the observed 35,330 provider-reported tokens.
   This is a spend-control product gap, not a test weakness.
 - The local guard cannot undo system-prompt or provider-side accounting that
   exceeds the first-request budget; a true total-token ceiling still requires
   provider receipt enforcement and a final prompt-size policy.
+
+### Provider compatibility checkpoint — 2026-09-18
+
+The live failure identified a real request-parameter defect: the configured
+GPT-5.4 route was receiving the legacy `max_tokens` parameter. The targeted
+fix in `pipelines/common/text_generation.py` keeps the existing budget and
+retry policy, but sends GPT-5-family requests only the provider-native
+`max_completion_tokens` parameter. Legacy model families retain the existing
+`max_tokens` path.
+
+The regression test checks CrewAI's prepared request dictionary, so it proves
+the parameter that would be sent without spending provider credits. The
+focused compatibility/provider tests passed **14/14**, affected pipeline
+tests passed **107/107**, and the full offline regression passed **705**, with
+8 skipped and 32 warnings. The prior live failure remains recorded as an
+important baseline; it was not deleted or relabeled as a success.
+
+### Controlled live rerun after the compatibility fix — 2026-09-18
+
+The fresh run `phase11-g01-live-fixed-20260918-143649` confirmed that the
+`max_completion_tokens` request reached GPT-5.4. The provider reported 1,145
+prompt tokens and 240 completion tokens, for 1,385 total provider-reported
+tokens. The run took 23,559 ms at the application/CrewAI wall-clock boundary.
+
+It still failed safely because the structured response reached the 240-token
+per-call cap and could not be parsed. No artifact was released, and the
+existing spend guard denied a retry. This is now a separate budget-allocation
+finding: the current 1,200-token total budget is incompatible with the
+requested 250–400-word structured executive-summary constraint. No further
+paid live run was started after this result.
+
+### Budget-cap experiments — 2026-09-18
+
+Two additional single-run experiments used the same sanitized G01 request:
+
+- `provider_token_budget=3000` produced a 600-token per-call cap. The
+  structured response reached that cap and failed parsing after 33,247 ms.
+- `provider_token_budget=6000` produced a 1,200-token per-call cap. The first
+  two analysis stages completed, but the final structured response reached the
+  cap and failed parsing after 59,266 ms.
+
+Both runs failed safely, released no artifact, and did not retry. These are
+not reasons to keep increasing the live budget blindly. They show that the
+existing five-way output allocation is not a reliable contract for the
+executive-summary pipeline. An additive `provider_output_token_budget` request
+override is now available in the common text-generation boundary; it changes
+only the completion cap for a pipeline while retaining the existing total
+budget and retry guard. It has been covered by offline regression tests but
+has not yet been used in another paid live run.
+
+### Final controlled G01 budget run — 2026-09-18
+
+The authorized run `phase11-g01-live-budget12000-20260918-145924` used a
+12,000-token total budget and a 2,400-token per-call output cap. The provider
+accepted the corrected GPT-5.4 request. All four executive-summary stages
+reached completion events, but the aggregate provider receipt reported 54,165
+input tokens and 11,919 output tokens, or **66,084 observed tokens** including
+13,056 cached input tokens. Wall time was **55,399 ms**.
+
+The existing spend guard then marked the run failed and denied retry. No
+artifact was released. This is a critical Phase 11 finding: increasing the
+per-call output cap does not make the current multi-agent pipeline fit a
+12,000-token total budget. The LLM key should now be removed again. No further
+live generation should run until the pipeline is made cost-bounded or its
+multi-agent prompt/context flow is reduced.
 
 ### Instrumentation checkpoint — 2026-09-18
 
@@ -222,6 +298,12 @@ decided. Trajectory and observability were available, but
   were available.
 - Provider-side total-token enforcement, including system prompts and any
   hidden provider/tool calls, for the first request.
+- One fresh live provider run after the compatibility fix; this is required to
+  confirm that the request now reaches GPT-5.4 and to measure real provider
+  latency, usage, cost, and artifact quality.
+- A live run that completes a valid structured response and produces an
+  artifact; the first corrected live rerun reached the provider but hit the
+  output cap.
 
 ### NEEDS DESIGN DECISION
 
@@ -234,6 +316,13 @@ decided. Trajectory and observability were available, but
   quality status in the standard run projection.
 - Whether G10 child failure makes the parent `partial` or `failed`.
 - Exact visual-quality rubric for PPTX and infographic output.
+- Whether `provider_token_budget` is a total request budget or an output budget,
+  and the minimum per-call completion cap required by each pipeline contract.
+- Whether the executive-summary contract should use a 2,400-token completion
+  cap, or whether its schema/prompt should first be made more compact.
+- Whether the current multi-agent executive-summary route is acceptable at an
+  observed 66,084 tokens, or must be redesigned to enforce a true per-run
+  provider ceiling before Phase 11 can be marked successful.
 
 ## Next execution order
 
