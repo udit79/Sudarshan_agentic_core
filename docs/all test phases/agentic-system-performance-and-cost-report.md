@@ -397,6 +397,34 @@ Observed:
 This is a useful failure record because it proves the safety gate worked while
 also exposing that provider usage accounting is not yet complete.
 
+## Instrumentation checkpoint — 2026-09-18
+
+The missing measurement boundary was fixed without making another live model
+call. CrewAI's returned `CrewOutput.token_usage` is now retained at the common
+text-pipeline boundary and projected through the existing `PipelineResponse`
+metadata and progress/observability event. Retry attempts receive distinct
+usage IDs; the pipeline-level aggregate receives one stable usage ID, so the
+same aggregate is not counted twice by the existing telemetry deduplicator.
+
+The recorded fields are limited to provider/model labels, input/output/
+reasoning/cache counters, attempt IDs, and CrewAI wall time. The timing field
+is labelled `latency_scope=crew_wall_time`; it must not be described as
+provider-only latency. Cost is explicitly `estimated_cost=null` with
+`cost_status=unavailable` until a configured pricing table or provider billing
+receipt exists. Missing provider counters are marked
+`usage_status=unavailable` and are never interpreted as zero-cost execution.
+
+Offline proof:
+
+- usage normalization and retry aggregation: 4 focused tests passed;
+- affected telemetry/pipeline regression: 26 passed;
+- pipeline regression: 134 passed;
+- full local regression: 685 passed, 8 skipped, 32 warnings.
+
+This proves the instrumentation path and its safety properties. It does not
+yet prove that the configured live provider returns non-zero usage counters;
+one explicitly approved, budgeted live run is still required for that.
+
 ## Current readiness
 
 ### Ready locally
@@ -423,15 +451,15 @@ also exposing that provider usage accounting is not yet complete.
 
 ## Recommended next order
 
-1. Keep the current Phase 11 checkpoint; do not repeat live calls while usage
-   receipts are missing.
-2. Add or verify a provider usage receipt at the model-call boundary.
-3. Make the normal run telemetry projection distinguish missing usage from zero.
-4. Run one explicitly approved, token-budgeted G01 request.
-5. Capture the sanitized benchmark record.
-6. Run the PPT path once with an exact slide-count constraint.
-7. Review the PPT structurally and visually.
-8. Run the remaining golden cases and calculate p50/p95 only after the values
+1. Keep the current Phase 11 checkpoint; do not run an unbudgeted live call.
+2. Configure or verify a pricing source before claiming cost numbers.
+3. Run one explicitly approved, token-budgeted G01 request and inspect its
+   sanitized usage projection.
+4. Capture the sanitized benchmark record with wall, memory, orchestration,
+   and provider-usage truth levels kept separate.
+5. Run the PPT path once with an exact slide-count constraint.
+6. Review the PPT structurally and visually.
+7. Run the remaining golden cases and calculate p50/p95 only after the values
    are genuinely recorded.
 
 ## Source files
@@ -440,6 +468,10 @@ also exposing that provider usage accounting is not yet complete.
 - `docs/pipeline-observability.md`
 - `pipelines/orchestrator/contracts.py`
 - `pipelines/orchestrator/observability.py`
+- `pipelines/common/usage_capture.py`
+- `pipelines/common/text_generation.py`
+- `pipelines/advisory/crew.py`
+- `tests/component/test_agentic_usage_capture.py`
 - `tests/component/test_observability_telemetry_matrix.py`
 - `tests/integration/test_openai_budgeted.py`
 - `docs/all test phases/phase-11-golden-and-holdout-cases.md`

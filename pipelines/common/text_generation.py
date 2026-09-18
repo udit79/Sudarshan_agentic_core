@@ -16,6 +16,7 @@ from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.common.flow_persistence import flow_persistence, typed_persist
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter, memory_tools
 from pipelines.common.task_state import TaskState
+from pipelines.common.usage_capture import aggregate_crew_usage, capture_crew_usage
 
 
 AgentFactory = Callable[[list[Any]], dict[str, Agent]]
@@ -79,6 +80,7 @@ class TextTransformationFlow(Flow[TaskState]):
 
     def run(self, request: AdvisoryRequest) -> PipelineResponse:
         self._result = None
+        self.state.usage_records = []
         self.state.pipeline_name = self.pipeline_name
         self.state.pipeline_options = {
             **self.pipeline_options(request),
@@ -239,6 +241,10 @@ class TextTransformationFlow(Flow[TaskState]):
         self.state.attempt += 1
         self.state.record(self.pipeline_name, "started", summary="Starting sequential text-generation crew")
         writer = TaskMemoryWriter(self._runtime(), on_event=self.progress_callback)
+        from time import perf_counter
+
+        started = perf_counter()
+        captured = False
         try:
             agents = self.agent_factory(memory_tools(self._runtime()), llm=self.llm)  # type: ignore[misc]
             tasks = self.task_factory(agents, writer)  # type: ignore[misc]
@@ -254,7 +260,7 @@ class TextTransformationFlow(Flow[TaskState]):
                     if self.state.attempt > 1 and self.state.failure
                     else "No previous quality-gate feedback; produce the first draft against the stated requirements."
                 )
-                crew.kickoff(inputs={
+                crew_result = crew.kickoff(inputs={
                     "query": self.state.query,
                     "memory_context": self.state.memory_context,
                     "task_id": self.state.task_id,
@@ -267,12 +273,30 @@ class TextTransformationFlow(Flow[TaskState]):
                     "request_understanding": self.state.request_understanding,
                     "quality_feedback": quality_feedback,
                 })
+            self.state.usage_records.append(capture_crew_usage(
+                crew_result,
+                run_id=self.state.run_id,
+                pipeline=self.pipeline_name,
+                attempt=self.state.attempt,
+                latency_ms=round((perf_counter() - started) * 1000),
+                model_ref=self.llm,
+            ))
+            captured = True
             output = self.output_model.model_validate(getattr(tasks["output"].output, "pydantic", None))  # type: ignore[union-attr]
             output = self.prepare_quality_output(output)
             quality = self.quality_model.model_validate(getattr(tasks["quality"].output, "pydantic", None))  # type: ignore[union-attr]
             self.state.record(self.pipeline_name, "succeeded", summary="Text-generation crew completed")
             return TextCrewRun(output=output, quality=quality)
         except Exception as exc:
+            if not captured:
+                self.state.usage_records.append(capture_crew_usage(
+                    None,
+                    run_id=self.state.run_id,
+                    pipeline=self.pipeline_name,
+                    attempt=self.state.attempt,
+                    latency_ms=round((perf_counter() - started) * 1000),
+                    model_ref=self.llm,
+                ))
             self.state.failure = str(exc)
             self.state.record(self.pipeline_name, "failed", summary="Text-generation crew failed", error=str(exc))
             self._write_task_failure(self.pipeline_name, str(exc))
@@ -405,6 +429,7 @@ class TextTransformationFlow(Flow[TaskState]):
                     "memory_records": len(self.state.memory_records),
                     "delivery_owner": "frontend",
                     "human_approval_required": self.human_approval_required,
+                    **self._usage_metadata(),
                 },
             )
             return self._result
@@ -462,5 +487,21 @@ class TextTransformationFlow(Flow[TaskState]):
                 "rendered_as_failed_draft": bool(output and self.render_failed_draft and self.state.artifact),
                 "quality_review": self.state.quality_review or {},
                 "failed_state": failed_state,
+                "usage": aggregate_crew_usage(
+                    self.state.usage_records,
+                    run_id=self.state.run_id,
+                    pipeline=self.pipeline_name,
+                ),
+                "usage_records": list(self.state.usage_records),
             },
         )
+
+    def _usage_metadata(self) -> dict[str, Any]:
+        return {
+            "usage": aggregate_crew_usage(
+                self.state.usage_records,
+                run_id=self.state.run_id,
+                pipeline=self.pipeline_name,
+            ),
+            "usage_records": list(self.state.usage_records),
+        }

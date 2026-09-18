@@ -153,6 +153,22 @@ in this report.
   latency despite real memory/provider work. This is a measurement gap, not
   evidence that the request was free.
 
+### Instrumentation checkpoint — 2026-09-18
+
+The common CrewAI text-pipeline boundary now retains the returned
+`CrewOutput.token_usage`, records separate retry-attempt counters, and exposes
+one deduplicated aggregate usage record through the existing response and
+observability projections. Crew wall time is recorded separately from
+provider-only latency. Cost remains explicitly unavailable until pricing or a
+provider billing receipt is configured.
+
+The offline instrumentation matrix passed 4/4 tests, the affected telemetry
+and pipeline regression passed 134 tests, and the full local regression passed
+685 tests with 8 skipped and 32 warnings. No live provider request was made
+for this fix. Phase 11 therefore remains open: the next action is one
+explicitly approved, token-budgeted G01 live run to verify non-zero provider
+usage is actually returned in this environment.
+
 ### NOT YET IMPLEMENTED
 
 - Actual live execution of these cases.

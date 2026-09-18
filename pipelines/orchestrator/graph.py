@@ -33,6 +33,7 @@ from pipelines.orchestrator.progress import (
     ProgressReporter,
     ProgressSink,
 )
+from pipelines.orchestrator.contracts import TelemetryUsage
 from pipelines.orchestrator.types import (
     OrchestrationResult,
     PipelineAdapter,
@@ -153,6 +154,34 @@ def _memory_records(recalled: Any) -> list[dict[str, Any]]:
             "score": getattr(result, "score", None),
         })
     return records
+
+
+def _response_usage(payload: Mapping[str, Any]) -> tuple[TelemetryUsage | None, str | None]:
+    """Project response usage into the existing safe progress contract."""
+
+    metadata = payload.get("metadata")
+    raw = metadata.get("usage") if isinstance(metadata, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return None, None
+    try:
+        cost = raw.get("estimated_cost")
+        usage = TelemetryUsage(
+            provider=str(raw.get("provider") or "unknown"),
+            model=str(raw.get("model") or "unknown"),
+            input_tokens=max(0, int(raw.get("input_tokens", 0) or 0)),
+            output_tokens=max(0, int(raw.get("output_tokens", 0) or 0)),
+            reasoning_tokens=max(0, int(raw.get("reasoning_tokens", 0) or 0)),
+            tool_calls=max(0, int(raw.get("tool_calls", 0) or 0)),
+            latency_ms=max(0, int(raw.get("latency_ms", 0) or 0)),
+            # Cost is intentionally zero in this transport projection when
+            # pricing is unavailable; is_estimate remains true so dashboards
+            # cannot present it as a measured billable amount.
+            estimated_cost=max(0.0, float(cost or 0.0)),
+            is_estimate=bool(raw.get("is_estimate", False)) or cost is None,
+        )
+    except (TypeError, ValueError):
+        return None, None
+    return usage, str(raw.get("usage_id") or "") or None
 
 
 def _context_pack(manager: MemoryManagerLike, *, query: str, context: AccessContext,
@@ -1197,19 +1226,29 @@ class PipelineOrchestrator:
                         self.registry[pipeline].resume is not None,
                     )
                     payload["metadata"] = response_metadata
+                usage, usage_id = _response_usage(payload)
                 if response.status == "pending":
                     reporter.emit(stage="human_approval", status="waiting_for_approval", progress=75,
                                   message="Waiting for an authorized approval decision", pipeline=pipeline,
                                   requires_action=True)
                 elif response.status == "succeeded":
                     reporter.emit(stage="pipeline_result", status="succeeded", progress=90,
-                                  message="Pipeline produced a validated result", pipeline=pipeline)
+                                  message="Pipeline produced a validated result", pipeline=pipeline,
+                                  usage=usage, usage_id=usage_id,
+                                  provider=usage.provider if usage else None,
+                                  model=usage.model if usage else None)
                 elif response.status == "partial":
                     reporter.emit(stage="pipeline_result", status="partial", progress=90,
-                                  message="Pipeline produced a degraded or partial result", pipeline=pipeline)
+                                  message="Pipeline produced a degraded or partial result", pipeline=pipeline,
+                                  usage=usage, usage_id=usage_id,
+                                  provider=usage.provider if usage else None,
+                                  model=usage.model if usage else None)
                 else:
                     reporter.emit(stage="pipeline_result", status="failed", progress=100,
-                                  message="Pipeline failed", pipeline=pipeline, error_code="PIPELINE_FAILED")
+                                  message="Pipeline failed", pipeline=pipeline, error_code="PIPELINE_FAILED",
+                                  usage=usage, usage_id=usage_id,
+                                  provider=usage.provider if usage else None,
+                                  model=usage.model if usage else None)
                 return {"response": payload, "responses": {pipeline: payload}, "stage": "pipeline_result", "status": response.status}
 
             payloads: dict[str, dict[str, Any]] = {}
@@ -1244,6 +1283,7 @@ class PipelineOrchestrator:
                         )) or {}
                     child = _response_from_dict(payloads[selected])
                     if child is not None:
+                        usage, usage_id = _response_usage(payloads[selected])
                         reporter.emit(
                             stage="pipeline_result",
                             status="succeeded" if child.status == "succeeded" else "failed",
@@ -1251,6 +1291,10 @@ class PipelineOrchestrator:
                             message=f"{selected} pipeline completed with status {child.status}",
                             pipeline=selected,
                             error_code="PIPELINE_FAILED" if child.status == "failed" else None,
+                            usage=usage,
+                            usage_id=usage_id,
+                            provider=usage.provider if usage else None,
+                            model=usage.model if usage else None,
                         )
             self._check_cancelled(state["run_id"])
             aggregate = _aggregate_pipeline_status(payloads)

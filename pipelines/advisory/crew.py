@@ -20,6 +20,7 @@ from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.common.flow_persistence import flow_persistence, typed_persist
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter, memory_tools
 from pipelines.common.task_state import TaskState
+from pipelines.common.usage_capture import aggregate_crew_usage, capture_crew_usage
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,7 @@ class CrewRun:
     advisory: AdvisoryOutput | None = None
     quality: QualityReview | None = None
     error: str | None = None
+    usage: dict[str, Any] | None = None
 
 
 class AdvisoryCrew:
@@ -64,14 +66,24 @@ class AdvisoryCrew:
         self.tasks = build_tasks(self.agents, self.writer)
 
     def kickoff(self, inputs: dict[str, Any]) -> CrewRun:
+        from time import perf_counter
+
         crew = Crew(
             agents=list(self.agents.values()),
             tasks=list(self.tasks.values()),
             process=Process.sequential,
             verbose=False,
         )
+        started = perf_counter()
         with self.writer.activate():
-            crew.kickoff(inputs=inputs)
+            crew_result = crew.kickoff(inputs=inputs)
+        usage = capture_crew_usage(
+            crew_result,
+            run_id=self.state.run_id,
+            pipeline="ntro_advisory",
+            attempt=self.state.attempt,
+            latency_ms=round((perf_counter() - started) * 1000),
+        )
 
         advisory_output = getattr(self.tasks["advisory"].output, "pydantic", None)
         quality_output = getattr(self.tasks["quality"].output, "pydantic", None)
@@ -79,7 +91,7 @@ class AdvisoryCrew:
             update={"advisory_id": f"advisory-{self.state.run_id}"}
         )
         quality = QualityReview.model_validate(quality_output)
-        return CrewRun(advisory=advisory, quality=quality)
+        return CrewRun(advisory=advisory, quality=quality, usage=usage)
 
 
 @typed_persist(flow_persistence())
@@ -104,6 +116,7 @@ class AdvisoryFlow(Flow[TaskState]):
         """Execute the Flow using a validated application request."""
 
         self._result: PipelineResponse | None = None
+        self.state.usage_records = []
         self.state.query = request.query
         self.state.user_id = request.user_id
         self.state.case_id = request.case_id
@@ -150,12 +163,17 @@ class AdvisoryFlow(Flow[TaskState]):
                 status="pending", pipeline=self.pipeline_name, task_id=request.task_id,
                 run_id=self.state.run_id, output=advisory,
                 attempts=self.state.attempt,
-                metadata={"approval_status": "pending", "resume_state_id": self.state.run_id},
+                metadata={
+                    "approval_status": "pending",
+                    "resume_state_id": self.state.run_id,
+                    **self._usage_metadata(),
+                },
             )
         return PipelineResponse(
             status="failed", pipeline=self.pipeline_name, task_id=request.task_id,
             run_id=self.state.run_id, failure="flow completed without a terminal response",
             attempts=self.state.attempt,
+            metadata=self._usage_metadata(),
         )
 
     @start()
@@ -213,8 +231,11 @@ class AdvisoryFlow(Flow[TaskState]):
         return self.state.memory_context
 
     def _run_crew(self) -> CrewRun:
+        from time import perf_counter
+
         self.state.attempt += 1
         self.state.record("advisory_crew", "started", summary="Starting sequential specialist crew")
+        started = perf_counter()
         try:
             runner = AdvisoryCrew(
                 self.memory_manager,
@@ -236,9 +257,18 @@ class AdvisoryFlow(Flow[TaskState]):
                 "prompt_plan": self.state.prompt_plan,
                 "request_understanding": self.state.request_understanding,
             })
+            if result.usage is not None:
+                self.state.usage_records.append(result.usage)
             self.state.record("advisory_crew", "succeeded", summary="Specialist crew completed")
             return result
         except Exception as exc:
+            self.state.usage_records.append(capture_crew_usage(
+                None,
+                run_id=self.state.run_id,
+                pipeline=self.pipeline_name,
+                attempt=self.state.attempt,
+                latency_ms=round((perf_counter() - started) * 1000),
+            ))
             self.state.failure = str(exc)
             self.state.record("advisory_crew", "failed", summary="Specialist crew failed", error=str(exc))
             self._write_task_failure("advisory_crew", str(exc))
@@ -417,7 +447,11 @@ class AdvisoryFlow(Flow[TaskState]):
                 output=advisory,
                 artifact=artifact,
                 attempts=self.state.attempt,
-                metadata={"memory_records": len(self.state.memory_records), "artifact_path": artifact.path},
+                metadata={
+                    "memory_records": len(self.state.memory_records),
+                    "artifact_path": artifact.path,
+                    **self._usage_metadata(),
+                },
             )
             self._result = response
             return response
@@ -466,5 +500,19 @@ class AdvisoryFlow(Flow[TaskState]):
             run_id=self.state.run_id,
             failure=self.state.failure or "advisory pipeline failed",
             attempts=self.state.attempt,
-            metadata={"events": len(self.state.events), "memory_records": len(self.state.memory_records)},
+            metadata={
+                "events": len(self.state.events),
+                "memory_records": len(self.state.memory_records),
+                **self._usage_metadata(),
+            },
         )
+
+    def _usage_metadata(self) -> dict[str, Any]:
+        return {
+            "usage": aggregate_crew_usage(
+                self.state.usage_records,
+                run_id=self.state.run_id,
+                pipeline=self.pipeline_name,
+            ),
+            "usage_records": list(self.state.usage_records),
+        }

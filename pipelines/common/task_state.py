@@ -64,6 +64,9 @@ class TaskState(BaseModel):
     approval_feedback: str | None = None
     artifact: dict[str, Any] | None = None
     failure: str | None = None
+    # Sanitized provider counters only; prompts and model output never enter
+    # this state field.
+    usage_records: list[dict[str, Any]] = Field(default_factory=list)
 
     def record(self, step: str, status: TaskEventStatus, *,
                summary: str = "", error: str | None = None) -> None:
