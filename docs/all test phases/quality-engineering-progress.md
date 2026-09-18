@@ -5,6 +5,15 @@ means the current implementation has an automated test result recorded in the
 linked phase document. It does not mean that every future live-provider,
 multi-agent, load, or human-review scenario is complete.
 
+## Current branch handoff
+
+The current Phase 11 checkpoint and route for another developer or agent are
+documented in `phase-11-branch-handoff.md`. The latest post-repair offline
+regression is **729 passed, 8 skipped, 47 warnings**. The final authorized live
+G01 presentation attempt reached the real provider but released no artifact;
+Phase 11 remains open until a future explicitly authorized live run proves the
+PPTX artifact path.
+
 ## Completed through the memory phase
 
 - [x] 0. Inspect existing architecture/tests
