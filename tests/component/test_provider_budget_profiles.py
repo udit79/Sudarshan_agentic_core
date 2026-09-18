@@ -7,6 +7,9 @@ from pipelines.orchestrator.budget_profiles import (
     ProviderBudgetProfile,
     diagnostic_profile_from_observed_run,
 )
+from pipelines.common.contracts import AdvisoryRequest
+from pipelines.executive_summary.crew import ExecutiveSummaryFlow
+from tests.conftest import FakeRecallManager
 
 
 def test_g01_diagnostic_profile_is_traceable_and_not_approved() -> None:
@@ -49,3 +52,25 @@ def test_profile_from_observed_usage_rounds_up_conservatively() -> None:
     assert profile.output_tokens_per_call == 126
     assert profile.reserved_tokens == (251 + 126) * 4
     assert profile.approved is False
+
+
+def test_diagnostic_profile_blocks_the_full_flow_before_provider_execution() -> None:
+    flow = ExecutiveSummaryFlow(FakeRecallManager(), max_attempts=1, llm=None)
+    request = AdvisoryRequest(
+        query="Summarize the permitted case evidence",
+        user_id="user-profile-test",
+        case_id="case-profile-test",
+        task_id="task-profile-test",
+        metadata={
+            "run_id": "run-profile-test",
+            **EXECUTIVE_SUMMARY_G01_DIAGNOSTIC_PROFILE.as_preflight_metadata(
+                allow_unapproved=True
+            ),
+        },
+    )
+
+    response = flow.run(request)
+
+    assert response.status == "failed"
+    assert "PROVIDER_BUDGET_PREFLIGHT_REJECTED" in (response.failure or "")
+    assert flow.state.provider_budget_exceeded is True

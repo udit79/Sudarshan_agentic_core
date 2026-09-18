@@ -148,9 +148,9 @@ component that can:
 - fail closed if actual usage exceeds the configured cap; and
 - expose only counters and status, never sensitive inputs.
 
-Focused offline results: **25 passed**. The affected text/pipeline regression
+Focused offline results: **26 passed**. The affected text/pipeline regression
 with an isolated temporary directory: **111 passed**. The full offline
-regression then passed **719 tests, 8 skipped, 32 warnings**. No provider call
+regression then passed **720 tests, 8 skipped, 32 warnings**. No provider call
 or API key was used.
 
 The reservation ledger is connected to an explicit
