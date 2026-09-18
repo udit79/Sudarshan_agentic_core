@@ -40,3 +40,12 @@ def test_staged_ppt_tasks_have_typed_plan_and_visual_routing(monkeypatch) -> Non
     assert list(tasks) == ["grounding", "plan", "visual_routing", "output", "quality"]
     assert tasks["plan"].output_pydantic.__name__ == "DeckPlan"
     assert tasks["visual_routing"].output_pydantic.__name__ == "DeckPlan"
+
+
+def test_ppt_output_task_does_not_invent_unvalidated_template_ids(monkeypatch) -> None:
+    monkeypatch.setenv("SUDARSHAN_PPT_FLOW", "staged")
+    agents = build_agents([], llm=offline_llm())
+    tasks = build_tasks(agents, CallbackOnlyWriter())
+
+    assert "native-default" in tasks["output"].description
+    assert "validated template contract" in tasks["output"].description

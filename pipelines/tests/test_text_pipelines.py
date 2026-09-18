@@ -10,6 +10,8 @@ from pipelines.linkedin.humanizer import audit_linkedin_text
 from pipelines.linkedin.schemas import LinkedInImageSpec, LinkedInPostOutput
 from pipelines.linkedin.visual_child import build_visual_child_call
 from pipelines.common.contracts import AdvisoryRequest
+from pipelines.ppt.crew import PresentationFlow
+from pipelines.ppt.schemas import PresentationOutput, SlideContent
 
 
 def test_automatic_text_flows_have_quality_and_delivery_routes() -> None:
@@ -114,6 +116,28 @@ def test_executive_summary_forbids_unresolved_placeholders() -> None:
     except ValueError:
         return
     raise AssertionError("unresolved placeholders must be rejected")
+
+
+def test_presentation_normalizes_unvalidated_model_template_to_native_default() -> None:
+    flow = PresentationFlow(None)
+    output = PresentationOutput(
+        presentation_id="live-template-fallback",
+        title="Verified case briefing",
+        template_id="model-invented-template",
+        template_version="unknown",
+        classification_level="RESTRICTED",
+        distribution="Authorized",
+        slides=[
+            SlideContent(slide_id="s1", order=1, title="Verified observations", bullets=["Observed fact"], layout="content"),
+            SlideContent(slide_id="s2", order=2, title="Unknowns", bullets=["Requires review"], layout="content"),
+        ],
+    )
+
+    prepared = flow.prepare_quality_output(output)
+
+    assert prepared.template_id == "native-default"
+    assert prepared.template_version is None
+    assert prepared.slides == output.slides
 
 
 def test_linkedin_image_option_returns_prompt_or_optional_asset() -> None:

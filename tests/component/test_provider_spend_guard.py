@@ -227,13 +227,32 @@ def test_text_flow_bounds_dynamic_inputs_only_when_provider_budget_is_explicit()
 
 
 def test_text_flow_keeps_default_inputs_unchanged_without_provider_budget() -> None:
-    state = TaskState(query="q" * 2000, memory_context="m" * 8000)
+    state = TaskState(
+        query="q" * 2000,
+        memory_context="m" * 8000,
+        constraints={"slide_count": 2, "theme_id": "ntro-briefing"},
+    )
     flow = SimpleNamespace(state=state)
 
     inputs = TextTransformationFlow._crew_inputs(flow, "feedback")
 
     assert inputs["query"] == state.query
     assert inputs["memory_context"] == state.memory_context
+    assert inputs["constraints"] == state.constraints
+
+
+def test_text_flow_passes_constraints_to_budgeted_provider_inputs() -> None:
+    state = TaskState(
+        provider_token_budget=1200,
+        pipeline_options={"provider_input_token_budget": 1000},
+        constraints={"slide_count": 2, "theme_id": "ntro-briefing"},
+    )
+    flow = SimpleNamespace(state=state)
+
+    inputs = TextTransformationFlow._crew_inputs(flow, "feedback")
+
+    assert '"slide_count": 2' in inputs["constraints"]
+    assert '"theme_id": "ntro-briefing"' in inputs["constraints"]
 
 
 def test_budgeted_gpt5_request_uses_provider_native_completion_token_parameter(monkeypatch) -> None:

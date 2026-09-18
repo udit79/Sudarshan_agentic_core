@@ -226,6 +226,47 @@ The first live rerun should be G01 only. It should verify both:
 1. the system stays within the declared budget; and
 2. one valid artifact is produced, validated, and scoped to the correct case.
 
+The executable one-run route is now documented in
+`phase-11-live-artifact-runbook.md`. It selects the existing `presentation`
+pipeline because that route renders an openable PPTX without an interactive
+approval pause. The request fixture and its offline contract test are:
+
+- `tests/fixtures/phase11_g01_presentation_live_request.json`
+- `tests/component/test_phase11_live_presentation_request.py`
+
+The focused gate passed **33 tests**. The LLM key remains disabled until the
+operator is ready to perform exactly that one controlled run. This does not
+claim that the live artifact already exists.
+
+The first controlled presentation attempt was recorded as a local network
+permission failure before provider generation. The network-recovery attempt
+then exposed a genuine product defect: the staged PPT task requested the
+`constraints` template variable, but the common text-generation boundary did
+not pass it. The fix is additive and covered by **34 focused tests** and the
+full offline regression (**728 passed, 8 skipped, 47 warnings**). The live
+artifact remains unproven until one post-fix run completes.
+
+The post-fix provider attempt reached all PPT agent stages and measured
+**42,040 provider tokens** in **32,406 ms**, but artifact rendering rejected a
+model-selected non-default template because no validated template contract was
+provided. The PPT task contract now explicitly requires `native-default` unless
+such a contract is supplied. Follow-up offline tests passed **40**. The server
+is stopped and the key should remain disabled until a final paid retry is
+explicitly authorized.
+
+The final authorized G01 retry reached all PPT agent stages but reproduced the
+same boundary failure. It measured **41,960 provider input/output tokens**,
+**21,760 cache-read tokens**, and **29,915 ms** provider latency. Cost was
+unavailable and no artifact was released. The prompt-only mitigation is
+therefore insufficient for live reliability; do not mark Phase 11 complete.
+
+An additive offline repair now normalizes unsupported model-selected template
+IDs to `native-default` when no validated custom template contract is present.
+It preserves slide content. The focused fallback test and affected PPT/artifact
+regression passed **6** and **32** tests respectively. The post-repair full
+offline regression passed **729 passed, 8 skipped, 47 warnings**. No additional
+paid request was made.
+
 ## CURRENT CLASSIFICATION
 
 | Item | Status |

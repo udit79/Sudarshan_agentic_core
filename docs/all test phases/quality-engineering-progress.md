@@ -105,6 +105,8 @@ multi-agent, load, or human-review scenario is complete.
 - Benchmark source dataset: `benchmark-results/benchmark-results.json`
 - Benchmark charts and traceability manifest: `benchmark-results/*.png`,
   `benchmark-results/benchmark-results.csv`, and `benchmark-results/chart-manifest.json`
+- One-run live artifact runbook: `phase-11-live-artifact-runbook.md`; the
+  sanitized G01 presentation request contract passed **33 focused tests**.
 
 ## Open decisions carried forward
 
@@ -157,3 +159,32 @@ multi-agent, load, or human-review scenario is complete.
   removes verbose raw task text before downstream task context. Focused tests
   passed **45**, and the latest full regression passed **724 passed, 8 skipped,
   32 warnings**. The default path remains unchanged.
+- The next live gate is deliberately one `presentation` run only. It has a
+  two-slide constraint, compaction enabled, a declared one-run provider ceiling,
+  and a manifest/download verification path. The LLM key remains disabled until
+  the operator explicitly starts that run.
+- Live presentation attempts are tracked in `phase-11-live-artifact-runbook.md`:
+  the first stopped at a local Cognee socket permission error; the network
+  recovery reached the PPT flow but exposed and fixed the missing `constraints`
+  template input. The post-fix full regression is **728 passed, 8 skipped,
+  47 warnings**. A post-fix live artifact is still pending.
+- The post-fix live presentation attempt reached the real provider and all PPT
+  agent stages, recording **42,040 provider tokens** and **32,406 ms** provider
+  latency, but failed at artifact rendering because the model selected an
+  unvalidated template. The PPT prompt now defaults to `native-default`; the
+  follow-up focused tests passed **40**, and the full offline regression now
+  passes **729 passed, 8 skipped, 47 warnings**. The server is stopped and no
+  further paid attempt was started.
+- The offline repair normalizes unsupported model-selected PPT template IDs to
+  `native-default` when no validated custom template contract exists. It
+  preserves slide content and passed **6** focused tests plus **32** affected
+  PPT/artifact regression tests. The post-repair full offline regression is
+  **729 passed, 8 skipped, 47 warnings**. No further paid provider call was
+  made.
+- The final authorized G01 presentation retry (`run-g01-presentation-live-final-01`)
+  reached routing, memory, prompt crafting, and all three PPT agent stages, but
+  failed again at the renderer boundary because the model selected a
+  non-default template without a validated contract. It recorded **31,735 input
+  tokens**, **10,225 output tokens**, **21,760 cache-read tokens**, and **29,915
+  ms** provider latency. No artifact was released; Phase 11 remains open until
+  this boundary is fixed and re-tested under an explicitly authorized run.

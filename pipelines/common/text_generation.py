@@ -507,6 +507,7 @@ class TextTransformationFlow(Flow[TaskState]):
             "case_id": self.state.case_id,
             "classification_level": self.state.classification_level,
             "distribution": self.state.distribution,
+            "constraints": self.state.constraints,
             "run_id": self.state.run_id,
             "pipeline_options": self.state.pipeline_options,
             "prompt_plan": self.state.prompt_plan,
@@ -532,6 +533,7 @@ class TextTransformationFlow(Flow[TaskState]):
         inputs.update({
             "query": bounded(self.state.query, max(1, input_budget // 5)),
             "memory_context": bounded(self.state.memory_context, max(1, (input_budget * 2) // 5)),
+            "constraints": bounded(self.state.constraints, max(1, input_budget // 10)),
             "pipeline_options": bounded(self.state.pipeline_options, max(1, input_budget // 10)),
             "prompt_plan": bounded(self.state.prompt_plan, max(1, input_budget // 10)),
             "request_understanding": bounded(self.state.request_understanding, max(1, input_budget // 10)),

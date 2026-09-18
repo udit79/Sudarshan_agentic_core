@@ -1,0 +1,22 @@
+{
+  "purpose": "One controlled Phase 11 live artifact run using the sanitized G01 case.",
+  "case_id": "golden-g01",
+  "user_id": "live-test-operator",
+  "task_id": "task-g01-presentation-live-01",
+  "pipeline": "presentation",
+  "requested_pipelines": ["presentation"],
+  "query": "Create a concise two-slide NTRO briefing from the verified G01 findings. Slide one must summarize the verified observations. Slide two must list the explicit unknowns and follow-up review point. Use only permitted case evidence, preserve source references, and do not invent facts, policy, owners, or dates.",
+  "constraints": {
+    "slide_count": 2,
+    "page_count": 2,
+    "theme_id": "ntro-briefing"
+  },
+  "top_k": 6,
+  "token_budget": 1500,
+  "metadata": {
+    "pipeline": "presentation",
+    "provider_context_compaction": true,
+    "benchmark_case": "G01",
+    "live_attempt_policy": "one controlled attempt"
+  }
+}
