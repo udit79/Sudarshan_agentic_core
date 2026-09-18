@@ -132,12 +132,28 @@ multi-agent, load, or human-review scenario is complete.
   the priority.
 - Phase 11A token-optimization route: `phase-11-token-optimization.md`.
   The additive reservation ledger and benchmark-only preflight switch are now
-  implemented. Focused preflight/profile tests passed **26**, affected
+  implemented. Focused preflight/profile/audit tests passed **28**, affected
   regression passed **111**, and the latest full offline regression after the
-  profile boundary check passed **720 passed, 8 skipped, 32 warnings**. The LLM
+  audit boundary check passed **722 passed, 8 skipped, 32 warnings**. The LLM
   key should remain disabled until a
   pipeline-specific profile is reviewed.
 - The executive-summary diagnostic profile is now recorded in
   `pipelines/orchestrator/budget_profiles.py`. It is deliberately unapproved
   and rejects the current G01 receipt-derived reservation before provider
   execution; no cheaper live budget has been invented.
+- The sanitized G01 dynamic-input audit measured **165 estimated tokens**
+  (including 97 tokens for the 387-character memory context). This shows that
+  the previous 54,165 input-token receipt is dominated by provider/system,
+  tool, or intermediate-task context rather than the raw G01 evidence. The
+  remaining source is not guessed; stage-level provider receipt measurement is
+  still required.
+- Stage-level usage capture is now attached to task callbacks using sanitized
+  counters only; it does not add stage values to aggregate totals. Focused
+  usage/audit/budget tests passed **39**, and the latest full regression passed
+  **723 passed, 8 skipped, 32 warnings**. A live run is still required to
+  populate real stage receipts.
+- Benchmark-only intermediate context compaction is now available through
+  `provider_context_compaction=true`; it keeps validated structured output and
+  removes verbose raw task text before downstream task context. Focused tests
+  passed **45**, and the latest full regression passed **724 passed, 8 skipped,
+  32 warnings**. The default path remains unchanged.

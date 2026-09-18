@@ -100,6 +100,45 @@ def capture_crew_usage(
     }
 
 
+def capture_task_usage(output: Any, *, stage: str) -> dict[str, Any]:
+    """Normalize one CrewAI task output into a safe stage usage record."""
+
+    raw_usage = getattr(output, "usage_metrics", None)
+    if callable(raw_usage):
+        raw_usage = raw_usage()
+    if hasattr(raw_usage, "model_dump"):
+        raw_usage = raw_usage.model_dump(mode="json")
+    if not isinstance(raw_usage, Mapping):
+        raw_usage = {}
+
+    input_tokens = _int(raw_usage.get("prompt_tokens", raw_usage.get("input_tokens")))
+    output_tokens = _int(raw_usage.get("completion_tokens", raw_usage.get("output_tokens")))
+    reasoning_tokens = _int(raw_usage.get("reasoning_tokens"))
+    cache_read_tokens = _int(
+        raw_usage.get("cached_prompt_tokens", raw_usage.get("cache_read_tokens"))
+    )
+    cache_write_tokens = _int(
+        raw_usage.get("cache_creation_tokens", raw_usage.get("cache_write_tokens"))
+    )
+    available = bool(
+        input_tokens
+        or output_tokens
+        or reasoning_tokens
+        or cache_read_tokens
+        or cache_write_tokens
+    )
+    return {
+        "stage": str(stage),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_write_tokens": cache_write_tokens,
+        "usage_status": "provider_reported" if available else "unavailable",
+        "provider_fields": {"source": "crewai.TaskOutput.usage_metrics"},
+    }
+
+
 def aggregate_crew_usage(records: list[dict[str, Any]], *, run_id: str, pipeline: str) -> dict[str, Any]:
     """Aggregate attempt records once for the pipeline response boundary."""
 
@@ -145,4 +184,4 @@ def aggregate_crew_usage(records: list[dict[str, Any]], *, run_id: str, pipeline
     }
 
 
-__all__ = ["aggregate_crew_usage", "capture_crew_usage"]
+__all__ = ["aggregate_crew_usage", "capture_crew_usage", "capture_task_usage"]

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from memory import AccessContext, MemoryManager
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
-from pipelines.common.memory_tools import MemoryRuntime, TaskMemoryWriter
+from pipelines.common.memory_tools import MemoryRuntime, TaskMemoryWriter, _record_task_output
 from pipelines.orchestrator import (
     InMemoryProgressSink,
     ProgressEvent,
@@ -128,6 +130,41 @@ def test_task_memory_writer_uses_task_scope(recording_backend) -> None:
 
     assert recording_backend.writes[0]["node_sets"] == ["sudarshan:scope:task:task-1"]
     assert recording_backend.writes[0]["metadata"]["step"] == "prompt_crafting"
+
+
+def test_task_callback_can_compact_intermediate_structured_context(recording_backend) -> None:
+    writer = TaskMemoryWriter(
+        MemoryRuntime(
+            manager=MemoryManager(recording_backend),
+            context=AccessContext(user_id="user-1", case_id="case-1", task_id="task-1"),
+            task_id="task-1",
+            case_id="case-1",
+            run_id="run-1",
+            compact_task_context=True,
+        )
+    )
+    structured = SimpleNamespace(
+        model_dump_json=lambda: '{"validated":true}',
+        model_dump=lambda **_: {"validated": True},
+    )
+    output = SimpleNamespace(
+        pydantic=structured,
+        raw="verbose intermediate output that should not flow to the next task",
+        json_dict=None,
+        usage_metrics={"prompt_tokens": 10, "completion_tokens": 5},
+    )
+
+    from pipelines.common.memory_tools import _ACTIVE_TASK_WRITER
+
+    token = _ACTIVE_TASK_WRITER.set(writer)
+    try:
+        compacted = _record_task_output("executive_case_analyst", output)
+    finally:
+        _ACTIVE_TASK_WRITER.reset(token)
+
+    assert compacted.raw == '{"validated":true}'
+    assert compacted.json_dict == {"validated": True}
+    assert "verbose intermediate" not in compacted.raw
 
 
 def test_progress_contract_accepts_clarification_waiting_state() -> None:

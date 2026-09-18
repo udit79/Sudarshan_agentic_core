@@ -94,6 +94,7 @@ class TextTransformationFlow(Flow[TaskState]):
     def run(self, request: AdvisoryRequest) -> PipelineResponse:
         self._result = None
         self.state.usage_records = []
+        self.state.stage_usage_records = []
         self.state.pipeline_name = self.pipeline_name
         self.state.pipeline_options = {
             **self.pipeline_options(request),
@@ -153,7 +154,7 @@ class TextTransformationFlow(Flow[TaskState]):
             self.state.pipeline_options["provider_input_token_budget"] = request.metadata.get(
                 "provider_input_token_budget"
             )
-        for key in ("provider_budget_preflight", "provider_call_count"):
+        for key in ("provider_budget_preflight", "provider_call_count", "provider_context_compaction"):
             if key in request.metadata:
                 self.state.pipeline_options[key] = request.metadata.get(key)
         self.state.max_attempts = self.max_attempts
@@ -235,6 +236,7 @@ class TextTransformationFlow(Flow[TaskState]):
             pipeline_name=self.pipeline_name,
             query=request.query,
             prompt_plan=dict(self.state.prompt_plan),
+            compact_task_context=self.state.pipeline_options.get("provider_context_compaction") is True,
         )
 
     @start()
@@ -293,7 +295,11 @@ class TextTransformationFlow(Flow[TaskState]):
             return TextCrewRun(error=self.state.failure)
         self.state.attempt += 1
         self.state.record(self.pipeline_name, "started", summary="Starting sequential text-generation crew")
-        writer = TaskMemoryWriter(self._runtime(), on_event=self.progress_callback)
+        writer = TaskMemoryWriter(
+            self._runtime(),
+            on_event=self.progress_callback,
+            on_usage=self._record_stage_usage,
+        )
         from time import perf_counter
 
         started = perf_counter()
@@ -325,6 +331,7 @@ class TextTransformationFlow(Flow[TaskState]):
                 latency_ms=round((perf_counter() - started) * 1000),
                 model_ref=self.llm,
             )
+            usage_record["stage_usage"] = list(self.state.stage_usage_records)
             self.state.usage_records.append(usage_record)
             if self._preflight_reservation is not None:
                 self._preflight_reservation.reconcile(
@@ -366,6 +373,19 @@ class TextTransformationFlow(Flow[TaskState]):
             self.state.record(self.pipeline_name, "failed", summary="Text-generation crew failed", error=str(exc))
             self._write_task_failure(self.pipeline_name, str(exc))
             return TextCrewRun(error=str(exc))
+
+    def _record_stage_usage(self, stage: str, usage: dict[str, Any]) -> None:
+        """Keep per-task counters separate from aggregate pipeline totals."""
+
+        self.state.stage_usage_records.append({
+            "stage": stage,
+            "attempt": max(1, self.state.attempt),
+            **{
+                key: value
+                for key, value in usage.items()
+                if key != "stage"
+            },
+        })
 
     def _preflight_provider_budget(self) -> bool:
         """Reserve a declared benchmark budget before provider execution.

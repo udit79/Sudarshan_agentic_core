@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from pipelines.common.usage_capture import aggregate_crew_usage, capture_crew_usage
+from pipelines.common.usage_capture import aggregate_crew_usage, capture_crew_usage, capture_task_usage
 from pipelines.orchestrator.graph import _response_usage
 
 
@@ -83,6 +83,29 @@ def test_missing_provider_usage_is_explicitly_unavailable() -> None:
     assert usage["is_estimate"] is True
     assert usage["latency_ms"] == 321
     assert usage["estimated_cost"] is None
+
+
+def test_task_usage_is_captured_per_stage_without_raw_output() -> None:
+    usage = capture_task_usage(
+        SimpleNamespace(
+            usage_metrics={
+                "prompt_tokens": 310,
+                "completion_tokens": 90,
+                "reasoning_tokens": 12,
+                "cached_prompt_tokens": 40,
+            },
+            raw="DO NOT STORE THIS TASK OUTPUT",
+        ),
+        stage="executive_summary_writer",
+    )
+
+    assert usage["stage"] == "executive_summary_writer"
+    assert usage["input_tokens"] == 310
+    assert usage["output_tokens"] == 90
+    assert usage["reasoning_tokens"] == 12
+    assert usage["cache_read_tokens"] == 40
+    assert usage["usage_status"] == "provider_reported"
+    assert "DO NOT STORE" not in str(usage)
 
 
 def test_response_usage_uses_existing_safe_telemetry_contract() -> None:

@@ -148,9 +148,9 @@ component that can:
 - fail closed if actual usage exceeds the configured cap; and
 - expose only counters and status, never sensitive inputs.
 
-Focused offline results: **26 passed**. The affected text/pipeline regression
+Focused offline results: **28 passed**. The affected text/pipeline regression
 with an isolated temporary directory: **111 passed**. The full offline
-regression then passed **720 tests, 8 skipped, 32 warnings**. No provider call
+regression then passed **722 tests, 8 skipped, 32 warnings**. No provider call
 or API key was used.
 
 The reservation ledger is connected to an explicit
@@ -171,6 +171,44 @@ configured 12,000-token budget, so the profile fails closed before execution.
 This is intentionally not a cheaper production recommendation. It proves that
 the current route cannot honestly be approved for another paid run until the
 context and stage allocation are reduced and measured again.
+
+### G01 dynamic-input audit
+
+The offline prompt audit was run against the sanitized G01 fixture with a
+1,500-token dynamic-input allowance. It measured **165 estimated dynamic
+tokens** in total:
+
+- memory context: 387 characters, 97 estimated tokens;
+- prompt plan: 69 characters, 18 estimated tokens;
+- request understanding: 33 characters, 9 estimated tokens;
+- query: 54 characters, 14 estimated tokens;
+- all other dynamic metadata together: 27 estimated tokens.
+
+This is an important diagnosis: the original 54,165 provider input tokens
+cannot be explained by the raw G01 evidence alone. The remaining input cost is
+likely in provider/system instructions, agent/task prompt templates, tool
+interactions, or repeated intermediate task output. The audit does not guess
+which one; the next measurement must capture sanitized per-stage provider
+receipts or equivalent boundary counters.
+
+### Stage-level usage checkpoint
+
+CrewAI task outputs now contribute separate sanitized stage usage records from
+the existing task callback boundary. Each record contains only the stage name,
+attempt, input/output/reasoning counters, cache counters, and usage status. The
+records are attached to the pipeline usage record for diagnosis but are not
+added again to the aggregate total.
+
+Focused usage, prompt-audit, and budget tests passed **39**. The full offline
+regression then passed **723 tests, 8 skipped, 32 warnings**. This prepares the
+next live run to show which task stages consume input tokens; it does not yet
+reduce provider usage by itself.
+
+The benchmark-only `provider_context_compaction=true` option now replaces
+verbose intermediate raw task output with the validated structured JSON before
+CrewAI passes that output to a later task. The default path remains unchanged.
+The focused context/usage/budget tests passed **45**, and the full offline
+regression passed **724 tests, 8 skipped, 32 warnings**.
 
 ## LIVE RE-ENTRY GATE
 
@@ -197,8 +235,11 @@ The first live rerun should be G01 only. It should verify both:
 | Reservation ledger | PASS, offline and benchmark-wired |
 | Pre-call declared-budget enforcement | PASS, opt-in |
 | Executive-summary diagnostic profile | PASS, deliberately rejected |
+| G01 dynamic-input audit | PASS, 165 estimated dynamic tokens |
+| Stage-level usage capture | PASS, offline; live receipt pending |
+| Opt-in intermediate context compaction | PASS, offline; live effect pending |
 | Provider-call exact total enforcement | NOT YET PROVEN |
-| Per-stage token ledger | NOT YET IMPLEMENTED |
+| Per-stage token ledger | PASS, live receipt pending |
 | Reconciled currency cost | NOT YET MEASURED |
 | Successful live G01 artifact | NOT YET PROVEN |
 | Phase 11 complete | NO |
