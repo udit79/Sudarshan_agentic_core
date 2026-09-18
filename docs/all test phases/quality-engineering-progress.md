@@ -75,6 +75,7 @@ multi-agent, load, or human-review scenario is complete.
 - First-half audit: `first-half-quality-audit.md`
 - Latest full deterministic local regression: **680 passed, 8 skipped, 32 warnings**
 - Phase 11 golden/holdout catalogue: `phase-11-golden-and-holdout-cases.md`
+- Agentic performance/cost measurement report: `agentic-system-performance-and-cost-report.md`
 - Live G01 checkpoint: same-case bounded context recovered and other-case
   isolation passed after the Cognee adapter fix; `run-g01-live-04` reached the
   real agents but failed the quality gate twice and produced no artifact
