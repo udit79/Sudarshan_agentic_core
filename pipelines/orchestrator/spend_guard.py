@@ -49,6 +49,72 @@ class ProviderSpendGuard:
         return max(0, self.max_tokens - self.used_tokens)
 
 
+@dataclass(slots=True)
+class TokenBudgetReservation:
+    """Offline-safe reservation ledger for a future provider call.
+
+    This ledger is intentionally separate from ``ProviderSpendGuard``. The
+    existing guard protects retry admission after a provider receipt arrives;
+    this class supports a later provider-boundary preflight without changing
+    the current pipeline execution path.
+
+    ``reserved_tokens`` are an accounting hold, not a billing claim. Callers
+    must reconcile each hold with the provider-reported actual usage after the
+    call. No prompt, memory text, or provider payload is stored here.
+    """
+
+    max_tokens: int | None = None
+    used_tokens: int = 0
+    reserved_tokens: int = 0
+    reservation_blocked: bool = False
+    exceeded: bool = False
+
+    def reserve(self, tokens: int) -> bool:
+        """Reserve a projected amount without exceeding the configured cap."""
+
+        requested = max(0, int(tokens))
+        if self.max_tokens is not None:
+            available = self.max_tokens - self.used_tokens - self.reserved_tokens
+            if requested > available:
+                self.reservation_blocked = True
+                return False
+        self.reserved_tokens += requested
+        return True
+
+    def reconcile(self, reserved_tokens: int, actual_tokens: int) -> bool:
+        """Release a reservation and record the provider-reported usage."""
+
+        released = max(0, int(reserved_tokens))
+        actual = max(0, int(actual_tokens))
+        self.reserved_tokens = max(0, self.reserved_tokens - released)
+        self.used_tokens += actual
+        if self.max_tokens is not None and self.used_tokens > self.max_tokens:
+            self.exceeded = True
+        return not self.exceeded
+
+    @property
+    def remaining_tokens(self) -> int | None:
+        """Return tokens not already used or reserved for another call."""
+
+        if self.max_tokens is None:
+            return None
+        return max(0, self.max_tokens - self.used_tokens - self.reserved_tokens)
+
+
+def declared_provider_reservation(
+    *,
+    input_tokens_per_call: int,
+    output_tokens_per_call: int,
+    provider_call_count: int,
+) -> int:
+    """Calculate a sanitized preflight reservation from a pipeline profile."""
+
+    input_tokens = max(0, int(input_tokens_per_call))
+    output_tokens = max(0, int(output_tokens_per_call))
+    call_count = max(0, int(provider_call_count))
+    return (input_tokens + output_tokens) * call_count
+
+
 def usage_tokens(record: dict[str, object]) -> int:
     """Read only normalized counters from a sanitized usage record."""
 
@@ -86,8 +152,10 @@ def output_tokens_per_call(max_tokens: int, *, call_count: int = 5) -> int:
 
 __all__ = [
     "ProviderSpendGuard",
+    "TokenBudgetReservation",
     "approximate_token_count",
     "bound_text",
+    "declared_provider_reservation",
     "output_tokens_per_call",
     "usage_tokens",
 ]

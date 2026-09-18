@@ -131,6 +131,8 @@ multi-agent, load, or human-review scenario is complete.
   run. Phase 11 live artifact generation remains open and cost-bounding is now
   the priority.
 - Phase 11A token-optimization route: `phase-11-token-optimization.md`.
-  Documentation is complete; additive preflight/reservation implementation and
-  offline tests are the next checkpoint. The LLM key should remain disabled
-  until that checkpoint passes.
+  The additive reservation ledger and benchmark-only preflight switch are now
+  implemented. Focused preflight tests passed **21**, affected regression
+  passed **111**, and the full offline regression passed **715 passed, 8
+  skipped, 32 warnings**. The LLM key should remain disabled until a
+  pipeline-specific profile is reviewed.

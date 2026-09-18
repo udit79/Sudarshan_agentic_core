@@ -20,7 +20,9 @@ from pipelines.common.task_state import TaskState
 from pipelines.common.usage_capture import aggregate_crew_usage, capture_crew_usage
 from pipelines.orchestrator.spend_guard import (
     ProviderSpendGuard,
+    TokenBudgetReservation,
     bound_text,
+    declared_provider_reservation,
     output_tokens_per_call,
     usage_tokens,
 )
@@ -86,6 +88,8 @@ class TextTransformationFlow(Flow[TaskState]):
         self.progress_callback = progress_callback
         self._result: PipelineResponse | None = None
         self._spend_guard: ProviderSpendGuard | None = None
+        self._preflight_reservation: TokenBudgetReservation | None = None
+        self._preflight_reserved_tokens = 0
 
     def run(self, request: AdvisoryRequest) -> PipelineResponse:
         self._result = None
@@ -121,6 +125,8 @@ class TextTransformationFlow(Flow[TaskState]):
             self._spend_guard = None
         self.state.provider_tokens_used = 0
         self.state.provider_budget_exceeded = False
+        self._preflight_reservation = None
+        self._preflight_reserved_tokens = 0
         self.state.operation = request.operation
         raw_constraints = request.constraints
         if hasattr(raw_constraints, "model_dump"):
@@ -147,6 +153,9 @@ class TextTransformationFlow(Flow[TaskState]):
             self.state.pipeline_options["provider_input_token_budget"] = request.metadata.get(
                 "provider_input_token_budget"
             )
+        for key in ("provider_budget_preflight", "provider_call_count"):
+            if key in request.metadata:
+                self.state.pipeline_options[key] = request.metadata.get(key)
         self.state.max_attempts = self.max_attempts
         requested_run_id = request.metadata.get("run_id")
         if isinstance(requested_run_id, str) and requested_run_id.strip():
@@ -270,6 +279,8 @@ class TextTransformationFlow(Flow[TaskState]):
         return self.state.memory_context
 
     def _run_crew(self) -> TextCrewRun:
+        if not self._preflight_provider_budget():
+            return TextCrewRun(error=self.state.failure)
         if self._spend_guard is not None and not self._spend_guard.admit_attempt():
             self.state.provider_budget_exceeded = True
             self.state.failure = "PROVIDER_TOKEN_BUDGET_EXCEEDED: retry admission denied"
@@ -315,6 +326,11 @@ class TextTransformationFlow(Flow[TaskState]):
                 model_ref=self.llm,
             )
             self.state.usage_records.append(usage_record)
+            if self._preflight_reservation is not None:
+                self._preflight_reservation.reconcile(
+                    self._preflight_reserved_tokens,
+                    usage_tokens(usage_record),
+                )
             if self._spend_guard is not None:
                 self.state.provider_tokens_used += usage_tokens(usage_record)
                 if self._spend_guard.record(usage_tokens(usage_record)):
@@ -350,6 +366,65 @@ class TextTransformationFlow(Flow[TaskState]):
             self.state.record(self.pipeline_name, "failed", summary="Text-generation crew failed", error=str(exc))
             self._write_task_failure(self.pipeline_name, str(exc))
             return TextCrewRun(error=str(exc))
+
+    def _preflight_provider_budget(self) -> bool:
+        """Reserve a declared benchmark budget before provider execution.
+
+        This path is opt-in through request metadata. Existing requests keep
+        the historical behavior until a pipeline-specific profile is ready.
+        """
+
+        options = self.state.pipeline_options
+        if options.get("provider_budget_preflight") is not True:
+            return True
+
+        total_budget = self.state.provider_token_budget
+        if total_budget is None:
+            return self._reject_preflight("provider token budget is missing")
+
+        try:
+            input_budget = int(options["provider_input_token_budget"])
+            output_budget = int(options["provider_output_token_budget"])
+            call_count = int(options["provider_call_count"])
+        except (KeyError, TypeError, ValueError):
+            return self._reject_preflight(
+                "provider preflight requires input budget, output budget, and call count"
+            )
+
+        if input_budget < 1 or output_budget < 1 or call_count < 1:
+            return self._reject_preflight("provider preflight values must be positive")
+
+        planned = declared_provider_reservation(
+            input_tokens_per_call=input_budget,
+            output_tokens_per_call=output_budget,
+            provider_call_count=call_count,
+        )
+        ledger = TokenBudgetReservation(max_tokens=total_budget)
+        if not ledger.reserve(planned):
+            return self._reject_preflight(
+                "declared provider reservation exceeds the configured total budget"
+            )
+
+        self._preflight_reservation = ledger
+        self._preflight_reserved_tokens = planned
+        self.state.pipeline_options["provider_reserved_tokens"] = planned
+        self.state.record(
+            "provider_budget",
+            "succeeded",
+            summary=f"Reserved {planned} declared provider tokens before execution",
+        )
+        return True
+
+    def _reject_preflight(self, reason: str) -> bool:
+        self.state.provider_budget_exceeded = True
+        self.state.failure = f"PROVIDER_BUDGET_PREFLIGHT_REJECTED: {reason}"
+        self.state.record(
+            "provider_budget",
+            "rejected",
+            summary="Provider execution rejected by benchmark budget preflight",
+            error=self.state.failure,
+        )
+        return False
 
     def _budgeted_llm(self) -> Any:
         """Return an LLM configured with a conservative per-call output cap."""

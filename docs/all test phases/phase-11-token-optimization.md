@@ -1,7 +1,7 @@
 # Phase 11A — Token optimization and provider budget control
 
 Date: 2026-09-18  
-Status: route defined; runtime implementation not yet started  
+Status: additive reservation ledger implemented; benchmark preflight wiring remains open
 Scope: safe token measurement and allocation before further paid live runs
 
 ## WHAT
@@ -136,6 +136,30 @@ Budget and isolation controls should target `pass^k`: every repeated run must
 obey the same safety rule. Model quality may later use `pass@k`, but a single
 successful run must never override a budget or security failure.
 
+## CURRENT IMPLEMENTATION CHECKPOINT
+
+`TokenBudgetReservation` now exists in
+`pipelines/orchestrator/spend_guard.py`. It is a small in-memory accounting
+component that can:
+
+- reserve a projected amount before a provider call;
+- reject a reservation that cannot fit the remaining cap;
+- reconcile the reservation with actual provider-reported usage;
+- fail closed if actual usage exceeds the configured cap; and
+- expose only counters and status, never sensitive inputs.
+
+Focused offline results: **21 passed**. The affected text/pipeline regression
+with an isolated temporary directory: **111 passed**. The full offline
+regression then passed **715 tests, 8 skipped, 32 warnings**. No provider call
+or API key was used.
+
+The reservation ledger is connected to an explicit
+`provider_budget_preflight=true` benchmark-only switch. The switch requires a
+pipeline profile containing input budget, output budget, and provider-call
+count. Missing or over-budget profiles fail before CrewAI execution. The
+default path remains unchanged. A future checkpoint can refine profiles and
+reconcile receipts at finer per-stage boundaries.
+
 ## LIVE RE-ENTRY GATE
 
 Do not restore the LLM key until all of these are true:
@@ -158,7 +182,9 @@ The first live rerun should be G01 only. It should verify both:
 |---|---|
 | Existing usage capture | PASS, provider-dependent |
 | Existing retry spend guard | PASS for post-attempt retry containment |
-| Pre-call total budget enforcement | NOT YET IMPLEMENTED |
+| Reservation ledger | PASS, offline and benchmark-wired |
+| Pre-call declared-budget enforcement | PASS, opt-in |
+| Provider-call exact total enforcement | NOT YET PROVEN |
 | Per-stage token ledger | NOT YET IMPLEMENTED |
 | Reconciled currency cost | NOT YET MEASURED |
 | Successful live G01 artifact | NOT YET PROVEN |

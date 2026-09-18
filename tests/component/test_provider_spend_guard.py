@@ -6,11 +6,29 @@ from pipelines.common.task_state import TaskState
 from pipelines.common.text_generation import TextTransformationFlow
 from pipelines.orchestrator.spend_guard import (
     ProviderSpendGuard,
+    TokenBudgetReservation,
     approximate_token_count,
     bound_text,
+    declared_provider_reservation,
     output_tokens_per_call,
     usage_tokens,
 )
+
+
+class _PreflightHarness(SimpleNamespace):
+    def _reject_preflight(self, reason: str) -> bool:
+        return TextTransformationFlow._reject_preflight(self, reason)
+
+    def _preflight_provider_budget(self) -> bool:
+        return TextTransformationFlow._preflight_provider_budget(self)
+
+
+def _preflight_harness(state: TaskState) -> _PreflightHarness:
+    return _PreflightHarness(
+        state=state,
+        _preflight_reservation=None,
+        _preflight_reserved_tokens=0,
+    )
 
 
 def test_provider_spend_guard_denies_retry_after_observed_cap() -> None:
@@ -39,6 +57,108 @@ def test_provider_spend_guard_allows_unlimited_mode_only_when_no_cap_is_set() ->
     assert guard.used_tokens == 50
 
 
+def test_token_budget_reservation_rejects_a_projected_overage_before_execution() -> None:
+    ledger = TokenBudgetReservation(max_tokens=1000)
+
+    assert ledger.reserve(700) is True
+    assert ledger.remaining_tokens == 300
+    assert ledger.reserve(301) is False
+    assert ledger.reservation_blocked is True
+    assert ledger.used_tokens == 0
+
+
+def test_token_budget_reservation_reconciles_actual_usage_without_double_counting() -> None:
+    ledger = TokenBudgetReservation(max_tokens=1000)
+
+    assert ledger.reserve(700) is True
+    assert ledger.reconcile(700, 420) is True
+    assert ledger.used_tokens == 420
+    assert ledger.reserved_tokens == 0
+    assert ledger.remaining_tokens == 580
+
+
+def test_token_budget_reservation_fails_closed_when_actual_usage_exceeds_cap() -> None:
+    ledger = TokenBudgetReservation(max_tokens=1000)
+
+    assert ledger.reserve(900) is True
+    assert ledger.reconcile(900, 1100) is False
+    assert ledger.exceeded is True
+    assert ledger.remaining_tokens == 0
+
+
+def test_token_budget_reservation_does_not_store_sensitive_inputs() -> None:
+    ledger = TokenBudgetReservation(max_tokens=1000)
+
+    assert ledger.reserve(250) is True
+    representation = repr(ledger)
+
+    assert "prompt" not in representation.lower()
+    assert "memory" not in representation.lower()
+    assert "secret" not in representation.lower()
+
+
+def test_declared_provider_reservation_is_deterministic() -> None:
+    assert declared_provider_reservation(
+        input_tokens_per_call=900,
+        output_tokens_per_call=600,
+        provider_call_count=4,
+    ) == 6000
+
+
+def test_text_flow_preflight_requires_an_explicit_pipeline_profile() -> None:
+    state = TaskState(
+        provider_token_budget=6000,
+        pipeline_options={"provider_budget_preflight": True},
+    )
+    flow = _preflight_harness(state)
+
+    assert TextTransformationFlow._preflight_provider_budget(flow) is False
+    assert state.provider_budget_exceeded is True
+    assert "PROVIDER_BUDGET_PREFLIGHT_REJECTED" in (state.failure or "")
+
+
+def test_text_flow_preflight_reserves_a_declared_profile() -> None:
+    state = TaskState(
+        provider_token_budget=6000,
+        pipeline_options={
+            "provider_budget_preflight": True,
+            "provider_input_token_budget": 900,
+            "provider_output_token_budget": 600,
+            "provider_call_count": 4,
+        },
+    )
+    flow = _preflight_harness(state)
+
+    assert TextTransformationFlow._preflight_provider_budget(flow) is True
+    assert flow._preflight_reserved_tokens == 6000
+    assert flow._preflight_reservation.remaining_tokens == 0
+
+
+def test_text_flow_preflight_rejects_a_profile_before_provider_execution() -> None:
+    state = TaskState(
+        provider_token_budget=5000,
+        pipeline_options={
+            "provider_budget_preflight": True,
+            "provider_input_token_budget": 900,
+            "provider_output_token_budget": 600,
+            "provider_call_count": 4,
+        },
+    )
+    flow = _preflight_harness(state)
+
+    assert TextTransformationFlow._preflight_provider_budget(flow) is False
+    assert flow._preflight_reservation is None
+    assert state.provider_budget_exceeded is True
+
+
+def test_text_flow_keeps_preflight_disabled_by_default() -> None:
+    state = TaskState(provider_token_budget=6000, pipeline_options={})
+    flow = _preflight_harness(state)
+
+    assert TextTransformationFlow._preflight_provider_budget(flow) is True
+    assert flow._preflight_reservation is None
+
+
 def test_text_flow_stops_before_a_retry_when_the_guard_is_exhausted() -> None:
     state = TaskState(
         run_id="run-budget",
@@ -47,9 +167,11 @@ def test_text_flow_stops_before_a_retry_when_the_guard_is_exhausted() -> None:
         max_attempts=2,
         provider_budget_exceeded=True,
     )
-    flow = SimpleNamespace(
+    flow = _PreflightHarness(
         state=state,
         _spend_guard=ProviderSpendGuard(max_tokens=1200, used_tokens=1400, attempts=1, exceeded=True),
+        _preflight_reservation=None,
+        _preflight_reserved_tokens=0,
     )
 
     result = TextTransformationFlow._run_crew(flow)
