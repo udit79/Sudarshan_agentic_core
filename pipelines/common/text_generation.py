@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
@@ -17,7 +18,13 @@ from pipelines.common.flow_persistence import flow_persistence, typed_persist
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter, memory_tools
 from pipelines.common.task_state import TaskState
 from pipelines.common.usage_capture import aggregate_crew_usage, capture_crew_usage
-from pipelines.orchestrator.spend_guard import ProviderSpendGuard, usage_tokens
+from pipelines.orchestrator.spend_guard import (
+    ProviderSpendGuard,
+    bound_text,
+    output_tokens_per_call,
+    usage_tokens,
+)
+from integrations.providers.router import ProviderRouter
 
 
 AgentFactory = Callable[[list[Any]], dict[str, Agent]]
@@ -132,6 +139,10 @@ class TextTransformationFlow(Flow[TaskState]):
             "resolved_memory_records": request.metadata.get("resolved_memory_records", []),
             **dict(request.metadata.get("pipeline_options", {})),
         }
+        if "provider_input_token_budget" in request.metadata:
+            self.state.pipeline_options["provider_input_token_budget"] = request.metadata.get(
+                "provider_input_token_budget"
+            )
         self.state.max_attempts = self.max_attempts
         requested_run_id = request.metadata.get("run_id")
         if isinstance(requested_run_id, str) and requested_run_id.strip():
@@ -273,7 +284,10 @@ class TextTransformationFlow(Flow[TaskState]):
         started = perf_counter()
         captured = False
         try:
-            agents = self.agent_factory(memory_tools(self._runtime()), llm=self.llm)  # type: ignore[misc]
+            agents = self.agent_factory(
+                memory_tools(self._runtime()),
+                llm=self._budgeted_llm(),
+            )  # type: ignore[misc]
             tasks = self.task_factory(agents, writer)  # type: ignore[misc]
             crew = Crew(
                 agents=list(agents.values()),
@@ -287,19 +301,7 @@ class TextTransformationFlow(Flow[TaskState]):
                     if self.state.attempt > 1 and self.state.failure
                     else "No previous quality-gate feedback; produce the first draft against the stated requirements."
                 )
-                crew_result = crew.kickoff(inputs={
-                    "query": self.state.query,
-                    "memory_context": self.state.memory_context,
-                    "task_id": self.state.task_id,
-                    "case_id": self.state.case_id,
-                    "classification_level": self.state.classification_level,
-                    "distribution": self.state.distribution,
-                    "run_id": self.state.run_id,
-                    "pipeline_options": self.state.pipeline_options,
-                    "prompt_plan": self.state.prompt_plan,
-                    "request_understanding": self.state.request_understanding,
-                    "quality_feedback": quality_feedback,
-                })
+                crew_result = crew.kickoff(inputs=self._crew_inputs(quality_feedback))
             usage_record = capture_crew_usage(
                 crew_result,
                 run_id=self.state.run_id,
@@ -344,6 +346,65 @@ class TextTransformationFlow(Flow[TaskState]):
             self.state.record(self.pipeline_name, "failed", summary="Text-generation crew failed", error=str(exc))
             self._write_task_failure(self.pipeline_name, str(exc))
             return TextCrewRun(error=str(exc))
+
+    def _budgeted_llm(self) -> Any:
+        """Return an LLM configured with a conservative per-call output cap."""
+
+        if self.state.provider_token_budget is None:
+            return self.llm
+        cap = output_tokens_per_call(self.state.provider_token_budget)
+        configured = ProviderRouter.configured_model("text", self.llm)
+        if isinstance(configured, str) and configured.strip():
+            from crewai import LLM
+
+            return LLM(model=configured.strip(), max_tokens=cap)
+        if self.llm is not None and callable(getattr(self.llm, "model_copy", None)):
+            return self.llm.model_copy(update={"max_tokens": cap})
+        raise RuntimeError(
+            "PROVIDER_BUDGET_UNAPPLIED: explicit provider budget requires a cloneable or configured LLM"
+        )
+
+    def _crew_inputs(self, quality_feedback: str) -> dict[str, Any]:
+        """Bound dynamic prompt fields without changing the default path."""
+
+        inputs: dict[str, Any] = {
+            "query": self.state.query,
+            "memory_context": self.state.memory_context,
+            "task_id": self.state.task_id,
+            "case_id": self.state.case_id,
+            "classification_level": self.state.classification_level,
+            "distribution": self.state.distribution,
+            "run_id": self.state.run_id,
+            "pipeline_options": self.state.pipeline_options,
+            "prompt_plan": self.state.prompt_plan,
+            "request_understanding": self.state.request_understanding,
+            "quality_feedback": quality_feedback,
+        }
+        budget = self.state.provider_token_budget
+        if budget is None:
+            return inputs
+        raw_input_budget = self.state.pipeline_options.get("provider_input_token_budget", budget)
+        try:
+            input_budget = max(256, int(raw_input_budget))
+        except (TypeError, ValueError):
+            input_budget = max(256, budget)
+
+        def bounded(value: Any, token_cap: int) -> str:
+            if isinstance(value, str):
+                text = value
+            else:
+                text = json.dumps(value, sort_keys=True, default=str)
+            return bound_text(text, token_cap)
+
+        inputs.update({
+            "query": bounded(self.state.query, max(1, input_budget // 5)),
+            "memory_context": bounded(self.state.memory_context, max(1, (input_budget * 2) // 5)),
+            "pipeline_options": bounded(self.state.pipeline_options, max(1, input_budget // 10)),
+            "prompt_plan": bounded(self.state.prompt_plan, max(1, input_budget // 10)),
+            "request_understanding": bounded(self.state.request_understanding, max(1, input_budget // 10)),
+            "quality_feedback": bounded(quality_feedback, max(1, input_budget // 10)),
+        })
+        return inputs
 
     def _write_task_failure(self, step: str, error: str) -> None:
         try:

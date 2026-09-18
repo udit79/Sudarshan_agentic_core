@@ -10,6 +10,7 @@ size controls at the model adapter boundary.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 
 @dataclass(slots=True)
@@ -56,4 +57,37 @@ def usage_tokens(record: dict[str, object]) -> int:
     ))
 
 
-__all__ = ["ProviderSpendGuard", "usage_tokens"]
+def approximate_token_count(value: str) -> int:
+    """Return a conservative character-based estimate for prompt sizing."""
+
+    return max(0, math.ceil(len(value) / 4))
+
+
+def bound_text(value: str, max_tokens: int) -> str:
+    """Bound dynamic text while preserving both its beginning and ending."""
+
+    if max_tokens < 1:
+        return ""
+    max_chars = max(4, max_tokens * 4)
+    if len(value) <= max_chars:
+        return value
+    marker = "\n...[bounded for provider budget]...\n"
+    available = max(0, max_chars - len(marker))
+    left = available // 2
+    right = available - left
+    return f"{value[:left]}{marker}{value[-right:] if right else ''}"
+
+
+def output_tokens_per_call(max_tokens: int, *, call_count: int = 5) -> int:
+    """Allocate a conservative completion cap across current text agents."""
+
+    return max(1, int(max_tokens) // max(1, int(call_count)))
+
+
+__all__ = [
+    "ProviderSpendGuard",
+    "approximate_token_count",
+    "bound_text",
+    "output_tokens_per_call",
+    "usage_tokens",
+]

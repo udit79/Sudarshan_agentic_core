@@ -49,7 +49,7 @@ multi-agent, load, or human-review scenario is complete.
 - [x] 36. Trajectory (safe event timeline and parallel lanes)
 - [x] 37. Observability (memory/provider/error visibility with redaction)
 - [x] 38. Telemetry (latency/usage/cost projection with duplicate receipt protection)
-- [x] 39. Full regression (693 passed, 8 skipped, 32 warnings in documented local mode; Cloud-configured API run remains pending)
+- [x] 39. Full regression (697 passed, 8 skipped, 32 warnings in documented local mode; Cloud-configured API run remains pending)
 - [ ] 40. Golden cases (G01 live recall recovered; quality gate rejected the final draft; replay fixture added)
 - [ ] 41. Holdout cases
 - [ ] 42. External AI baseline
@@ -73,7 +73,7 @@ multi-agent, load, or human-review scenario is complete.
 - Observability/telemetry report: `observability-telemetry-testing-report.md`
 - Latest Phase 9 matrix result: **7 passed**; affected regression: **149 passed, 1 warning**
 - First-half audit: `first-half-quality-audit.md`
-- Latest full deterministic local regression: **693 passed, 8 skipped, 32 warnings**
+- Latest full deterministic local regression: **697 passed, 8 skipped, 32 warnings**
 - Phase 11 golden/holdout catalogue: `phase-11-golden-and-holdout-cases.md`
 - Agentic performance/cost measurement report: `agentic-system-performance-and-cost-report.md`
 - Live G01 checkpoint: same-case bounded context recovered and other-case
@@ -92,6 +92,8 @@ multi-agent, load, or human-review scenario is complete.
 - Offline retry-spend guard matrix: **5 passed**; explicit provider budgets
   deny a second provider attempt, while provider-native first-request caps
   remain open.
+- Budgeted prompt/output-bound matrix: **9 passed**; dynamic fields are
+  bounded and completion caps are applied without changing the default path.
 - Latest isolation result: **8 passed**; artifact-evidence ownership validation
   is now enforced before registration side effects.
 - Current evidence is application-level and deterministic; live Cognee and

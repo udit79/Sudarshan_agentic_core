@@ -152,6 +152,10 @@ in this report.
   denies retry admission after that attempt. The offline spend-guard matrix
   passed 5/5 tests. This contains retry multiplication but is not yet a
   provider-side total-token cap for the first request.
+- Budgeted text execution now applies a conservative per-call completion cap
+  and bounds dynamic query/context fields before the model boundary. The
+  extended offline matrix passed 9/9 tests; the default unbudgeted path is
+  unchanged.
 
 ### FAIL
 
@@ -166,9 +170,9 @@ in this report.
   Phase 11 is not a successful golden-case result yet.
 - `token_budget=1200` did not cap the observed 35,330 provider-reported tokens.
   This is a spend-control product gap, not a test weakness.
-- The offline guard cannot undo an oversized first provider request; prompt
-  sizing and provider-native output limits are still required for a true hard
-  provider-spend ceiling.
+- The local guard cannot undo system-prompt or provider-side accounting that
+  exceeds the first-request budget; a true total-token ceiling still requires
+  provider receipt enforcement and a final prompt-size policy.
 
 ### Instrumentation checkpoint — 2026-09-18
 
@@ -210,8 +214,8 @@ decided. Trajectory and observability were available, but
 - DAG persistence/projection for the normal `/runs` route; the measured run's
   `/runs/{run_id}/dag` request returned 404 while observability and trajectory
   were available.
-- Provider-native total-token enforcement and bounded prompt construction for
-  the first request.
+- Provider-side total-token enforcement, including system prompts and any
+  hidden provider/tool calls, for the first request.
 
 ### NEEDS DESIGN DECISION
 
