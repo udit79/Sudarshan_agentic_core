@@ -132,7 +132,11 @@ multi-agent, load, or human-review scenario is complete.
   the priority.
 - Phase 11A token-optimization route: `phase-11-token-optimization.md`.
   The additive reservation ledger and benchmark-only preflight switch are now
-  implemented. Focused preflight tests passed **21**, affected regression
-  passed **111**, and the full offline regression passed **715 passed, 8
-  skipped, 32 warnings**. The LLM key should remain disabled until a
+  implemented. Focused preflight/profile tests passed **25**, affected
+  regression passed **111**, and the full offline regression passed **719
+  passed, 8 skipped, 32 warnings**. The LLM key should remain disabled until a
   pipeline-specific profile is reviewed.
+- The executive-summary diagnostic profile is now recorded in
+  `pipelines/orchestrator/budget_profiles.py`. It is deliberately unapproved
+  and rejects the current G01 receipt-derived reservation before provider
+  execution; no cheaper live budget has been invented.

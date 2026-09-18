@@ -148,9 +148,9 @@ component that can:
 - fail closed if actual usage exceeds the configured cap; and
 - expose only counters and status, never sensitive inputs.
 
-Focused offline results: **21 passed**. The affected text/pipeline regression
+Focused offline results: **25 passed**. The affected text/pipeline regression
 with an isolated temporary directory: **111 passed**. The full offline
-regression then passed **715 tests, 8 skipped, 32 warnings**. No provider call
+regression then passed **719 tests, 8 skipped, 32 warnings**. No provider call
 or API key was used.
 
 The reservation ledger is connected to an explicit
@@ -159,6 +159,18 @@ pipeline profile containing input budget, output budget, and provider-call
 count. Missing or over-budget profiles fail before CrewAI execution. The
 default path remains unchanged. A future checkpoint can refine profiles and
 reconcile receipts at finer per-stage boundaries.
+
+### Executive-summary profile checkpoint
+
+`pipelines/orchestrator/budget_profiles.py` now contains an explicit,
+unapproved diagnostic profile for the recorded G01 executive-summary run. It
+uses only the observed aggregate receipt of 54,165 input tokens and 11,919
+output tokens across four stages. The rounded reservation is greater than the
+configured 12,000-token budget, so the profile fails closed before execution.
+
+This is intentionally not a cheaper production recommendation. It proves that
+the current route cannot honestly be approved for another paid run until the
+context and stage allocation are reduced and measured again.
 
 ## LIVE RE-ENTRY GATE
 
@@ -184,6 +196,7 @@ The first live rerun should be G01 only. It should verify both:
 | Existing retry spend guard | PASS for post-attempt retry containment |
 | Reservation ledger | PASS, offline and benchmark-wired |
 | Pre-call declared-budget enforcement | PASS, opt-in |
+| Executive-summary diagnostic profile | PASS, deliberately rejected |
 | Provider-call exact total enforcement | NOT YET PROVEN |
 | Per-stage token ledger | NOT YET IMPLEMENTED |
 | Reconciled currency cost | NOT YET MEASURED |
