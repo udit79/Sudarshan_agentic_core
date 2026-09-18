@@ -17,6 +17,7 @@ from pipelines.common.flow_persistence import flow_persistence, typed_persist
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter, memory_tools
 from pipelines.common.task_state import TaskState
 from pipelines.common.usage_capture import aggregate_crew_usage, capture_crew_usage
+from pipelines.orchestrator.spend_guard import ProviderSpendGuard, usage_tokens
 
 
 AgentFactory = Callable[[list[Any]], dict[str, Agent]]
@@ -77,6 +78,7 @@ class TextTransformationFlow(Flow[TaskState]):
         self.llm = llm
         self.progress_callback = progress_callback
         self._result: PipelineResponse | None = None
+        self._spend_guard: ProviderSpendGuard | None = None
 
     def run(self, request: AdvisoryRequest) -> PipelineResponse:
         self._result = None
@@ -97,6 +99,21 @@ class TextTransformationFlow(Flow[TaskState]):
         self.state.distribution = request.distribution
         self.state.top_k = request.top_k
         self.state.token_budget = request.token_budget
+        raw_provider_budget = request.metadata.get("provider_token_budget")
+        if raw_provider_budget is None:
+            budget_cap = request.metadata.get("budget_cap")
+            if isinstance(budget_cap, Mapping):
+                raw_provider_budget = budget_cap.get("max_model_tokens")
+        if isinstance(raw_provider_budget, int) and raw_provider_budget >= 256:
+            self.state.provider_token_budget = raw_provider_budget
+            # A hard total budget cannot safely assume that a second retry will
+            # fit, so explicit provider-budget mode admits one provider attempt.
+            self._spend_guard = ProviderSpendGuard(max_tokens=raw_provider_budget, max_attempts=1)
+        else:
+            self.state.provider_token_budget = None
+            self._spend_guard = None
+        self.state.provider_tokens_used = 0
+        self.state.provider_budget_exceeded = False
         self.state.operation = request.operation
         raw_constraints = request.constraints
         if hasattr(raw_constraints, "model_dump"):
@@ -238,6 +255,16 @@ class TextTransformationFlow(Flow[TaskState]):
         return self.state.memory_context
 
     def _run_crew(self) -> TextCrewRun:
+        if self._spend_guard is not None and not self._spend_guard.admit_attempt():
+            self.state.provider_budget_exceeded = True
+            self.state.failure = "PROVIDER_TOKEN_BUDGET_EXCEEDED: retry admission denied"
+            self.state.record(
+                "provider_budget",
+                "rejected",
+                summary="Provider retry denied because the observed token budget is exhausted",
+                error=self.state.failure,
+            )
+            return TextCrewRun(error=self.state.failure)
         self.state.attempt += 1
         self.state.record(self.pipeline_name, "started", summary="Starting sequential text-generation crew")
         writer = TaskMemoryWriter(self._runtime(), on_event=self.progress_callback)
@@ -273,14 +300,29 @@ class TextTransformationFlow(Flow[TaskState]):
                     "request_understanding": self.state.request_understanding,
                     "quality_feedback": quality_feedback,
                 })
-            self.state.usage_records.append(capture_crew_usage(
+            usage_record = capture_crew_usage(
                 crew_result,
                 run_id=self.state.run_id,
                 pipeline=self.pipeline_name,
                 attempt=self.state.attempt,
                 latency_ms=round((perf_counter() - started) * 1000),
                 model_ref=self.llm,
-            ))
+            )
+            self.state.usage_records.append(usage_record)
+            if self._spend_guard is not None:
+                self.state.provider_tokens_used += usage_tokens(usage_record)
+                if self._spend_guard.record(usage_tokens(usage_record)):
+                    self.state.provider_budget_exceeded = True
+                    self.state.failure = (
+                        "PROVIDER_TOKEN_BUDGET_EXCEEDED: observed provider usage exceeded the configured cap"
+                    )
+                    self.state.record(
+                        "provider_budget",
+                        "rejected",
+                        summary="Provider usage exceeded the configured retry-spend cap",
+                        error=self.state.failure,
+                    )
+                    return TextCrewRun(error=self.state.failure)
             captured = True
             output = self.output_model.model_validate(getattr(tasks["output"].output, "pydantic", None))  # type: ignore[union-attr]
             output = self.prepare_quality_output(output)
@@ -289,14 +331,15 @@ class TextTransformationFlow(Flow[TaskState]):
             return TextCrewRun(output=output, quality=quality)
         except Exception as exc:
             if not captured:
-                self.state.usage_records.append(capture_crew_usage(
+                usage_record = capture_crew_usage(
                     None,
                     run_id=self.state.run_id,
                     pipeline=self.pipeline_name,
                     attempt=self.state.attempt,
                     latency_ms=round((perf_counter() - started) * 1000),
                     model_ref=self.llm,
-                ))
+                )
+                self.state.usage_records.append(usage_record)
             self.state.failure = str(exc)
             self.state.record(self.pipeline_name, "failed", summary="Text-generation crew failed", error=str(exc))
             self._write_task_failure(self.pipeline_name, str(exc))
@@ -349,6 +392,8 @@ class TextTransformationFlow(Flow[TaskState]):
     def route_validation(self) -> str:
         if self.state.output and self.state.quality_review and self.state.quality_review.get("approved"):
             return "complete"
+        if self.state.provider_budget_exceeded:
+            return "failed"
         if self.state.attempt < self.state.max_attempts:
             return "retry"
         return "failed"
@@ -468,6 +513,9 @@ class TextTransformationFlow(Flow[TaskState]):
             "failure": self.state.failure,
             "quality_review": self.state.quality_review or {},
             "token_budget": self.state.token_budget,
+            "provider_token_budget": self.state.provider_token_budget,
+            "provider_tokens_used": self.state.provider_tokens_used,
+            "provider_budget_exceeded": self.state.provider_budget_exceeded,
         }
         return PipelineResponse(
             status="failed",
@@ -493,6 +541,9 @@ class TextTransformationFlow(Flow[TaskState]):
                     pipeline=self.pipeline_name,
                 ),
                 "usage_records": list(self.state.usage_records),
+                "provider_token_budget": self.state.provider_token_budget,
+                "provider_tokens_used": self.state.provider_tokens_used,
+                "provider_budget_exceeded": self.state.provider_budget_exceeded,
             },
         )
 
@@ -504,4 +555,7 @@ class TextTransformationFlow(Flow[TaskState]):
                 pipeline=self.pipeline_name,
             ),
             "usage_records": list(self.state.usage_records),
+            "provider_token_budget": self.state.provider_token_budget,
+            "provider_tokens_used": self.state.provider_tokens_used,
+            "provider_budget_exceeded": self.state.provider_budget_exceeded,
         }

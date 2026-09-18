@@ -459,11 +459,18 @@ Offline proof:
 - usage normalization and retry aggregation: 4 focused tests passed;
 - affected telemetry/pipeline regression: 26 passed;
 - pipeline regression: 134 passed;
-- full local regression: 688 passed, 8 skipped, 32 warnings.
+- full local regression: 693 passed, 8 skipped, 32 warnings.
 
 This proves the instrumentation path and its safety properties. It does not
 yet prove that the configured live provider returns non-zero usage counters;
 one explicitly approved, budgeted live run is still required for that.
+
+The retry-spend guard in `pipelines/orchestrator/spend_guard.py` now admits
+one provider attempt when `metadata.provider_token_budget` is explicitly
+supplied and fails closed before a retry. Its focused matrix passed 5/5 tests.
+This contains retry multiplication only: it cannot undo an oversized first
+provider request, so provider-native output limits and bounded prompt sizing
+remain required before restoring the live key.
 
 ## Current readiness
 
@@ -472,6 +479,7 @@ one explicitly approved, budgeted live run is still required for that.
 - deterministic full regression;
 - typed usage and telemetry contracts;
 - sanitized Phase 11 benchmark-record construction;
+- offline retry-spend containment;
 - safe observability events;
 - memory timing events;
 - artifact IDs and checksums;

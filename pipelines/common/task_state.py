@@ -67,6 +67,9 @@ class TaskState(BaseModel):
     # Sanitized provider counters only; prompts and model output never enter
     # this state field.
     usage_records: list[dict[str, Any]] = Field(default_factory=list)
+    provider_token_budget: int | None = Field(default=None, ge=256)
+    provider_tokens_used: int = Field(default=0, ge=0)
+    provider_budget_exceeded: bool = False
 
     def record(self, step: str, status: TaskEventStatus, *,
                summary: str = "", error: str | None = None) -> None:

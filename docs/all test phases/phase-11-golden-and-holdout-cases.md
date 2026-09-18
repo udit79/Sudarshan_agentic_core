@@ -148,6 +148,10 @@ in this report.
   wall, provider, usage, cache, artifact, and quality fields separate. Its
   focused matrix passed 3/3 tests; unavailable values remain `null` rather
   than being reported as zero.
+- An explicit `provider_token_budget` now admits one provider attempt and
+  denies retry admission after that attempt. The offline spend-guard matrix
+  passed 5/5 tests. This contains retry multiplication but is not yet a
+  provider-side total-token cap for the first request.
 
 ### FAIL
 
@@ -162,6 +166,9 @@ in this report.
   Phase 11 is not a successful golden-case result yet.
 - `token_budget=1200` did not cap the observed 35,330 provider-reported tokens.
   This is a spend-control product gap, not a test weakness.
+- The offline guard cannot undo an oversized first provider request; prompt
+  sizing and provider-native output limits are still required for a true hard
+  provider-spend ceiling.
 
 ### Instrumentation checkpoint — 2026-09-18
 
@@ -203,6 +210,8 @@ decided. Trajectory and observability were available, but
 - DAG persistence/projection for the normal `/runs` route; the measured run's
   `/runs/{run_id}/dag` request returned 404 while observability and trajectory
   were available.
+- Provider-native total-token enforcement and bounded prompt construction for
+  the first request.
 
 ### NEEDS DESIGN DECISION
 
