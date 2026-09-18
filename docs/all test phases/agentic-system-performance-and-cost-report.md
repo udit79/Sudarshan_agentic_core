@@ -397,6 +397,46 @@ Observed:
 This is a useful failure record because it proves the safety gate worked while
 also exposing that provider usage accounting is not yet complete.
 
+### First measured usage run — 2026-09-18
+
+Run: `run-g01-usage-20260918-01`
+Pipeline: `executive_summary`
+Admission: HTTP 202, 114 ms
+Final status: `failed`
+Attempts: `2`
+Observability events: `48`
+Trajectory lanes: `1` (`main`)
+Artifacts: `0`
+
+Measured safe telemetry:
+
+| Metric | Value | Meaning |
+|---|---:|---|
+| Input tokens | 29,430 | Provider-reported prompt/input usage across both attempts |
+| Output tokens | 5,900 | Provider-reported completion usage across both attempts |
+| Reasoning tokens | 0 | No separate reasoning counter was returned |
+| Total measured tokens | 35,330 | Input plus output plus reasoning |
+| Crew wall time | 69,177 ms | Total CrewAI execution time, not provider-only latency |
+| Memory recall duration | 12,166 ms | First request-memory recall event |
+| Second memory recall duration | 11,877 ms | Pipeline-context recall event |
+| Usage records | 2 | One per agent attempt |
+| Cost | unavailable | No pricing/billing reconciliation configured |
+
+The quality gate rejected the result because the generated summary did not
+contain grounded G01 findings and introduced unsupported procedural
+recommendations. No artifact was released. This is a product-quality failure,
+not a telemetry failure.
+
+The DAG endpoint returned `404 run not found in DAG store` for this run while
+trajectory and observability were available. DAG availability for the normal
+`/runs` route is therefore an open integration gap.
+
+The Phase 11 benchmark-record boundary is now implemented in
+`pipelines/orchestrator/benchmark_record.py`. It accepts only sanitized API
+projections, keeps queue/wall/provider timing separate, preserves unknown
+measurements as `null`, and emits only artifact IDs and checksums. Its focused
+matrix passed 3/3 tests without provider or network calls.
+
 ## Instrumentation checkpoint — 2026-09-18
 
 The missing measurement boundary was fixed without making another live model
@@ -419,7 +459,7 @@ Offline proof:
 - usage normalization and retry aggregation: 4 focused tests passed;
 - affected telemetry/pipeline regression: 26 passed;
 - pipeline regression: 134 passed;
-- full local regression: 685 passed, 8 skipped, 32 warnings.
+- full local regression: 688 passed, 8 skipped, 32 warnings.
 
 This proves the instrumentation path and its safety properties. It does not
 yet prove that the configured live provider returns non-zero usage counters;
@@ -431,6 +471,7 @@ one explicitly approved, budgeted live run is still required for that.
 
 - deterministic full regression;
 - typed usage and telemetry contracts;
+- sanitized Phase 11 benchmark-record construction;
 - safe observability events;
 - memory timing events;
 - artifact IDs and checksums;
@@ -451,13 +492,13 @@ one explicitly approved, budgeted live run is still required for that.
 
 ## Recommended next order
 
-1. Keep the current Phase 11 checkpoint; do not run an unbudgeted live call.
+1. Do not repeat G01 until the spend-control issue is addressed: the request's
+   `token_budget=1200` did not cap the observed 35,330 provider tokens.
 2. Configure or verify a pricing source before claiming cost numbers.
-3. Run one explicitly approved, token-budgeted G01 request and inspect its
-   sanitized usage projection.
+3. Repair or explicitly document DAG persistence for normal `/runs`.
 4. Capture the sanitized benchmark record with wall, memory, orchestration,
    and provider-usage truth levels kept separate.
-5. Run the PPT path once with an exact slide-count constraint.
+5. Run the PPT path once only after a hard budget policy is confirmed.
 6. Review the PPT structurally and visually.
 7. Run the remaining golden cases and calculate p50/p95 only after the values
    are genuinely recorded.

@@ -142,6 +142,12 @@ in this report.
 - The offline G01 replay fixture can build a task-scoped, case-scoped
   grounding ContextPack with the expected facts, unknowns, and source
   reference (`tests/component/test_phase11_g01_fixture.py`).
+- The first controlled live run returned non-zero provider counters and wall
+  time through the sanitized telemetry projection.
+- A sanitized Phase 11 benchmark-record builder now keeps admission, queue,
+  wall, provider, usage, cache, artifact, and quality fields separate. Its
+  focused matrix passed 3/3 tests; unavailable values remain `null` rather
+  than being reported as zero.
 
 ### FAIL
 
@@ -152,6 +158,10 @@ in this report.
 - The live run's aggregate telemetry reported zero provider tokens and zero
   latency despite real memory/provider work. This is a measurement gap, not
   evidence that the request was free.
+- The measured run's quality gate rejected the output and released no artifact;
+  Phase 11 is not a successful golden-case result yet.
+- `token_budget=1200` did not cap the observed 35,330 provider-reported tokens.
+  This is a spend-control product gap, not a test weakness.
 
 ### Instrumentation checkpoint — 2026-09-18
 
@@ -164,10 +174,24 @@ provider billing receipt is configured.
 
 The offline instrumentation matrix passed 4/4 tests, the affected telemetry
 and pipeline regression passed 134 tests, and the full local regression passed
-685 tests with 8 skipped and 32 warnings. No live provider request was made
-for this fix. Phase 11 therefore remains open: the next action is one
-explicitly approved, token-budgeted G01 live run to verify non-zero provider
-usage is actually returned in this environment.
+688 tests with 8 skipped and 32 warnings. This was the pre-live measurement
+checkpoint; the first measured live run is recorded below.
+
+### First measured usage run — 2026-09-18
+
+The controlled run `run-g01-usage-20260918-01` was admitted with HTTP 202 in
+114 ms and ended `failed` after two attempts. Safe telemetry recorded 29,430
+input tokens, 5,900 output tokens, zero separate reasoning tokens, and 69,177
+ms of CrewAI wall time. It recorded 48 observability events, one main
+trajectory lane, and two usage records. No artifact was released because the
+quality gate rejected ungrounded findings and unsupported procedural
+recommendations. Cost remained unavailable.
+
+This proves real provider usage is now visible. It also found that
+`token_budget=1200` is not a hard provider-spend cap: the observed total was
+35,330 tokens. No further live calls should run until spend-control policy is
+decided. Trajectory and observability were available, but
+`/runs/{run_id}/dag` returned 404 for this normal `/runs` run.
 
 ### NOT YET IMPLEMENTED
 
@@ -176,6 +200,9 @@ usage is actually returned in this environment.
 - Live execution of G02-G10 and the holdout cases.
 - Automated benchmark runner and p50/p95 aggregation.
 - Final claim/evidence scoring rubric and human review scores.
+- DAG persistence/projection for the normal `/runs` route; the measured run's
+  `/runs/{run_id}/dag` request returned 404 while observability and trajectory
+  were available.
 
 ### NEEDS DESIGN DECISION
 
