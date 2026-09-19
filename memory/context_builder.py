@@ -165,6 +165,13 @@ class ContextBuilder:
                 continue
             lexical = self._lexical_score(content, query_terms)
             backend_score = float(result.score or 0.0)
+            # A provider may return a broad candidate set.  Do not inject a
+            # clearly unrelated, unscored candidate just because it fits the
+            # token budget.  Positive provider scores still support semantic
+            # matches whose wording does not overlap the query.
+            if query_terms and lexical == 0.0 and backend_score <= 0.0:
+                budget_dropped_count += 1
+                continue
             injection_flags = detect_prompt_injection(content)
             if injection_flags:
                 provenance = dict(result.provenance or {})

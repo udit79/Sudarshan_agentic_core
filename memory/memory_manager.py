@@ -104,6 +104,32 @@ def _scope_type(value: Any) -> ScopeType | None:
         return None
 
 
+def _scope_from_node_sets(value: Any) -> tuple[ScopeType, str] | None:
+    """Recover one Sudarshan scope from Cognee's returned node-set marker."""
+
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        values = [item for item in value if isinstance(item, str)]
+    else:
+        return None
+    matches: list[tuple[ScopeType, str]] = []
+    prefix = "sudarshan:scope:"
+    for item in values:
+        if not item.startswith(prefix):
+            continue
+        remainder = item[len(prefix):]
+        scope_name, separator, scope_id = remainder.partition(":")
+        if not separator or not scope_id:
+            continue
+        scope_type = _scope_type(scope_name)
+        if scope_type is not None:
+            matches.append((scope_type, scope_id))
+    # A remembered unit is written to one exact node set. Refuse ambiguous
+    # provider shapes rather than guessing which scope should be trusted.
+    return matches[0] if len(matches) == 1 else None
+
+
 def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
     if isinstance(raw, RetrievedMemory):
         return [raw]
@@ -123,6 +149,17 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
         return [RetrievedMemory(str(raw))]
 
     metadata: Mapping[str, Any] = raw.get("metadata") or raw.get("memify_metadata") or {}
+    provider_payload = raw.get("raw")
+    if isinstance(provider_payload, Mapping):
+        provider_metadata = provider_payload.get("metadata")
+        if not metadata and isinstance(provider_metadata, Mapping):
+            metadata = provider_metadata
+    provider_scope = _scope_from_node_sets(
+        raw.get("belongs_to_set")
+        or (provider_payload.get("belongs_to_set") if isinstance(provider_payload, Mapping) else None)
+    )
+    scope_type = _scope_type(metadata.get("scope_type")) or (provider_scope[0] if provider_scope else None)
+    scope_id = metadata.get("scope_id") or (provider_scope[1] if provider_scope else None)
     context_layers = _context_layers(metadata)
     provenance = dict(metadata.get("provenance")) if isinstance(metadata.get("provenance"), Mapping) else {}
     # Preserve stable identity and lifecycle hints beside the bounded text.
@@ -131,13 +168,19 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
     for key in ("memory_id", "unit_id", "pipeline", "step", "status", "source_id", "source_type"):
         if key in metadata:
             provenance.setdefault(key, metadata[key])
+    if provider_scope:
+        provenance.setdefault("node_set", f"sudarshan:scope:{provider_scope[0].value}:{provider_scope[1]}")
+    if isinstance(provider_payload, Mapping):
+        for key in ("id", "document_id", "document_name", "source_chunk_id"):
+            if key in provider_payload:
+                provenance.setdefault(f"cognee_{key}", provider_payload[key])
     result = raw.get("search_result", raw.get("context", raw.get("text", raw.get("answer"))))
     if isinstance(result, (dict, list, tuple)):
         nested = _retrieved_from(result)
         return [RetrievedMemory(
             item.content,
-            _scope_type(metadata.get("scope_type")) or item.scope_type,
-            metadata.get("scope_id") or item.scope_id,
+            scope_type or item.scope_type,
+            scope_id or item.scope_id,
             metadata.get("source_reference") or item.source_reference,
             item.score,
             provenance or item.provenance,
@@ -156,7 +199,7 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
     except (TypeError, ValueError):
         score = None
     return [RetrievedMemory(
-        str(result), _scope_type(metadata.get("scope_type")), metadata.get("scope_id"),
+        str(result), scope_type, scope_id,
         metadata.get("source_reference") or metadata.get("source"), score, provenance,
         metadata.get("memory_id"), str(metadata.get("lifecycle", "active")),
         context_layers, _context_level(metadata.get("context_level", "L2")),

@@ -58,6 +58,21 @@ class PresentationFlow(TextTransformationFlow):
             progress_callback=progress_callback,
         )
 
+    def prepare_quality_output(self, output: PresentationOutput) -> PresentationOutput:
+        """Keep model output renderable when no validated custom template exists.
+
+        The model may still return an arbitrary ``template_id`` even after the
+        task instruction asks for the native renderer.  A custom template is
+        only meaningful when a validated ``PptTemplateContract`` is supplied;
+        otherwise the existing native renderer is the safe product contract.
+        Preserve the slide content and normalize only the unsupported template
+        selection before quality checks and artifact persistence.
+        """
+
+        if output.template_id != "native-default":
+            return output.model_copy(update={"template_id": "native-default", "template_version": None})
+        return output
+
     def quality_output_issues(self, output: PresentationOutput) -> list[str]:
         """Render and validate constraints during the quality gate for the repair loop."""
         raw_constraints = self._request().constraints

@@ -108,6 +108,16 @@ def _looks_like_text(sample: bytes) -> bool:
     return True
 
 
+def _has_non_whitespace_text(path: Path) -> bool:
+    """Return whether a UTF-8 text source contains usable characters."""
+
+    with path.open("r", encoding="utf-8") as source:
+        for chunk in iter(lambda: source.read(64 * 1024), ""):
+            if chunk.strip():
+                return True
+    return False
+
+
 def _matches_magic(
     path: Path,
     extension: str,
@@ -206,6 +216,13 @@ def inspect_source(
         sample = source.read(4096)
     if not _matches_magic(path, extension, sample, max_uncompressed_bytes=max_bytes, byte_size=byte_size):
         raise SourceSafetyError("source content does not match its declared file type")
+    if extension in TEXT_EXTENSIONS:
+        try:
+            has_content = _has_non_whitespace_text(path)
+        except UnicodeDecodeError as exc:
+            raise SourceSafetyError("source is not valid UTF-8 text") from exc
+        if not has_content:
+            raise SourceSafetyError("source content is empty")
 
     classification = require_classification(classification_level)
     return SourceInspection(

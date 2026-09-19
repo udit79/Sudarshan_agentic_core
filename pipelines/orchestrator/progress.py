@@ -23,6 +23,7 @@ ProgressStatus = Literal[
     "waiting_for_input",
     "pending",
     "succeeded",
+    "partial",
     "failed",
     "completed",
     "cancelled",

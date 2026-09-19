@@ -7,9 +7,10 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from api.storage import ObjectStore, build_object_store_from_env
+from memory import AccessContext
 from pipelines.orchestrator.contracts import ArtifactManifest, QualityStatus
 
 
@@ -19,6 +20,19 @@ class ArtifactNotFound(FileNotFoundError):
 
 class ArtifactPreviewUnavailable(ArtifactNotFound):
     """Raised when a registered artifact has no safe preview representation."""
+
+
+class EvidenceScopeVerifier(Protocol):
+    """Minimal evidence ownership interface required by artifact registration."""
+
+    def get_evidence(
+        self,
+        evidence_id: str,
+        context: AccessContext,
+        *,
+        classification_level: str = "RESTRICTED",
+    ) -> dict[str, Any]:
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +49,13 @@ class CheckedArtifact:
 class ArtifactStore:
     """Register files under the controlled artifact root and verify integrity."""
 
-    def __init__(self, root: str | Path = "artifacts", *, object_store: ObjectStore | None = None) -> None:
+    def __init__(
+        self,
+        root: str | Path = "artifacts",
+        *,
+        object_store: ObjectStore | None = None,
+        evidence_scope_verifier: EvidenceScopeVerifier | None = None,
+    ) -> None:
         self.root = Path(root).resolve()
         self.manifest_root = self.root / ".state" / "manifests"
         self.preview_root = self.root / ".state" / "previews"
@@ -44,6 +64,41 @@ class ArtifactStore:
         self.preview_root.mkdir(parents=True, exist_ok=True)
         self.quality_report_root.mkdir(parents=True, exist_ok=True)
         self.object_store = object_store or build_object_store_from_env(self.root)
+        self.evidence_scope_verifier = evidence_scope_verifier
+
+    def _validate_evidence_ownership(
+        self,
+        evidence_ids: list[str] | None,
+        *,
+        classification_level: str,
+        user_id: str,
+        case_id: str,
+        task_id: str,
+    ) -> None:
+        """Reject foreign evidence before any artifact side effect occurs."""
+
+        requested_ids = list(dict.fromkeys(
+            str(item).strip() for item in (evidence_ids or []) if str(item).strip()
+        ))
+        if not requested_ids:
+            return
+        verifier = self.evidence_scope_verifier
+        if verifier is None:
+            raise PermissionError(
+                "evidence ownership verifier is required when an artifact has evidence_ids"
+            )
+        context = AccessContext(user_id=user_id, case_id=case_id, task_id=task_id)
+        for evidence_id in requested_ids:
+            try:
+                verifier.get_evidence(
+                    evidence_id,
+                    context,
+                    classification_level=classification_level,
+                )
+            except (KeyError, PermissionError, ValueError) as exc:
+                raise PermissionError(
+                    f"evidence {evidence_id!r} is not accessible in case {case_id!r}"
+                ) from exc
 
     def _safe_source(self, path: str | Path) -> Path:
         resolved = Path(path).resolve()
@@ -118,6 +173,13 @@ class ArtifactStore:
     ) -> ArtifactManifest:
         if not all(str(value).strip() for value in (user_id, case_id, task_id)):
             raise ValueError("artifact registration requires user_id, case_id, and task_id")
+        self._validate_evidence_ownership(
+            evidence_ids,
+            classification_level=classification_level,
+            user_id=user_id,
+            case_id=case_id,
+            task_id=task_id,
+        )
         source = self._safe_source(path)
         digest = self._sha256(source)
         artifact_id = "artifact-" + hashlib.sha256(
@@ -204,11 +266,24 @@ class ArtifactStore:
         cannot be treated as a deliverable.
         """
 
+        self._validate_evidence_ownership(
+            evidence_ids,
+            classification_level=classification_level,
+            user_id=user_id,
+            case_id=case_id,
+            task_id=task_id,
+        )
+
         from pipelines.common.renderers import default_renderer_registry
 
         registry = default_renderer_registry()
         selection = registry.resolve(renderer_id, artifact_kind, "inspect")
-        report = registry.inspect(selection.selected_renderer_id, path, required_text=required_text)
+        report = registry.inspect(
+            selection.selected_renderer_id,
+            path,
+            kind=artifact_kind,
+            required_text=required_text,
+        )
         quality_report_id = "quality-" + hashlib.sha256(
             f"{run_id}:{kind}:{selection.renderer_version}:{source_ir_hash or Path(path).name}".encode("utf-8")
         ).hexdigest()[:24]

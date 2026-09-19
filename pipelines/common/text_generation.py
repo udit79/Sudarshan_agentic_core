@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
@@ -16,6 +17,16 @@ from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.common.flow_persistence import flow_persistence, typed_persist
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter, memory_tools
 from pipelines.common.task_state import TaskState
+from pipelines.common.usage_capture import aggregate_crew_usage, capture_crew_usage
+from pipelines.orchestrator.spend_guard import (
+    ProviderSpendGuard,
+    TokenBudgetReservation,
+    bound_text,
+    declared_provider_reservation,
+    output_tokens_per_call,
+    usage_tokens,
+)
+from integrations.providers.router import ProviderRouter
 
 
 AgentFactory = Callable[[list[Any]], dict[str, Agent]]
@@ -76,9 +87,14 @@ class TextTransformationFlow(Flow[TaskState]):
         self.llm = llm
         self.progress_callback = progress_callback
         self._result: PipelineResponse | None = None
+        self._spend_guard: ProviderSpendGuard | None = None
+        self._preflight_reservation: TokenBudgetReservation | None = None
+        self._preflight_reserved_tokens = 0
 
     def run(self, request: AdvisoryRequest) -> PipelineResponse:
         self._result = None
+        self.state.usage_records = []
+        self.state.stage_usage_records = []
         self.state.pipeline_name = self.pipeline_name
         self.state.pipeline_options = {
             **self.pipeline_options(request),
@@ -95,6 +111,23 @@ class TextTransformationFlow(Flow[TaskState]):
         self.state.distribution = request.distribution
         self.state.top_k = request.top_k
         self.state.token_budget = request.token_budget
+        raw_provider_budget = request.metadata.get("provider_token_budget")
+        if raw_provider_budget is None:
+            budget_cap = request.metadata.get("budget_cap")
+            if isinstance(budget_cap, Mapping):
+                raw_provider_budget = budget_cap.get("max_model_tokens")
+        if isinstance(raw_provider_budget, int) and raw_provider_budget >= 256:
+            self.state.provider_token_budget = raw_provider_budget
+            # A hard total budget cannot safely assume that a second retry will
+            # fit, so explicit provider-budget mode admits one provider attempt.
+            self._spend_guard = ProviderSpendGuard(max_tokens=raw_provider_budget, max_attempts=1)
+        else:
+            self.state.provider_token_budget = None
+            self._spend_guard = None
+        self.state.provider_tokens_used = 0
+        self.state.provider_budget_exceeded = False
+        self._preflight_reservation = None
+        self._preflight_reserved_tokens = 0
         self.state.operation = request.operation
         raw_constraints = request.constraints
         if hasattr(raw_constraints, "model_dump"):
@@ -113,6 +146,17 @@ class TextTransformationFlow(Flow[TaskState]):
             "resolved_memory_records": request.metadata.get("resolved_memory_records", []),
             **dict(request.metadata.get("pipeline_options", {})),
         }
+        if "provider_output_token_budget" in request.metadata:
+            self.state.pipeline_options["provider_output_token_budget"] = request.metadata.get(
+                "provider_output_token_budget"
+            )
+        if "provider_input_token_budget" in request.metadata:
+            self.state.pipeline_options["provider_input_token_budget"] = request.metadata.get(
+                "provider_input_token_budget"
+            )
+        for key in ("provider_budget_preflight", "provider_call_count", "provider_context_compaction"):
+            if key in request.metadata:
+                self.state.pipeline_options[key] = request.metadata.get(key)
         self.state.max_attempts = self.max_attempts
         requested_run_id = request.metadata.get("run_id")
         if isinstance(requested_run_id, str) and requested_run_id.strip():
@@ -192,6 +236,7 @@ class TextTransformationFlow(Flow[TaskState]):
             pipeline_name=self.pipeline_name,
             query=request.query,
             prompt_plan=dict(self.state.prompt_plan),
+            compact_task_context=self.state.pipeline_options.get("provider_context_compaction") is True,
         )
 
     @start()
@@ -236,11 +281,34 @@ class TextTransformationFlow(Flow[TaskState]):
         return self.state.memory_context
 
     def _run_crew(self) -> TextCrewRun:
+        if not self._preflight_provider_budget():
+            return TextCrewRun(error=self.state.failure)
+        if self._spend_guard is not None and not self._spend_guard.admit_attempt():
+            self.state.provider_budget_exceeded = True
+            self.state.failure = "PROVIDER_TOKEN_BUDGET_EXCEEDED: retry admission denied"
+            self.state.record(
+                "provider_budget",
+                "rejected",
+                summary="Provider retry denied because the observed token budget is exhausted",
+                error=self.state.failure,
+            )
+            return TextCrewRun(error=self.state.failure)
         self.state.attempt += 1
         self.state.record(self.pipeline_name, "started", summary="Starting sequential text-generation crew")
-        writer = TaskMemoryWriter(self._runtime(), on_event=self.progress_callback)
+        writer = TaskMemoryWriter(
+            self._runtime(),
+            on_event=self.progress_callback,
+            on_usage=self._record_stage_usage,
+        )
+        from time import perf_counter
+
+        started = perf_counter()
+        captured = False
         try:
-            agents = self.agent_factory(memory_tools(self._runtime()), llm=self.llm)  # type: ignore[misc]
+            agents = self.agent_factory(
+                memory_tools(self._runtime()),
+                llm=self._budgeted_llm(),
+            )  # type: ignore[misc]
             tasks = self.task_factory(agents, writer)  # type: ignore[misc]
             crew = Crew(
                 agents=list(agents.values()),
@@ -254,29 +322,224 @@ class TextTransformationFlow(Flow[TaskState]):
                     if self.state.attempt > 1 and self.state.failure
                     else "No previous quality-gate feedback; produce the first draft against the stated requirements."
                 )
-                crew.kickoff(inputs={
-                    "query": self.state.query,
-                    "memory_context": self.state.memory_context,
-                    "task_id": self.state.task_id,
-                    "case_id": self.state.case_id,
-                    "classification_level": self.state.classification_level,
-                    "distribution": self.state.distribution,
-                    "run_id": self.state.run_id,
-                    "pipeline_options": self.state.pipeline_options,
-                    "prompt_plan": self.state.prompt_plan,
-                    "request_understanding": self.state.request_understanding,
-                    "quality_feedback": quality_feedback,
-                })
+                crew_result = crew.kickoff(inputs=self._crew_inputs(quality_feedback))
+            usage_record = capture_crew_usage(
+                crew_result,
+                run_id=self.state.run_id,
+                pipeline=self.pipeline_name,
+                attempt=self.state.attempt,
+                latency_ms=round((perf_counter() - started) * 1000),
+                model_ref=self.llm,
+            )
+            usage_record["stage_usage"] = list(self.state.stage_usage_records)
+            self.state.usage_records.append(usage_record)
+            if self._preflight_reservation is not None:
+                self._preflight_reservation.reconcile(
+                    self._preflight_reserved_tokens,
+                    usage_tokens(usage_record),
+                )
+            if self._spend_guard is not None:
+                self.state.provider_tokens_used += usage_tokens(usage_record)
+                if self._spend_guard.record(usage_tokens(usage_record)):
+                    self.state.provider_budget_exceeded = True
+                    self.state.failure = (
+                        "PROVIDER_TOKEN_BUDGET_EXCEEDED: observed provider usage exceeded the configured cap"
+                    )
+                    self.state.record(
+                        "provider_budget",
+                        "rejected",
+                        summary="Provider usage exceeded the configured retry-spend cap",
+                        error=self.state.failure,
+                    )
+                    return TextCrewRun(error=self.state.failure)
+            captured = True
             output = self.output_model.model_validate(getattr(tasks["output"].output, "pydantic", None))  # type: ignore[union-attr]
             output = self.prepare_quality_output(output)
             quality = self.quality_model.model_validate(getattr(tasks["quality"].output, "pydantic", None))  # type: ignore[union-attr]
             self.state.record(self.pipeline_name, "succeeded", summary="Text-generation crew completed")
             return TextCrewRun(output=output, quality=quality)
         except Exception as exc:
+            if not captured:
+                usage_record = capture_crew_usage(
+                    None,
+                    run_id=self.state.run_id,
+                    pipeline=self.pipeline_name,
+                    attempt=self.state.attempt,
+                    latency_ms=round((perf_counter() - started) * 1000),
+                    model_ref=self.llm,
+                )
+                self.state.usage_records.append(usage_record)
             self.state.failure = str(exc)
             self.state.record(self.pipeline_name, "failed", summary="Text-generation crew failed", error=str(exc))
             self._write_task_failure(self.pipeline_name, str(exc))
             return TextCrewRun(error=str(exc))
+
+    def _record_stage_usage(self, stage: str, usage: dict[str, Any]) -> None:
+        """Keep per-task counters separate from aggregate pipeline totals."""
+
+        self.state.stage_usage_records.append({
+            "stage": stage,
+            "attempt": max(1, self.state.attempt),
+            **{
+                key: value
+                for key, value in usage.items()
+                if key != "stage"
+            },
+        })
+
+    def _preflight_provider_budget(self) -> bool:
+        """Reserve a declared benchmark budget before provider execution.
+
+        This path is opt-in through request metadata. Existing requests keep
+        the historical behavior until a pipeline-specific profile is ready.
+        """
+
+        options = self.state.pipeline_options
+        if options.get("provider_budget_preflight") is not True:
+            return True
+
+        total_budget = self.state.provider_token_budget
+        if total_budget is None:
+            return self._reject_preflight("provider token budget is missing")
+
+        try:
+            input_budget = int(options["provider_input_token_budget"])
+            output_budget = int(options["provider_output_token_budget"])
+            call_count = int(options["provider_call_count"])
+        except (KeyError, TypeError, ValueError):
+            return self._reject_preflight(
+                "provider preflight requires input budget, output budget, and call count"
+            )
+
+        if input_budget < 1 or output_budget < 1 or call_count < 1:
+            return self._reject_preflight("provider preflight values must be positive")
+
+        planned = declared_provider_reservation(
+            input_tokens_per_call=input_budget,
+            output_tokens_per_call=output_budget,
+            provider_call_count=call_count,
+        )
+        ledger = TokenBudgetReservation(max_tokens=total_budget)
+        if not ledger.reserve(planned):
+            return self._reject_preflight(
+                "declared provider reservation exceeds the configured total budget"
+            )
+
+        self._preflight_reservation = ledger
+        self._preflight_reserved_tokens = planned
+        self.state.pipeline_options["provider_reserved_tokens"] = planned
+        self.state.record(
+            "provider_budget",
+            "succeeded",
+            summary=f"Reserved {planned} declared provider tokens before execution",
+        )
+        return True
+
+    def _reject_preflight(self, reason: str) -> bool:
+        self.state.provider_budget_exceeded = True
+        self.state.failure = f"PROVIDER_BUDGET_PREFLIGHT_REJECTED: {reason}"
+        self.state.record(
+            "provider_budget",
+            "rejected",
+            summary="Provider execution rejected by benchmark budget preflight",
+            error=self.state.failure,
+        )
+        return False
+
+    def _budgeted_llm(self) -> Any:
+        """Return an LLM configured with a conservative per-call output cap."""
+
+        if self.state.provider_token_budget is None:
+            return self.llm
+        raw_output_budget = self.state.pipeline_options.get("provider_output_token_budget")
+        if isinstance(raw_output_budget, int) and raw_output_budget >= 256:
+            cap = raw_output_budget
+        else:
+            cap = output_tokens_per_call(self.state.provider_token_budget)
+        configured = ProviderRouter.configured_model("text", self.llm)
+        if isinstance(configured, str) and configured.strip():
+            from crewai import LLM
+
+            model = configured.strip()
+            if TextTransformationFlow._uses_completion_token_parameter(model):
+                # CrewAI's normal ``max_completion_tokens`` field is translated
+                # back to ``max_tokens`` by its request builder.  Keep both
+                # fields empty and inject the provider-native parameter so
+                # GPT-5-family APIs receive only ``max_completion_tokens``.
+                return LLM(
+                    model=model,
+                    max_tokens=None,
+                    max_completion_tokens=None,
+                    additional_params={"max_completion_tokens": cap},
+                )
+            return LLM(model=model, max_tokens=cap)
+        if self.llm is not None and callable(getattr(self.llm, "model_copy", None)):
+            if TextTransformationFlow._uses_completion_token_parameter(self.llm):
+                additional_params = dict(getattr(self.llm, "additional_params", {}) or {})
+                additional_params["max_completion_tokens"] = cap
+                return self.llm.model_copy(
+                    update={
+                        "max_tokens": None,
+                        "max_completion_tokens": None,
+                        "additional_params": additional_params,
+                    }
+                )
+            return self.llm.model_copy(update={"max_tokens": cap})
+        raise RuntimeError(
+            "PROVIDER_BUDGET_UNAPPLIED: explicit provider budget requires a cloneable or configured LLM"
+        )
+
+    @staticmethod
+    def _uses_completion_token_parameter(model: object) -> bool:
+        """Identify model families that reject the legacy ``max_tokens`` key."""
+
+        model_name = str(getattr(model, "model", model) or "").strip().lower()
+        model_name = model_name.rsplit("/", 1)[-1]
+        return model_name.startswith(("gpt-5", "o1", "o3", "o4"))
+
+    def _crew_inputs(self, quality_feedback: str) -> dict[str, Any]:
+        """Bound dynamic prompt fields without changing the default path."""
+
+        inputs: dict[str, Any] = {
+            "query": self.state.query,
+            "memory_context": self.state.memory_context,
+            "task_id": self.state.task_id,
+            "case_id": self.state.case_id,
+            "classification_level": self.state.classification_level,
+            "distribution": self.state.distribution,
+            "constraints": self.state.constraints,
+            "run_id": self.state.run_id,
+            "pipeline_options": self.state.pipeline_options,
+            "prompt_plan": self.state.prompt_plan,
+            "request_understanding": self.state.request_understanding,
+            "quality_feedback": quality_feedback,
+        }
+        budget = self.state.provider_token_budget
+        if budget is None:
+            return inputs
+        raw_input_budget = self.state.pipeline_options.get("provider_input_token_budget", budget)
+        try:
+            input_budget = max(256, int(raw_input_budget))
+        except (TypeError, ValueError):
+            input_budget = max(256, budget)
+
+        def bounded(value: Any, token_cap: int) -> str:
+            if isinstance(value, str):
+                text = value
+            else:
+                text = json.dumps(value, sort_keys=True, default=str)
+            return bound_text(text, token_cap)
+
+        inputs.update({
+            "query": bounded(self.state.query, max(1, input_budget // 5)),
+            "memory_context": bounded(self.state.memory_context, max(1, (input_budget * 2) // 5)),
+            "constraints": bounded(self.state.constraints, max(1, input_budget // 10)),
+            "pipeline_options": bounded(self.state.pipeline_options, max(1, input_budget // 10)),
+            "prompt_plan": bounded(self.state.prompt_plan, max(1, input_budget // 10)),
+            "request_understanding": bounded(self.state.request_understanding, max(1, input_budget // 10)),
+            "quality_feedback": bounded(quality_feedback, max(1, input_budget // 10)),
+        })
+        return inputs
 
     def _write_task_failure(self, step: str, error: str) -> None:
         try:
@@ -325,6 +588,8 @@ class TextTransformationFlow(Flow[TaskState]):
     def route_validation(self) -> str:
         if self.state.output and self.state.quality_review and self.state.quality_review.get("approved"):
             return "complete"
+        if self.state.provider_budget_exceeded:
+            return "failed"
         if self.state.attempt < self.state.max_attempts:
             return "retry"
         return "failed"
@@ -405,6 +670,7 @@ class TextTransformationFlow(Flow[TaskState]):
                     "memory_records": len(self.state.memory_records),
                     "delivery_owner": "frontend",
                     "human_approval_required": self.human_approval_required,
+                    **self._usage_metadata(),
                 },
             )
             return self._result
@@ -443,6 +709,9 @@ class TextTransformationFlow(Flow[TaskState]):
             "failure": self.state.failure,
             "quality_review": self.state.quality_review or {},
             "token_budget": self.state.token_budget,
+            "provider_token_budget": self.state.provider_token_budget,
+            "provider_tokens_used": self.state.provider_tokens_used,
+            "provider_budget_exceeded": self.state.provider_budget_exceeded,
         }
         return PipelineResponse(
             status="failed",
@@ -462,5 +731,27 @@ class TextTransformationFlow(Flow[TaskState]):
                 "rendered_as_failed_draft": bool(output and self.render_failed_draft and self.state.artifact),
                 "quality_review": self.state.quality_review or {},
                 "failed_state": failed_state,
+                "usage": aggregate_crew_usage(
+                    self.state.usage_records,
+                    run_id=self.state.run_id,
+                    pipeline=self.pipeline_name,
+                ),
+                "usage_records": list(self.state.usage_records),
+                "provider_token_budget": self.state.provider_token_budget,
+                "provider_tokens_used": self.state.provider_tokens_used,
+                "provider_budget_exceeded": self.state.provider_budget_exceeded,
             },
         )
+
+    def _usage_metadata(self) -> dict[str, Any]:
+        return {
+            "usage": aggregate_crew_usage(
+                self.state.usage_records,
+                run_id=self.state.run_id,
+                pipeline=self.pipeline_name,
+            ),
+            "usage_records": list(self.state.usage_records),
+            "provider_token_budget": self.state.provider_token_budget,
+            "provider_tokens_used": self.state.provider_tokens_used,
+            "provider_budget_exceeded": self.state.provider_budget_exceeded,
+        }

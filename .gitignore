@@ -45,3 +45,4 @@ artifacts/
 
 # Browser-safe origins generated from the local .env by startup.ps1.
 landing page/landing page/public/runtime-config.local.js
+G01-normal-report.txt

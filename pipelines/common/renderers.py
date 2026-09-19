@@ -114,7 +114,14 @@ class RendererRegistry:
             degraded = True
         raise ValueError(f"renderer {requested!r} could not be resolved")
 
-    def inspect(self, renderer_id: str, path: str | Path, *, required_text: Iterable[str] = ()):
+    def inspect(
+        self,
+        renderer_id: str,
+        path: str | Path,
+        *,
+        kind: str | None = None,
+        required_text: Iterable[str] = (),
+    ):
         """Run the shared integrity gate for a registered inspect-capable renderer."""
 
         capability = self.get(renderer_id)
@@ -124,6 +131,7 @@ class RendererRegistry:
 
         return inspect_visual_artifact(
             path,
+            kind=kind,  # The declared artifact kind is authoritative at registration time.
             required_text=required_text,
             renderer_version=f"{capability.renderer_id}@{capability.version}",
         )

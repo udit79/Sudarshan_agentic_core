@@ -225,10 +225,16 @@ class CogneeHttpAdapter:
                top_k: int, session_id: str | None = None) -> Sequence[Any]:
         payload: dict[str, Any] = {
             "query": query,
+            # Graph completion's context-only response is plain text and does
+            # not carry the scope metadata required by MemoryManager. Chunks
+            # retrieval is non-generative and returns payloads with
+            # belongs_to_set, allowing the application to verify scope before
+            # admitting context.
+            "search_type": "CHUNKS",
             "datasets": [dataset_name],
             "node_name": list(node_sets),
             "top_k": top_k,
-            "only_context": True,
+            "only_context": False,
             "verbose": True,
         }
         if session_id:

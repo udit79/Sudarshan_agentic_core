@@ -37,6 +37,8 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
             "Write a complete NTRO briefing presentation from the intelligence analysis. "
             "The classification is {classification_level}; distribution is {distribution}. "
             "Use the exact PresentationOutput schema. Generate only the number of slides required by the supplied constraints. "
+            "Set template_id to `native-default` unless the request explicitly supplies a validated template contract; "
+            "do not invent a custom template ID. "
             "A requested exact slide count includes any cover, agenda, conclusion, or closing slide; never add those slides "
             "when they would exceed the requested count. Use the appropriate `layout` field for slides that are actually planned. "
             "Keep slides focused: one topic per slide. Bullets must be complete sentences or "
@@ -122,6 +124,7 @@ def build_staged_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> di
             "PresentationOutput. Preserve evidence bindings, one message per slide, speaker "
             "notes, uncertainty, and gaps. Use only typed child artifact references for visuals. "
             "The classification is {classification_level}; distribution is {distribution}. "
+            "Set template_id to `native-default` unless a validated template contract is explicitly supplied. "
             "The constraints are authoritative: {constraints}. If an exact slide count is supplied, "
             "the `slides` array must contain exactly that many slides, including any cover or closing slide."
         ),

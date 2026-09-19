@@ -60,6 +60,7 @@ class MemoryRuntime:
     pipeline_name: str = "ntro_advisory"
     query: str = ""
     prompt_plan: dict[str, Any] = field(default_factory=dict)
+    compact_task_context: bool = False
 
 
 class RecallSudarshanMemoryTool(BaseTool):
@@ -96,11 +97,22 @@ class TaskMemoryWriter:
         runtime: MemoryRuntime,
         on_error: Callable[[str], None] | None = None,
         on_event: Callable[[str, str], None] | None = None,
+        on_usage: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.runtime = runtime
         self._sequence = 0
         self._on_error = on_error
         self._on_event = on_event
+        self._on_usage = on_usage
+
+    def record_usage(self, step: str, usage: dict[str, Any]) -> None:
+        """Publish sanitized stage usage without persisting raw task output."""
+
+        if self._on_usage:
+            try:
+                self._on_usage(step, dict(usage))
+            except Exception:
+                return
 
     def write(self, step: str, status: str, content: str, *, metadata: dict[str, Any] | None = None) -> None:
         self._sequence += 1
@@ -184,7 +196,15 @@ def _record_task_output(step: str, output: TaskOutput) -> TaskOutput:
     writer = _ACTIVE_TASK_WRITER.get()
     if writer is None:
         raise RuntimeError("task memory callback invoked without an active pipeline run")
+    from pipelines.common.usage_capture import capture_task_usage
+
+    writer.record_usage(step, capture_task_usage(output, stage=step))
     structured = getattr(output, "pydantic", None)
+    if writer.runtime.compact_task_context and structured is not None and hasattr(structured, "model_dump_json"):
+        compacted = structured.model_dump_json()
+        output.raw = compacted
+        if hasattr(output, "json_dict"):
+            output.json_dict = structured.model_dump(mode="json")
     if structured is not None and hasattr(structured, "model_dump_json"):
         content = structured.model_dump_json()
     else:

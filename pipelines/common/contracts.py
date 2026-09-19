@@ -141,6 +141,17 @@ class AdvisoryRequest:
     def as_inputs(self) -> dict[str, Any]:
         """Return safe, non-secret values for CrewAI interpolation."""
 
+        raw_constraints = self.constraints
+        if hasattr(raw_constraints, "model_dump"):
+            constraints = raw_constraints.model_dump(mode="json")
+        elif isinstance(raw_constraints, Mapping):
+            constraints = dict(raw_constraints)
+        else:
+            # Optional constraints must cross the pipeline boundary as an
+            # object.  ``None`` is valid at the request-construction layer,
+            # but downstream structured state requires a dictionary.
+            constraints = {}
+
         return {
             "query": self.query,
             "user_id": self.user_id,
@@ -156,7 +167,7 @@ class AdvisoryRequest:
             "revision_scope": list(self.revision_scope),
             "request_understanding": self.metadata.get("request_understanding", {}),
             "prompt_plan": self.metadata.get("prompt_plan", {}),
-            "constraints": self.constraints,
+            "constraints": constraints,
         }
 
 

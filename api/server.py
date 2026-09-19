@@ -20,7 +20,7 @@ from api.artifacts import ArtifactNotFound, ArtifactPreviewUnavailable, Artifact
 from api.scheduler import SchedulerConflictError
 from integrations.deepseek_harness.application import get_application
 from api.sse import event_generator
-from ingestion_pipelines import SourceSafetyError, inspect_source
+from ingestion_pipelines import EvidenceIndex, SourceSafetyError, inspect_source
 from ingestion_pipelines.extract import SUPPORTED_EXTENSIONS
 from pipelines.common.ntro_policy import require_classification, require_classification_access
 from pipelines.common.contracts import AdvisoryRequest
@@ -34,7 +34,13 @@ from integrations.deepseek_harness.a2a import (
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 ARTIFACT_ROOT = (Path(__file__).resolve().parents[1] / "artifacts").resolve()
-ARTIFACT_STORE = ArtifactStore(ARTIFACT_ROOT)
+EVIDENCE_INDEX = EvidenceIndex(
+    os.getenv(
+        "SUDARSHAN_EVIDENCE_INDEX_DB_PATH",
+        str(ARTIFACT_ROOT / ".state" / "evidence_index.db"),
+    )
+)
+ARTIFACT_STORE = ArtifactStore(ARTIFACT_ROOT, evidence_scope_verifier=EVIDENCE_INDEX)
 
 
 @asynccontextmanager

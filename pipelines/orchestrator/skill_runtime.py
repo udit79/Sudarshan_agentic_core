@@ -239,6 +239,7 @@ class SkillRuntime:
             )
             event_name = {
                 "succeeded": "skill.completed",
+                "partial": "skill.partial",
                 "waiting": "skill.waiting",
                 "cancelled": "skill.cancelled",
             }.get(result.status, "skill.failed")
