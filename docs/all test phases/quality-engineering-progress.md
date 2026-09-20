@@ -58,7 +58,7 @@ PPTX artifact path.
 - [x] 36. Trajectory (safe event timeline and parallel lanes)
 - [x] 37. Observability (memory/provider/error visibility with redaction)
 - [x] 38. Telemetry (latency/usage/cost projection with duplicate receipt protection)
-- [x] 39. Full regression (latest: 705 passed, 8 skipped, 32 warnings; Cloud-configured API run remains pending)
+- [x] 39. Full regression (latest merged-main verification: 729 passed, 8 skipped, 47 warnings; Cloud-configured API run remains pending)
 - [ ] 40. Golden cases (G01 live recall recovered; quality gate rejected the final draft; replay fixture added)
 - [ ] 41. Holdout cases
 - [ ] 42. External AI baseline
@@ -82,7 +82,7 @@ PPTX artifact path.
 - Observability/telemetry report: `observability-telemetry-testing-report.md`
 - Latest Phase 9 matrix result: **7 passed**; affected regression: **149 passed, 1 warning**
 - First-half audit: `first-half-quality-audit.md`
-- Latest full deterministic local regression: **705 passed, 8 skipped, 32 warnings**
+- Latest full deterministic local regression on merged `main` (2026-09-20): **729 passed, 8 skipped, 47 warnings in 48.23 seconds**
 - Phase 11 golden/holdout catalogue: `phase-11-golden-and-holdout-cases.md`
 - Agentic performance/cost measurement report: `agentic-system-performance-and-cost-report.md`
 - Live G01 checkpoint: same-case bounded context recovered and other-case
@@ -114,6 +114,8 @@ PPTX artifact path.
 - Benchmark source dataset: `benchmark-results/benchmark-results.json`
 - Benchmark charts and traceability manifest: `benchmark-results/*.png`,
   `benchmark-results/benchmark-results.csv`, and `benchmark-results/chart-manifest.json`
+- Merged-main verification (2026-09-20): **729 passed, 8 skipped, 47 warnings
+  in 48.23 seconds**; source code and configuration were unchanged.
 - One-run live artifact runbook: `phase-11-live-artifact-runbook.md`; the
   sanitized G01 presentation request contract passed **33 focused tests**.
 

@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "created_at": "2026-09-18",
+  "updated_at": "2026-09-20",
   "purpose": "Sanitized benchmark evidence assembled from completed deterministic tests, the recorded live G01 run, and the offline harness benchmark.",
   "measurement_policy": {
     "objective_metrics": "Directly asserted by an automated test or returned by a recorded run.",
@@ -153,6 +154,35 @@
       },
       "human_evaluation": {"status": "not_run", "score": null},
       "notes": "Latest result was 705 passed, 8 skipped, 32 warnings in 59.20 seconds. Skips and warnings are retained as separate facts."
+    },
+    {
+      "record_id": "suite-full-regression-merged-main-20260920",
+      "record_type": "test_suite",
+      "case_id": null,
+      "pipeline": "all_local_tests",
+      "run_id": null,
+      "outcome": "pass",
+      "quality_status": "not_evaluated",
+      "source_kind": "repository_command",
+      "source": "Fresh full pytest run on merged main at 2026-09-20",
+      "source_tests": ["pytest test discovery across the repository"],
+      "test_counts": {"total": 737, "passed": 729, "failed": 0, "skipped": 8},
+      "duration_ms": 48230,
+      "objective_metrics": {
+        "correctness": "pass",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "not_measured",
+        "constraint_adherence": "pass",
+        "completeness": "not_measured",
+        "artifact_quality": "not_measured",
+        "failure_rate": 0.0,
+        "partial_degraded_rate": null,
+        "latency_ms": 48230,
+        "token_usage": null,
+        "cost_usd": null
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "notes": "Current merged-main verification. Source code and configuration were unchanged; 8 skips and 47 warnings are retained separately from pass/fail counts."
     },
     {
       "record_id": "suite-gpt5-token-compatibility-20260918",

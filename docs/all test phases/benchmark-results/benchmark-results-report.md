@@ -11,6 +11,9 @@ This checkpoint turns existing test evidence into a reusable benchmark
 dataset and separate Matplotlib charts. It is a reporting layer, not a new
 runtime path.
 
+The dataset was refreshed after the merge onto `main`. Historical records are
+retained, while the latest merged-main regression is recorded separately.
+
 ## WHY
 
 Test counts, system timing, provider usage, and artifact quality answer
@@ -32,13 +35,15 @@ the dataset.
 
 ## INPUT
 
-The dataset contains eight records:
+The dataset contains 17 records, including historical focused checks, live
+observations, and the current merged-main verification:
 
 - ingestion matrix: 17 passed, 1 skipped, 0 failed, 620 ms;
 - memory matrix: 53 passed, 0 skipped, 0 failed, 390 ms;
 - artifact/pipeline focused checks: 131 passed, 0 skipped, 0 failed, 6,300 ms;
 - Phase 11 focused checks: 26 passed, 0 skipped, 0 failed, 20,420 ms;
-- latest full local regression: 703 passed, 8 skipped, 0 failed, 58,100 ms;
+- historical full local regression: 703 passed, 8 skipped, 0 failed, 58,100 ms;
+- current merged-main regression: 729 passed, 8 skipped, 0 failed, 48,230 ms;
 - offline G01 replay: 1 objective grounding check passed;
 - Phase 11 catalogue readiness: 3 checks passed in 60 ms; all 10 golden and
   all 3 holdout cases are present, disjoint, sanitized, and contract-defined;
@@ -175,6 +180,19 @@ Regenerate the CSV, manifest, and charts:
 
 The current validation result is **3 passed**. The generator makes no API,
 provider, database, or Cognee calls.
+
+### Merged-main verification — 2026-09-20
+
+The fresh read-only regression on merged `main` completed with:
+
+```text
+729 passed, 8 skipped, 47 warnings in 48.23s
+```
+
+No source or configuration files were changed by this verification. The
+benchmark dataset now records this result as
+`suite-full-regression-merged-main-20260920`. The 47 warnings are dependency
+warnings and remain distinct from test failures.
 
 The Phase 11 catalogue validation result is **3 passed in 0.06 seconds**. It
 proves offline case-set readiness, not live model execution.

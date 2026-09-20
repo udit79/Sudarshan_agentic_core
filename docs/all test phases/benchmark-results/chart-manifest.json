@@ -9,6 +9,7 @@
         "suite-artifact-pipeline-precommit-20260917",
         "suite-phase11-focused-20260918",
         "suite-full-regression-20260918",
+        "suite-full-regression-merged-main-20260920",
         "suite-gpt5-token-compatibility-20260918"
       ],
       "data_columns": [
@@ -25,6 +26,7 @@
         "suite-artifact-pipeline-precommit-20260917",
         "suite-phase11-focused-20260918",
         "suite-full-regression-20260918",
+        "suite-full-regression-merged-main-20260920",
         "suite-gpt5-token-compatibility-20260918"
       ],
       "data_columns": [
