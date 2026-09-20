@@ -155,6 +155,43 @@ def test_presentation_artifact_handoff_uses_declared_task_state_field() -> None:
     assert "artifact_data" not in TaskState.model_fields
 
 
+def test_presentation_quality_issue_projection_uses_ppt_issue_code_field() -> None:
+    """A real validation issue must become a retryable quality message."""
+
+    flow = PresentationFlow(None)
+    flow.state.query = "Create a case briefing"
+    flow.state.user_id = "user-a"
+    flow.state.case_id = "case-a"
+    flow.state.task_id = "task-a"
+    flow.state.classification_level = "RESTRICTED"
+    flow.state.distribution = "Authorized NTRO personnel"
+    flow.state.constraints = {"slide_count": 2}
+    output = PresentationOutput(
+        presentation_id="quality-issue-projection",
+        title="Case briefing",
+        classification_level="RESTRICTED",
+        distribution="Authorized NTRO personnel",
+        slides=[SlideContent(
+            slide_id="s1",
+            order=1,
+            title="Verified observations",
+            bullets=["One", "Two", "Three", "Four", "Five", "Six"],
+            layout="content",
+        ), SlideContent(
+            slide_id="s2",
+            order=2,
+            title="Unknowns",
+            bullets=["Requires review"],
+            layout="content",
+        )],
+    )
+
+    issues = flow.quality_output_issues(output)
+
+    assert issues
+    assert any("PPT_CONTENT_DENSITY" in issue for issue in issues)
+
+
 def test_linkedin_image_option_returns_prompt_or_optional_asset() -> None:
     draft = LinkedInPostOutput(
         post_id="post-1",

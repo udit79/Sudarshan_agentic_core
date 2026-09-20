@@ -94,7 +94,7 @@ class PresentationFlow(TextTransformationFlow):
             "deck_manifest": artifact.deck_manifest,
         }
         if not quality.approved:
-            return [f"[{i.severity.upper()}] {i.issue_code}: {i.message}" for i in quality.issues]
+            return [f"[{i.severity.upper()}] {i.code}: {i.message}" for i in quality.issues]
         return []
 
     def enrich_output(self, output: PresentationOutput) -> PresentationOutput:

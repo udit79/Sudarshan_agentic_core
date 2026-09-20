@@ -364,6 +364,43 @@ live provider because the one authorized paid attempt was already consumed.
 Phase 11 therefore remains open pending a future explicitly authorized live
 artifact run.
 
+### Controlled evidence-bound run — validation listener defect
+
+Run `run-g01-presentation-live-20260920-05` was admitted with HTTP **202** in
+**105 ms** on branch `phase-11-live-g01`. The sanitized source ingested
+successfully with memory projection succeeded, and its explicit `evidence_id`
+was passed through `evidence_refs` into the run. The provider and all three PPT
+agent stages executed, and a two-slide native-default PPTX was rendered
+internally.
+
+The run failed before release because the validation listener attempted to read
+`PPTIssue.issue_code`, while the actual schema defines `PPTIssue.code`:
+
+```text
+'PPTIssue' object has no attribute 'issue_code'
+```
+
+Recorded safe telemetry:
+
+| Measurement | Value |
+|---|---:|
+| Terminal status | failed |
+| Safe event count | 30 |
+| Provider model | gpt-5.4 |
+| Provider input tokens | 31,925 |
+| Provider output tokens | 5,420 |
+| Cache-read tokens | 21,760 |
+| Provider latency | 23,629 ms |
+| Provider attempts | 1 |
+| Released artifact count | 0 |
+| Cost | unavailable |
+
+The one-line field mismatch is fixed in `pipelines/ppt/crew.py`, with a
+regression test that forces a real PPT quality issue. The focused pipeline
+regression passed **32 tests** and the full offline regression passed **744
+tests, 8 skipped, 62 warnings**. The server was stopped and the provider key
+was disabled after diagnosis. No automatic retry was made.
+
 ### Main-branch live attempt — invalid provider credential
 
 Run `run-g01-presentation-live-main-20260920-01` was admitted with HTTP

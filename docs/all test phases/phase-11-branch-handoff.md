@@ -15,7 +15,7 @@ Latest offline regression after the PPT repair, offline artifact preview, and
 redacted memory health-probe safety gate:
 
 ```text
-743 passed, 8 skipped, 62 warnings in 55.93s
+744 passed, 8 skipped, 62 warnings in 40.52s
 ```
 
 The warnings are dependency deprecations/configuration warnings. They are not
@@ -66,6 +66,10 @@ The changes are additive and covered by tests:
 - `SudarshanApplication` now binds selected ingestion evidence IDs into the
   existing scoped `ContextPack`, preserving source-task provenance and rejecting
   foreign User/Case evidence. The focused binding/API/receipt tests pass **24**.
+- The controlled live run reached provider-backed PPT rendering with explicit
+  ingestion evidence, then exposed a `PPTIssue.code` versus `issue_code`
+  validation-listener defect. The additive fix is covered by the focused PPT
+  regression, and the full offline suite now passes **744** tests.
 
 The fallback does not add custom-template support. It uses the already existing
 native renderer and preserves the generated slide content.
@@ -135,7 +139,7 @@ $base = Join-Path $env:TEMP "sudarshan-offline-$runStamp"
   -p no:cacheprovider
 ```
 
-Expected current result: **743 passed, 8 skipped, 62 warnings**.
+Expected current result: **744 passed, 8 skipped, 62 warnings**.
 
 ## Route to complete Phase 11
 
@@ -223,6 +227,7 @@ have stable evidence and artifact measurements.
 | Real PPT artifact | NOT YET PROVEN |
 | Live provider cost | NOT MEASURED |
 | Ingestion-to-resolver evidence binding | PASS offline; live use not yet proven |
+| Live evidence binding through provider/PPT render | PASS for reachability; artifact release still open |
 | Custom PPT template support | NEEDS DESIGN DECISION |
 | Phase 11 overall | OPEN |
 

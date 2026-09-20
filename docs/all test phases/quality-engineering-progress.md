@@ -9,7 +9,7 @@ multi-agent, load, or human-review scenario is complete.
 
 The current Phase 11 checkpoint and route for another developer or agent are
 documented in `phase-11-branch-handoff.md`. The latest post-repair offline
-regression is **743 passed, 8 skipped, 62 warnings**. The final authorized live
+regression is **744 passed, 8 skipped, 62 warnings**. The final authorized live
 G01 presentation attempt reached the real provider but released no artifact;
 Phase 11 remains open until a future explicitly authorized live run proves the
 PPTX artifact path.
@@ -63,7 +63,7 @@ provider-backed generation result and does not close the live Phase 11 gate.
 - [x] 36. Trajectory (safe event timeline and parallel lanes)
 - [x] 37. Observability (memory/provider/error visibility with redaction)
 - [x] 38. Telemetry (latency/usage/cost projection with duplicate receipt protection)
-- [x] 39. Full regression (latest verification: 743 passed, 8 skipped, 62 warnings; Cloud-configured API run remains pending)
+- [x] 39. Full regression (latest verification: 744 passed, 8 skipped, 62 warnings; Cloud-configured API run remains pending)
 - [ ] 40. Golden cases (G01 live recall recovered; quality gate rejected the final draft; replay fixture added)
 - [ ] 41. Holdout cases
 - [ ] 42. External AI baseline
@@ -92,7 +92,7 @@ change the core ingestion or pipeline flow.
 - Observability/telemetry report: `observability-telemetry-testing-report.md`
 - Latest Phase 9 matrix result: **7 passed**; affected regression: **149 passed, 1 warning**
 - First-half audit: `first-half-quality-audit.md`
-- Latest full deterministic local regression after the evidence-binding change (2026-09-20): **743 passed, 8 skipped, 62 warnings in 55.93 seconds**
+- Latest full deterministic local regression after the live validation fix (2026-09-20): **744 passed, 8 skipped, 62 warnings in 40.52 seconds**
 - Phase 11 golden/holdout catalogue: `phase-11-golden-and-holdout-cases.md`
 - Agentic performance/cost measurement report: `agentic-system-performance-and-cost-report.md`
 - Live G01 checkpoint: same-case bounded context recovered and other-case
@@ -140,8 +140,16 @@ change the core ingestion or pipeline flow.
   sanitized G01 presentation request contract passed **33 focused tests**.
 - Evidence binding checkpoint (2026-09-20): **24 focused tests passed**;
   ingestion receipts now expose `evidence_ids`, and later runs can pass those
-  IDs as `evidence_refs` for scoped resolver binding. One live artifact run
-  using this explicit link is still required.
+  IDs as `evidence_refs` for scoped resolver binding. Live evidence binding has
+  now been observed; one successful released artifact using that link is still
+  required.
+- Controlled live G01 run `run-g01-presentation-live-20260920-05` proved
+  ingestion, Cognee projection, explicit evidence binding, provider execution,
+  and PPT rendering. It failed at the validation listener because of a
+  `PPTIssue.code`/`issue_code` field mismatch; provider-reported usage was
+  **31,925 input + 5,420 output tokens**, cache-read **21,760**, and latency
+  **23,629 ms**. Cost was unavailable and no released artifact was produced.
+  The defect is fixed offline; another paid run remains separately authorized.
 
 ## Open decisions carried forward
 
