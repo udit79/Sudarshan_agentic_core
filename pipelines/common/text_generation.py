@@ -284,12 +284,26 @@ class TextTransformationFlow(Flow[TaskState]):
         if not self._preflight_provider_budget():
             return TextCrewRun(error=self.state.failure)
         if self._spend_guard is not None and not self._spend_guard.admit_attempt():
-            self.state.provider_budget_exceeded = True
-            self.state.failure = "PROVIDER_TOKEN_BUDGET_EXCEEDED: retry admission denied"
+            budget_exhausted = bool(
+                self._spend_guard.exceeded
+                or (
+                    self._spend_guard.remaining_tokens is not None
+                    and self._spend_guard.remaining_tokens <= 0
+                )
+            )
+            if budget_exhausted:
+                self.state.provider_budget_exceeded = True
+                self.state.failure = "PROVIDER_TOKEN_BUDGET_EXCEEDED: retry admission denied"
+            else:
+                self.state.failure = "PROVIDER_RETRY_NOT_ADMITTED: retry policy exhausted"
             self.state.record(
                 "provider_budget",
                 "rejected",
-                summary="Provider retry denied because the observed token budget is exhausted",
+                summary=(
+                    "Provider retry denied because the observed token budget is exhausted"
+                    if budget_exhausted
+                    else "Provider retry denied by the configured retry policy"
+                ),
                 error=self.state.failure,
             )
             return TextCrewRun(error=self.state.failure)

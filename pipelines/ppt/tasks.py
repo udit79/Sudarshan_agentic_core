@@ -59,11 +59,17 @@ def build_tasks(agents: dict[str, Agent], writer: TaskMemoryWriter) -> dict[str,
         description=(
             "Critically review the PresentationOutput. Check every slide for a clear title, "
             "focused and evidence-linked bullets, and informative speaker notes. "
-            "Verify the agenda matches the slides. Check the conclusion and key takeaways. "
+            "Treat the supplied constraints, especially an exact slide count, as authoritative. "
+            "Do not reject a concise deck merely because it has no separate agenda, conclusion, "
+            "or key-takeaway slide when adding those slides would violate the requested count; "
+            "evaluate those requirements within the available slides instead. "
+            "Verify any agenda, conclusion, or key-takeaway content that is actually requested. "
             "Reject placeholder text, unsupported claims, invented organizational authority, "
-            "AI self-reference, meta-commentary, vague or unfocused slides, and missing gaps. "
+            "AI self-reference, meta-commentary, vague or unfocused slides, unresolved evidence "
+            "labels, and missing gaps. "
             "Return PresentationQualityReview with approved=true only if release-ready. "
-            "If false, list precise slide-level and structural issues for retry."
+            "If false, list precise slide-level and constraint-aware structural issues for retry. "
+            "Constraints to apply: {constraints}"
         ),
         expected_output="A validated PresentationQualityReview JSON object.",
         agent=agents["quality_critic"],

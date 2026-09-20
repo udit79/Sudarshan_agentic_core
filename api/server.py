@@ -557,7 +557,12 @@ async def create_run(request: Request):
 
     app_instance = get_application()
     try:
-        validated = AdvisoryRequest(**payload)
+        # evidence_refs is an admission-level selector, not a field on the
+        # typed pipeline request. Validate all request fields without dropping
+        # the selector from the original payload passed to the application.
+        validation_payload = dict(payload)
+        validation_payload.pop("evidence_refs", None)
+        validated = AdvisoryRequest(**validation_payload)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

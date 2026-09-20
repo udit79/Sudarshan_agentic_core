@@ -49,3 +49,13 @@ def test_ppt_output_task_does_not_invent_unvalidated_template_ids(monkeypatch) -
 
     assert "native-default" in tasks["output"].description
     assert "validated template contract" in tasks["output"].description
+
+
+def test_legacy_ppt_quality_prompt_respects_exact_slide_constraints(monkeypatch) -> None:
+    monkeypatch.setenv("SUDARSHAN_PPT_FLOW", "legacy")
+    agents = build_agents([], llm=offline_llm())
+    tasks = build_tasks(agents, CallbackOnlyWriter())
+
+    assert "exact slide count" in tasks["quality"].description
+    assert "Do not reject a concise deck" in tasks["quality"].description
+    assert "unresolved evidence" in tasks["quality"].description

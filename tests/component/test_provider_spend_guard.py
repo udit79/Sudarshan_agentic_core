@@ -182,6 +182,26 @@ def test_text_flow_stops_before_a_retry_when_the_guard_is_exhausted() -> None:
     assert TextTransformationFlow.route_validation(flow) == "failed"
 
 
+def test_text_flow_labels_retry_policy_exhaustion_separately_from_budget_exhaustion() -> None:
+    state = TaskState(
+        run_id="run-retry-policy",
+        pipeline_name="presentation",
+        attempt=1,
+        max_attempts=2,
+    )
+    flow = _PreflightHarness(
+        state=state,
+        _spend_guard=ProviderSpendGuard(max_tokens=100_000, used_tokens=39_710, attempts=1, max_attempts=1),
+        _preflight_reservation=None,
+        _preflight_reserved_tokens=0,
+    )
+
+    result = TextTransformationFlow._run_crew(flow)
+
+    assert result.error == "PROVIDER_RETRY_NOT_ADMITTED: retry policy exhausted"
+    assert state.provider_budget_exceeded is False
+
+
 def test_usage_token_sum_uses_only_sanitized_counters() -> None:
     assert usage_tokens({
         "input_tokens": 100,

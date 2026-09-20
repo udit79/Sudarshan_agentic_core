@@ -32,6 +32,40 @@ receipt, not the ceiling, is what belongs in the benchmark report.
 - Artifact download: `GET /artifacts/{artifact_id}/download`
 - PPTX renderer: `pipelines/ppt/renderer.py`
 
+## OFFLINE ARTIFACT PREVIEW (KEY DISABLED)
+
+To physically inspect the backend artifact path without using an LLM, run:
+
+```powershell
+.venv\Scripts\python.exe scripts\run_phase11_offline_artifact.py `
+  C:\path\to\your\sanitized-report.txt `
+  "Summarize the verified findings and list the unknowns." `
+  --output-root artifacts\phase11-offline-g01 `
+  --user-id live-test-operator `
+  --case-id golden-g01 `
+  --task-id task-g01-offline-preview `
+  --source-reference G01-normal-report.txt `
+  --run-id run-g01-offline-preview
+```
+
+This command uses the existing ingestion extractor, local evidence index,
+native PPTX renderer, visual quality gate, and `ArtifactStore`. It produces a
+real PPTX plus a manifest under `artifacts/phase11-offline-g01/`. The deck
+contains the prompt, extracted source lines, and User/Case/Task provenance.
+It deliberately reports `provider_called=false` and
+`memory_backend_called=false`: this is a backend artifact-path proof, not
+proof of LLM quality, Cognee retrieval, or the full live orchestration path.
+
+Automated proof:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q `
+  tests\component\test_phase11_offline_artifact.py `
+  --basetemp=$env:TEMP\sudarshan-phase11-offline-artifact -p no:cacheprovider
+```
+
+Expected result: **1 passed**.
+
 ## INPUT
 
 Use the already-ingested, sanitized G01 source under:
@@ -42,6 +76,11 @@ Use the already-ingested, sanitized G01 source under:
 
 The request must select exactly one pipeline: `presentation`. Do not add
 `executive_summary`, `infographic`, `video`, or a second pipeline to this run.
+
+Before creating the run, poll the ingestion receipt and copy its
+`document_id` and first `evidence_ids` value. The run must pass that evidence
+ID explicitly; otherwise a successful ingestion and a successful pipeline
+admission do not prove that the source was used.
 
 ## OFFLINE GATE
 
@@ -68,6 +107,34 @@ Only after the offline gate passes should the operator temporarily restore the
 LLM key in the local `.env`. Do not paste the key into Postman, this document,
 the request body, or chat. Keep the server terminal visible so it can be
 stopped immediately with `Ctrl+C`.
+
+Before restoring the LLM key, verify that the configured memory backend is
+reachable. The ordinary health response reports configuration; this opt-in
+probe performs one bounded, redacted recall so an operator does not mistake
+"configured" for "reachable":
+
+```powershell
+$env:SUDARSHAN_HEALTH_PROBE_MEMORY = "true"
+# start FastAPI, then send GET {{fastapi_base}}/health in Postman
+```
+
+Proceed to the paid run only when the response contains:
+
+```json
+{
+  "status": "ok",
+  "memory_probe": {"status": "reachable"}
+}
+```
+
+If `memory_probe.status` is `unreachable`, keep the LLM key disabled. The
+response exposes only the probe status, duration, result count, and exception
+type; it never returns the recalled memory or the probe query. A failed probe
+also reports the overall health as `degraded`.
+
+After the check, keep `SUDARSHAN_HEALTH_PROBE_MEMORY=true` for the controlled
+run so the recorded health state remains explicit. Remove the LLM key again
+after the run.
 
 The one-run diagnostic ceiling is:
 
@@ -114,6 +181,12 @@ Use this JSON body:
     "page_count": 2,
     "theme_id": "ntro-briefing"
   },
+  "evidence_refs": [
+    {
+      "evidence_id": "<EVIDENCE_ID_FROM_INGESTION_STATUS>",
+      "document_id": "<DOCUMENT_ID_FROM_INGESTION_STATUS>"
+    }
+  ],
   "metadata": {
     "run_id": "run-g01-presentation-live-01",
     "pipeline": "presentation",
@@ -290,3 +363,100 @@ been re-run against a
 live provider because the one authorized paid attempt was already consumed.
 Phase 11 therefore remains open pending a future explicitly authorized live
 artifact run.
+
+### Main-branch live attempt — invalid provider credential
+
+Run `run-g01-presentation-live-main-20260920-01` was admitted with HTTP
+**202** in **189 ms** using the single-pipeline presentation request. The run
+reached routing, memory recall, prompt crafting, and the presentation crew
+boundary. The configured provider rejected the credential with HTTP **401
+`invalid_api_key`**. The application then denied retry admission under the
+provider spend guard, so no second provider attempt was allowed.
+
+Sanitized terminal evidence:
+
+| Measurement | Value |
+|---|---:|
+| Terminal status | `failed` |
+| Terminal stage | `failed` |
+| Safe telemetry events | 26 |
+| Projected crew wall time | 4,170 ms |
+| Provider-reported input/output/reasoning tokens | unavailable; projected counters remained 0 |
+| Cache hits/misses/waits | 0 / 0 / 0 |
+| Artifact count | 0 |
+| Quality report | not produced |
+| Manifest | 404; no artifact was released |
+| Cost | unavailable |
+
+This is classified as a **credential/configuration failure**, not a model
+quality result. The zero token projection must not be presented as a billing
+receipt. The server was stopped immediately after the terminal state. The
+provider key must be disabled or replaced before another paid run; no key is
+stored in this report.
+
+### Main-branch live attempt — provider accepted, state hand-off failure
+
+Run `run-g01-presentation-live-main-20260920-02` was admitted with HTTP
+**202** in **327 ms** after the provider credential was corrected. The real
+provider completed the presentation crew stages and reported **31,625 input
+tokens**, **9,815 output tokens**, and **0 reasoning tokens** (**41,440 total**)
+with **32,392 ms** of crew/provider-stage latency. Currency cost was
+unavailable.
+
+The run failed at the PPT validation-to-persistence boundary with:
+
+```text
+"StateWithId" object has no field "artifact_data"
+```
+
+The renderer had already written a PPTX file, but the application failed before
+attaching an artifact ID or manifest. This created an unregistered orphan file,
+not a deliverable. The run therefore had:
+
+| Measurement | Value |
+|---|---:|
+| Terminal status | `failed` |
+| Safe telemetry/trajectory events | 35 / 35 |
+| Artifact count in response | 0 |
+| Manifest | 404; no released artifact |
+| Quality status | not produced |
+| Provider usage | provider-reported |
+| Cost | unavailable |
+
+The defect was genuine: `PresentationFlow.quality_output_issues()` wrote to
+an undeclared runtime-state field. The additive fix reuses the declared
+`TaskState.artifact` hand-off field and preserves the existing renderer,
+quality gate, memory, routing, and budget paths. The orphan file is retained
+for forensic traceability and is not advertised as a successful artifact.
+
+The focused repair suite passed **23 tests**, the affected PPT/artifact suite
+passed **49 tests**, and the full offline regression after the repair passed
+**730 tests, with 8 skipped and 47 warnings**. A fresh controlled live run is
+required to prove manifest-backed artifact release.
+
+### Main-branch live retry — Cognee memory timeout before provider execution
+
+Run `run-g01-presentation-live-main-20260920-03` was admitted with HTTP
+**202** in **236 ms**, but remained queued while the scheduler waited for the
+memory stage. It then failed during `request_memory_recall` with:
+
+```text
+Cognee is unreachable: The read operation timed out
+```
+
+Sanitized terminal evidence:
+
+| Measurement | Value |
+|---|---:|
+| Terminal status | `failed` |
+| Failure stage | `request_memory_recall` |
+| Safe telemetry/trajectory events | 12 / 12 |
+| Provider execution | not reached |
+| Provider tokens | not measured |
+| Artifact count | 0 |
+| Manifest | 404; no artifact was released |
+| Cost | unavailable |
+
+This is classified as a **live Cognee availability failure**, not a PPT
+quality result and not a failure of the repaired `artifact` state hand-off.
+The server was stopped after the terminal state. No automatic retry was made.

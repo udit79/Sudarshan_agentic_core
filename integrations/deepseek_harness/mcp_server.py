@@ -298,6 +298,7 @@ def start_sudarshan_run(
     metadata: dict[str, Any] | None = None,
     preparation_id: str | None = None,
     idempotency_key: str | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
 ) -> StartRunResponse:
     """Validate and enqueue an operation without blocking the Harness call."""
 
@@ -319,6 +320,7 @@ def start_sudarshan_run(
             "metadata": metadata or {},
             "preparation_id": preparation_id,
             "idempotency_key": idempotency_key,
+            "evidence_refs": evidence_refs or [],
         },
         operator_id=user_id,
     )

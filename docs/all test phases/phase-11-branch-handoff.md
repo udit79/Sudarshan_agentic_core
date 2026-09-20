@@ -1,6 +1,6 @@
 # Phase 11 Branch Handoff and Completion Route
 
-Last updated: 2026-09-18
+Last updated: 2026-09-20
 
 This document is the handoff point for another developer or coding agent. It
 describes what this branch proves, what it does not prove, and the safest route
@@ -11,24 +11,28 @@ to finish Phase 11 without repeating uncontrolled provider calls.
 The branch is safe to review as a testing checkpoint. No server is running and
 no live provider request is active.
 
-Latest offline regression after the PPT repair:
+Latest offline regression after the PPT repair, offline artifact preview, and
+redacted memory health-probe safety gate:
 
 ```text
-729 passed, 8 skipped, 47 warnings in 55.86s
+743 passed, 8 skipped, 62 warnings in 55.93s
 ```
 
 The warnings are dependency deprecations/configuration warnings. They are not
 test failures.
 
-The latest authorized live run was:
+The latest provider-accepted live run was:
 
 ```text
-run-g01-presentation-live-final-01
+run-g01-presentation-live-main-20260920-02
 ```
 
 It reached routing, memory recall, prompt crafting, and all three PPT agent
-stages. It failed at the renderer boundary because the model selected a custom
-template without a validated template contract. No artifact was released.
+stages. It failed at the renderer-to-state hand-off because the runtime
+rejected an undeclared `artifact_data` field. That defect was fixed by using
+the declared `TaskState.artifact` field. The next retry
+(`run-g01-presentation-live-main-20260920-03`) reached memory recall but Cognee
+timed out before provider execution. No live artifact has been released.
 
 This means:
 
@@ -52,6 +56,16 @@ The changes are additive and covered by tests:
   extended;
 - Phase 11 runbook, token report, and progress documentation record the live
   measurements and failure honestly.
+- `scripts/run_phase11_offline_artifact.py` provides an explicitly labelled,
+  no-provider artifact proof from a local source file and operator prompt;
+  `tests/component/test_phase11_offline_artifact.py` covers its manifest,
+  provenance, scope, and visible-text checks.
+- `SudarshanApplication._memory_health_probe()` provides an opt-in bounded
+  memory reachability check for the live-run operator gate; it returns no raw
+  memory and reports `degraded` health when the check is unreachable.
+- `SudarshanApplication` now binds selected ingestion evidence IDs into the
+  existing scoped `ContextPack`, preserving source-task provenance and rejecting
+  foreign User/Case evidence. The focused binding/API/receipt tests pass **24**.
 
 The fallback does not add custom-template support. It uses the already existing
 native renderer and preserves the generated slide content.
@@ -78,6 +92,7 @@ The phase-specific documents are in this folder. Start with:
 3. `phase-11-golden-and-holdout-cases.md`
 4. `quality-engineering-progress.md`
 5. `first-half-quality-audit.md`
+6. `phase-11-evidence-binding.md`
 
 ## Latest live measurement
 
@@ -120,7 +135,7 @@ $base = Join-Path $env:TEMP "sudarshan-offline-$runStamp"
   -p no:cacheprovider
 ```
 
-Expected current result: **729 passed, 8 skipped, 47 warnings**.
+Expected current result: **743 passed, 8 skipped, 62 warnings**.
 
 ## Route to complete Phase 11
 
@@ -207,6 +222,7 @@ have stable evidence and artifact measurements.
 | Real memory path | PASS for observed bounded G01 path |
 | Real PPT artifact | NOT YET PROVEN |
 | Live provider cost | NOT MEASURED |
+| Ingestion-to-resolver evidence binding | PASS offline; live use not yet proven |
 | Custom PPT template support | NEEDS DESIGN DECISION |
 | Phase 11 overall | OPEN |
 

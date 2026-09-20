@@ -168,6 +168,7 @@ export type IngestionReceipt = {
   classification_level: string;
   content_characters: number;
   memory_persisted: true;
+  evidence_ids: string[];
   ingested_at: string;
 };
 ```
@@ -245,6 +246,7 @@ export async function createRun(
     requestedPipelines?: string[];
     classificationLevel?: string;
     distribution?: string;
+    evidenceRefs?: Array<{ evidence_id: string; document_id?: string }>;
   },
 ): Promise<RunReceipt> {
   const body = {
@@ -255,6 +257,7 @@ export async function createRun(
     requested_pipelines: input.requestedPipelines ?? [],
     classification_level: input.classificationLevel ?? "RESTRICTED",
     distribution: input.distribution ?? "Authorized NTRO personnel",
+    evidence_refs: input.evidenceRefs ?? [],
     metadata: {},
   };
   const response = await fetch(`${apiOrigin}/runs`, {
@@ -269,6 +272,10 @@ export async function createRun(
   return response.json() as Promise<RunReceipt>;
 }
 ```
+
+Pass the `evidence_ids` from the completed ingestion status as
+`evidenceRefs`. This is the explicit ingestion-to-resolver link; the backend
+checks User/Case ownership and preserves the ingestion task as provenance.
 
 An empty `requested_pipelines` lets the router select. Explicit names must be
 registered in `GET /pipelines`. Multiple names run as isolated child tasks and

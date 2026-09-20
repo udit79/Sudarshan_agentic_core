@@ -94,6 +94,7 @@ def test_ingestion_status_projects_safe_usage_and_cache_receipts() -> None:
                     "fallback_count": 1,
                     "fallbacks": ["vision_provider_unavailable"],
                     "evidence_count": 2,
+                    "evidence_ids": ["evidence-1", "evidence-2"],
                     "chunk_count": 1,
                     "relationship_count": 1,
                 },
@@ -110,6 +111,7 @@ def test_ingestion_status_projects_safe_usage_and_cache_receipts() -> None:
     assert status["usage"]["estimated_tokens"] == 4096
     assert status["fallbacks"] == ["vision_provider_unavailable"]
     assert status["evidence_count"] == 2
+    assert status["evidence_ids"] == ["evidence-1", "evidence-2"]
 
 
 def test_memory_projection_failure_returns_partial_status_and_records_fallback(tmp_path) -> None:

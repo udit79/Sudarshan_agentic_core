@@ -12,6 +12,7 @@ from pipelines.linkedin.visual_child import build_visual_child_call
 from pipelines.common.contracts import AdvisoryRequest
 from pipelines.ppt.crew import PresentationFlow
 from pipelines.ppt.schemas import PresentationOutput, SlideContent
+from pipelines.common.task_state import TaskState
 
 
 def test_automatic_text_flows_have_quality_and_delivery_routes() -> None:
@@ -138,6 +139,20 @@ def test_presentation_normalizes_unvalidated_model_template_to_native_default() 
     assert prepared.template_id == "native-default"
     assert prepared.template_version is None
     assert prepared.slides == output.slides
+
+
+def test_presentation_artifact_handoff_uses_declared_task_state_field() -> None:
+    """The render hand-off must be accepted by the serialized flow state."""
+
+    state = TaskState()
+    state.artifact = {
+        "path": "artifacts/presentations/g01.pptx",
+        "slide_count": 2,
+        "quality": {"approved": True},
+    }
+
+    assert state.artifact["slide_count"] == 2
+    assert "artifact_data" not in TaskState.model_fields
 
 
 def test_linkedin_image_option_returns_prompt_or_optional_asset() -> None:

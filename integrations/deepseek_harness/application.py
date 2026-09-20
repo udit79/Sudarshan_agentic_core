@@ -29,7 +29,7 @@ from ingestion_pipelines import (
     VideoIngestionPolicy,
     build_ingestion_stage_fingerprint,
 )
-from ingestion_pipelines.evidence_index import EvidenceIndex
+from ingestion_pipelines.evidence_index import EvidenceIndex, EvidenceNotFoundError
 from pipelines.common.contracts import AdvisoryRequest
 from pipelines.common.audit_logger import get_audit_logger
 from api.control_plane import RedisControlPlane
@@ -289,6 +289,138 @@ class SudarshanApplication:
             raise ValueError(f"Unknown pipeline(s): {', '.join(unknown)}")
         return request, run_id
 
+    @staticmethod
+    def _normalize_evidence_refs(value: Any) -> list[dict[str, str]]:
+        """Normalize explicit evidence selectors without accepting raw content."""
+
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("evidence_refs must be a list")
+        normalized: list[dict[str, str]] = []
+        for item in value:
+            if isinstance(item, str):
+                evidence_id = item.strip()
+                document_id = ""
+            elif isinstance(item, Mapping):
+                evidence_id = str(item.get("evidence_id", "")).strip()
+                document_id = str(item.get("document_id", "")).strip()
+            else:
+                raise ValueError("each evidence_ref must be an evidence ID or object")
+            if not evidence_id:
+                raise ValueError("each evidence_ref requires evidence_id")
+            normalized.append({
+                "evidence_id": evidence_id,
+                **({"document_id": document_id} if document_id else {}),
+            })
+        if len(normalized) > 32:
+            raise ValueError("evidence_refs cannot contain more than 32 items")
+        return list({
+            (item["evidence_id"], item.get("document_id", "")): item
+            for item in normalized
+        }.values())
+
+    def _bind_evidence_references(
+        self,
+        request: AdvisoryRequest,
+        payload: Mapping[str, Any],
+        *,
+        run_id: str,
+    ) -> tuple[list[dict[str, str]], dict[str, Any] | None]:
+        """Compile selected EvidenceIndex rows into the run's ContextPack.
+
+        Explicit source evidence is authorized by User/Case ownership.  It may
+        be consumed by a later task in the same case, while task-memory records
+        remain governed by the normal task scope checks.
+        """
+
+        raw_refs = payload.get("evidence_refs")
+        if raw_refs is None:
+            payload_metadata = payload.get("metadata")
+            raw_refs = (
+                payload_metadata.get("evidence_refs", [])
+                if isinstance(payload_metadata, Mapping)
+                else []
+            )
+        refs = self._normalize_evidence_refs(raw_refs)
+        if not refs:
+            return [], None
+
+        context = AccessContext(user_id=request.user_id, case_id=request.case_id)
+        records: list[dict[str, Any]] = []
+        text_parts: list[str] = []
+        max_chars = max(1024, min(24_000, request.token_budget * 4))
+        used_chars = 0
+        for ref in refs:
+            try:
+                evidence = self.evidence_index.get_evidence(
+                    ref["evidence_id"],
+                    context,
+                    classification_level=request.classification_level,
+                )
+            except EvidenceNotFoundError as exc:
+                # Do not reveal whether a foreign evidence ID exists.  The
+                # caller only needs to know that this reference is unusable
+                # in the current User/Case scope.
+                raise PermissionError(
+                    "evidence reference is not permitted or does not exist"
+                ) from exc
+            if ref.get("document_id") and ref["document_id"] != evidence["document_id"]:
+                raise ValueError(
+                    f"evidence_ref document_id does not match evidence {ref['evidence_id']}"
+                )
+            content = str(evidence.get("content") or "").strip()
+            if not content:
+                raise ValueError(f"evidence {ref['evidence_id']} has no text content")
+            remaining = max_chars - used_chars
+            if remaining <= 0:
+                break
+            bounded = content[:remaining]
+            used_chars += len(bounded)
+            records.append({
+                "content": bounded,
+                "scope_type": "case",
+                "scope_id": request.case_id,
+                "source_reference": evidence.get("source_reference"),
+                "provenance": {
+                    **dict(evidence.get("provenance") or {}),
+                    "evidence_id": evidence["evidence_id"],
+                    "document_id": evidence["document_id"],
+                    "source_task_id": evidence.get("task_id"),
+                    "selection": "explicit_evidence_ref",
+                },
+                "memory_id": evidence["evidence_id"],
+                "evidence_id": evidence["evidence_id"],
+                "document_id": evidence["document_id"],
+            })
+            text_parts.append(f"[{evidence['evidence_id']}] {bounded}")
+
+        if not records:
+            raise ValueError("evidence_refs did not resolve to usable evidence")
+        digest = hashlib.sha256(
+            "|".join(item["evidence_id"] for item in refs).encode("utf-8")
+        ).hexdigest()[:24]
+        pack = {
+            "pack_id": f"evidence-pack-{digest}",
+            "run_id": run_id,
+            "stage_id": "explicit_evidence",
+            "query": request.query[:4000],
+            "records": records,
+            "source_artifact_ids": [],
+            "token_budget": request.token_budget,
+            "retrieval_trace_id": f"evidence-bind-{digest}",
+            "scope": {
+                "user_id": request.user_id,
+                "case_id": request.case_id,
+                "task_id": request.task_id,
+            },
+            "context_text": "\n\n".join(text_parts),
+            "context_level": "L2",
+        }
+        request.metadata["evidence_refs"] = refs
+        request.metadata["context_pack"] = pack
+        return refs, pack
+
     def _resolve_lineage(
         self,
         payload: Mapping[str, Any],
@@ -386,7 +518,10 @@ class SudarshanApplication:
         try:
             request, run_id = self._prepare_request(data)
             constraints = RequestConstraints.model_validate(data.get("constraints") or {})
-        except (TypeError, ValueError) as exc:
+            evidence_refs, explicit_pack = self._bind_evidence_references(
+                request, data, run_id=run_id
+            )
+        except (PermissionError, TypeError, ValueError) as exc:
             return {
                 "status": "rejected",
                 "rejection_code": "INVALID_REQUEST",
@@ -401,7 +536,7 @@ class SudarshanApplication:
             user_id=request.user_id,
             case_id=request.case_id,
         )
-        pack = _context_pack(
+        pack = explicit_pack or _context_pack(
             self.orchestrator.memory_manager,
             query=request.query,
             context=preparation_context,
@@ -444,7 +579,7 @@ class SudarshanApplication:
             "classification": request.classification_level,
             "selected_pipelines": selected_pipelines,
             "constraint_set": constraints.model_dump(mode="json"),
-            "evidence_refs": list(data.get("evidence_refs") or []),
+            "evidence_refs": list(evidence_refs),
             "status": status,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "expires_at": expires_at,
@@ -826,6 +961,7 @@ class SudarshanApplication:
             "fallbacks": list(receipt.get("fallbacks") or []),
             "memory_projection_status": receipt.get("memory_projection_status", "pending"),
             "memory_projection_error": receipt.get("memory_projection_error"),
+            "evidence_ids": list(receipt.get("evidence_ids") or []),
             "evidence_count": receipt.get("evidence_count", 0),
             "chunk_count": receipt.get("chunk_count", 0),
             "relationship_count": receipt.get("relationship_count", 0),
@@ -1202,6 +1338,7 @@ class SudarshanApplication:
                 raise PermissionError("user_id must match the authorized user of the preparation")
             data.update(record.get("normalized_request", {}))
             data["context_pack"] = record.get("context_pack")
+            data["evidence_refs"] = list(record.get("evidence_refs") or [])
             data["metadata"] = {
                 **dict(data.get("metadata") or {}),
                 "preparation_id": preparation_id,
@@ -1222,6 +1359,15 @@ class SudarshanApplication:
         operator = (operator_id or request.user_id).strip()
         if operator != request.user_id:
             raise PermissionError("user_id must match the authenticated operator")
+
+        # Resolve explicit source evidence before admission.  This keeps the
+        # existing graph/pipeline architecture intact while making the
+        # ingestion -> resolver -> generation hand-off explicit and scoped.
+        evidence_refs, _ = self._bind_evidence_references(
+            request, data, run_id=run_id
+        )
+        if evidence_refs:
+            data["evidence_refs"] = evidence_refs
 
         # Server-derived authoritative lineage
         is_revision = data.get("operation") == "revise" or bool(data.get("revision_instruction"))
@@ -1622,10 +1768,12 @@ class SudarshanApplication:
         """Return system health for operational monitoring."""
         pipelines = self.list_pipelines()
         cognee_backend = os.getenv("COGNEE_BACKEND", "cloud").strip().lower() or "cloud"
+        memory_probe = self._memory_health_probe()
         return {
-            "status": "ok",
+            "status": "degraded" if memory_probe["status"] == "unreachable" else "ok",
             "memory_system": "connected",
             "memory_backend": "cognee_cloud" if cognee_backend == "cloud" else "cognee_local_dev",
+            "memory_probe": memory_probe,
             "memory_cloud_configured": bool(
                 cognee_backend == "cloud"
                 and os.getenv("COGNEE_BASE_URL", "").strip()
@@ -1655,6 +1803,40 @@ class SudarshanApplication:
                 "cognee_base_url": bool(os.getenv("COGNEE_BASE_URL", "").strip()),
             },
         }
+
+    def _memory_health_probe(self) -> dict[str, Any]:
+        """Optionally verify memory reachability without exposing memory data.
+
+        Health checks are normally local and side-effect free.  Operators may
+        opt in to this bounded probe before a paid live run so configuration
+        and actual backend reachability are not confused with one another.
+        """
+
+        enabled = os.getenv("SUDARSHAN_HEALTH_PROBE_MEMORY", "").strip().lower()
+        if enabled not in {"1", "true", "yes", "on"}:
+            return {"status": "not_run", "reason": "opt_in_required"}
+
+        started = time.monotonic()
+        try:
+            response = self.orchestrator.memory_manager.recall(
+                query="Sudarshan backend reachability probe",
+                context=AccessContext(user_id="health-probe", case_id="health-probe"),
+                top_k=1,
+                token_budget=256,
+                session_id="health-probe",
+            )
+            results = getattr(response, "results", ())
+            return {
+                "status": "reachable",
+                "latency_ms": max(0, round((time.monotonic() - started) * 1000)),
+                "result_count": len(results) if hasattr(results, "__len__") else None,
+            }
+        except Exception as exc:
+            return {
+                "status": "unreachable",
+                "latency_ms": max(0, round((time.monotonic() - started) * 1000)),
+                "error_code": type(exc).__name__,
+            }
 
     def cleanup_lifecycle(self, *, dry_run: bool = True, older_than_seconds: float = 86_400) -> dict[str, Any]:
         """Run the lineage-aware cleanup boundary for an operator or job."""
@@ -2224,6 +2406,9 @@ class SudarshanApplication:
             "memory_projection_status": memory_projection_status,
             "memory_projection_error": memory_projection_error,
             "evidence_indexed": bool(index_receipt.get("indexed", False)),
+            "evidence_ids": [
+                block.evidence_id for block in document.evidence_blocks
+            ],
             "evidence_count": int(index_receipt.get("evidence_count", 0)),
             "chunk_count": int(index_receipt.get("chunk_count", 0)),
             "relationship_count": int(index_receipt.get("relationship_count", 0)),

@@ -69,3 +69,42 @@ def test_http_async_ingest_preserves_uploaded_content_and_scope(tmp_path, monkey
     assert payload["task_id"] == "task-http"
     assert payload["source_reference"] == "brief.txt"
     assert str(payload["source_hash"]).startswith("sha256:")
+
+
+def test_http_run_accepts_evidence_refs_at_admission_boundary(monkeypatch) -> None:
+    received: dict[str, object] = {}
+
+    class FakeApplication:
+        def list_pipelines(self):
+            return ["presentation"]
+
+        def submit(self, payload, *, operator_id):
+            received["payload"] = payload
+            received["operator_id"] = operator_id
+            return {
+                "status": "queued",
+                "run_id": "run-evidence-boundary",
+                "task_id": payload["task_id"],
+                "pipelines": ["presentation"],
+            }
+
+    with patch("api.server.get_application", return_value=FakeApplication()):
+        response = client.post(
+            "/runs",
+            headers={
+                "x-operator-id": "user-a",
+                "x-case-id": "case-a",
+            },
+            json={
+                "query": "Summarize the selected evidence.",
+                "user_id": "user-a",
+                "case_id": "case-a",
+                "task_id": "task-run",
+                "requested_pipelines": ["presentation"],
+                "evidence_refs": [{"evidence_id": "evidence-a1"}],
+            },
+        )
+
+    assert response.status_code == 202
+    assert received["operator_id"] == "user-a"
+    assert received["payload"]["evidence_refs"] == [{"evidence_id": "evidence-a1"}]

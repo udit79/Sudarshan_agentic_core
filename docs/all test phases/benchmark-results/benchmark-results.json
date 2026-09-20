@@ -185,6 +185,74 @@
       "notes": "Current merged-main verification. Source code and configuration were unchanged; 8 skips and 47 warnings are retained separately from pass/fail counts."
     },
     {
+      "record_id": "suite-full-regression-post-ppt-fix-20260920",
+      "record_type": "test_suite",
+      "case_id": null,
+      "pipeline": "all_local_tests",
+      "run_id": null,
+      "outcome": "pass",
+      "quality_status": "not_evaluated",
+      "source_kind": "repository_command",
+      "source": "Full pytest run after the PPT artifact state hand-off fix on 2026-09-20",
+      "source_tests": ["pytest test discovery across the repository"],
+      "test_counts": {"total": 738, "passed": 730, "failed": 0, "skipped": 8},
+      "duration_ms": 46470,
+      "objective_metrics": {
+        "correctness": "pass",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "not_measured",
+        "constraint_adherence": "pass",
+        "completeness": "not_measured",
+        "artifact_quality": "not_measured",
+        "failure_rate": 0.0,
+        "partial_degraded_rate": null,
+        "latency_ms": 46470,
+        "token_usage": null,
+        "cost_usd": null
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "operational_measurements": {
+        "warnings": 47,
+        "regression_delta_passed_tests": 1,
+        "source_change_under_test": "pipelines/ppt/crew.py declared TaskState.artifact hand-off"
+      },
+      "notes": "Post-fix regression. The added test covers the declared PPT artifact hand-off field; 8 skips and 47 warnings remain separate from pass/fail counts."
+    },
+    {
+      "record_id": "suite-full-regression-after-offline-preview-20260920",
+      "record_type": "test_suite",
+      "case_id": null,
+      "pipeline": "all_local_tests",
+      "run_id": null,
+      "outcome": "pass",
+      "quality_status": "not_evaluated",
+      "source_kind": "repository_command",
+      "source": "Full pytest run after adding the offline artifact preview on 2026-09-20",
+      "source_tests": ["pytest test discovery across the repository"],
+      "test_counts": {"total": 739, "passed": 731, "failed": 0, "skipped": 8},
+      "duration_ms": 49050,
+      "objective_metrics": {
+        "correctness": "pass",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "not_measured",
+        "constraint_adherence": "pass",
+        "completeness": "not_measured",
+        "artifact_quality": "not_measured",
+        "failure_rate": 0.0,
+        "partial_degraded_rate": null,
+        "latency_ms": 49050,
+        "token_usage": null,
+        "cost_usd": null
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "operational_measurements": {
+        "warnings": 47,
+        "regression_delta_passed_tests": 1,
+        "source_change_under_test": "offline deterministic file-to-PPTX artifact preview"
+      },
+      "notes": "Latest full regression after adding the offline artifact proof. 8 skips and 47 warnings remain separate from pass/fail counts."
+    },
+    {
       "record_id": "suite-gpt5-token-compatibility-20260918",
       "record_type": "test_suite",
       "case_id": null,
@@ -328,6 +396,126 @@
         "cost_status": "unavailable"
       },
       "notes": "The quality gate rejected unsupported/ungrounded output and released no artifact. Provider latency and reconciled cost were not recorded."
+    },
+    {
+      "record_id": "case-g01-live-invalid-key-20260920",
+      "record_type": "live_case",
+      "case_id": "golden-g01",
+      "pipeline": "presentation",
+      "run_id": "run-g01-presentation-live-main-20260920-01",
+      "outcome": "fail",
+      "quality_status": "not_produced",
+      "source_kind": "recorded_live_run",
+      "source": "phase-11-live-artifact-runbook.md, Main-branch live attempt — invalid provider credential",
+      "source_tests": [],
+      "test_counts": {"total": 1, "passed": 0, "failed": 1, "skipped": 0},
+      "duration_ms": 4170,
+      "objective_metrics": {
+        "correctness": "not_measured",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "not_measured",
+        "constraint_adherence": "not_measured",
+        "completeness": "not_measured",
+        "artifact_quality": "not_produced",
+        "failure_rate": 1.0,
+        "partial_degraded_rate": 0.0,
+        "latency_ms": 4170,
+        "token_usage": null,
+        "cost_usd": null
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "operational_measurements": {
+        "admission_ms": 189,
+        "attempts": 1,
+        "observability_events": 26,
+        "trajectory_events": 26,
+        "artifact_count": 0,
+        "provider_latency_ms": null,
+        "cost_status": "unavailable"
+      },
+      "notes": "Provider returned HTTP 401 invalid_api_key. Retry admission was denied by the spend guard. Provider usage was unavailable; zero projected counters are not a billing receipt. No artifact or manifest was released."
+    },
+    {
+      "record_id": "case-g01-live-state-handoff-20260920",
+      "record_type": "live_case",
+      "case_id": "golden-g01",
+      "pipeline": "presentation",
+      "run_id": "run-g01-presentation-live-main-20260920-02",
+      "outcome": "fail",
+      "quality_status": "not_produced",
+      "source_kind": "recorded_live_run",
+      "source": "phase-11-live-artifact-runbook.md, Main-branch live attempt — provider accepted, state hand-off failure",
+      "source_tests": ["pipelines/tests/test_text_pipelines.py"],
+      "test_counts": {"total": 1, "passed": 0, "failed": 1, "skipped": 0},
+      "duration_ms": 32392,
+      "objective_metrics": {
+        "correctness": "fail",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "not_measured",
+        "constraint_adherence": "not_measured",
+        "completeness": "not_measured",
+        "artifact_quality": "not_produced",
+        "failure_rate": 1.0,
+        "partial_degraded_rate": 0.0,
+        "latency_ms": 32392,
+        "token_usage": {
+          "input": 31625,
+          "output": 9815,
+          "reasoning": 0,
+          "total": 41440,
+          "usage_status": "provider_reported"
+        },
+        "cost_usd": null
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "operational_measurements": {
+        "admission_ms": 327,
+        "attempts": 1,
+        "observability_events": 35,
+        "trajectory_events": 35,
+        "artifact_count": 0,
+        "provider_latency_ms": 32392,
+        "cost_status": "unavailable"
+      },
+      "notes": "Provider accepted the request and all PPT agent stages completed. Persistence failed because PresentationFlow wrote to undeclared artifact_data on CrewAI StateWithId. A PPTX file was rendered but not registered or released; it is an orphan, not a successful artifact."
+    },
+    {
+      "record_id": "case-g01-live-memory-timeout-20260920",
+      "record_type": "live_case",
+      "case_id": "golden-g01",
+      "pipeline": "presentation",
+      "run_id": "run-g01-presentation-live-main-20260920-03",
+      "outcome": "fail",
+      "quality_status": "not_produced",
+      "source_kind": "recorded_live_run",
+      "source": "phase-11-live-artifact-runbook.md, Main-branch live retry — Cognee memory timeout before provider execution",
+      "source_tests": [],
+      "test_counts": {"total": 1, "passed": 0, "failed": 1, "skipped": 0},
+      "duration_ms": null,
+      "objective_metrics": {
+        "correctness": "not_measured",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "not_measured",
+        "constraint_adherence": "not_measured",
+        "completeness": "not_measured",
+        "artifact_quality": "not_produced",
+        "failure_rate": 1.0,
+        "partial_degraded_rate": 0.0,
+        "latency_ms": null,
+        "token_usage": null,
+        "cost_usd": null
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "operational_measurements": {
+        "admission_ms": 236,
+        "attempts": 0,
+        "observability_events": 12,
+        "trajectory_events": 12,
+        "artifact_count": 0,
+        "provider_latency_ms": null,
+        "cost_status": "unavailable"
+      },
+      "notes": "Cognee read timed out during request memory recall. Provider execution was not reached; token usage and runtime duration remain unavailable rather than zero. No artifact or manifest was released."
     },
     {
       "record_id": "phase11-catalog-readiness-20260918",
@@ -626,6 +814,111 @@
         "guard_outcome": "retry_denied_after_first_attempt"
       },
       "notes": "The provider accepted the request and all four executive-summary stages reached completion events, but aggregate provider usage reached 66,084 tokens against the configured 12,000-token budget. No artifact was released. Cost remains unavailable, so these tokens must not be converted into a fabricated currency value."
+    },
+    {
+      "record_id": "suite-phase11-offline-artifact-preview-20260920",
+      "record_type": "offline_case",
+      "case_id": "golden-g01",
+      "pipeline": "presentation",
+      "run_id": "run-g01-offline-preview",
+      "outcome": "pass",
+      "quality_status": "passed",
+      "source_kind": "repository_test",
+      "source": "Deterministic local source-grounded artifact preview",
+      "source_tests": ["tests/component/test_phase11_offline_artifact.py"],
+      "test_counts": {"total": 1, "passed": 1, "failed": 0, "skipped": 0},
+      "duration_ms": null,
+      "objective_metrics": {
+        "correctness": "pass",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "pass",
+        "constraint_adherence": "pass",
+        "completeness": "not_measured",
+        "artifact_quality": "pass",
+        "failure_rate": 0.0,
+        "partial_degraded_rate": 0.0,
+        "latency_ms": null,
+        "token_usage": 0,
+        "cost_usd": 0.0
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "operational_measurements": {
+        "provider_called": false,
+        "memory_backend_called": false,
+        "manifest_ownership": "user_case_task",
+        "provenance": "evidence_ids_and_source_reference"
+      },
+       "notes": "This proves the local file-to-ingestion-to-deterministic-PPTX-to-quality-gate-to-manifest path. It does not measure model quality or Cognee recall; zero token and cost values are deliberate because no provider was called."
+     },
+    {
+      "record_id": "suite-full-regression-after-memory-health-probe-20260920",
+      "record_type": "test_suite",
+      "case_id": null,
+      "pipeline": "repository",
+      "run_id": null,
+      "outcome": "pass",
+      "quality_status": "not_evaluated",
+      "source_kind": "local_test_run",
+      "source": "Full pytest regression after adding the opt-in redacted memory reachability probe",
+      "source_tests": ["pytest -q --basetemp=.pytest-tmp-phase11-full-20260920 -p no:cacheprovider"],
+      "test_counts": {"total": 743, "passed": 735, "failed": 0, "skipped": 8},
+      "duration_ms": 42280,
+      "objective_metrics": {
+        "correctness": "pass",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "not_measured",
+        "constraint_adherence": "pass",
+        "completeness": "not_measured",
+        "artifact_quality": "not_measured",
+        "failure_rate": 0.0,
+        "partial_degraded_rate": 0.0,
+        "latency_ms": 42280,
+        "token_usage": 0,
+        "cost_usd": 0.0
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "operational_measurements": {
+        "warnings": 47,
+        "memory_health_probe": "tested_offline_only",
+        "provider_called": false,
+        "memory_backend_called": false
+      },
+      "notes": "The full regression passed after the health-probe change. The probe is disabled by default in automated tests, so this record contains no provider or Cognee usage. Skips and dependency warnings are preserved rather than counted as passes."
+     },
+    {
+      "record_id": "suite-full-regression-after-live-diagnostic-fix-20260920",
+      "record_type": "test_suite",
+      "case_id": null,
+      "pipeline": "repository",
+      "run_id": null,
+      "outcome": "pass",
+      "quality_status": "not_evaluated",
+      "source_kind": "local_test_run",
+      "source": "Full pytest regression after retry-policy classification and constraint-aware PPT quality prompt fixes",
+      "source_tests": ["pytest -q --basetemp=.pytest-tmp-phase11-live-fix-full-20260920 -p no:cacheprovider"],
+      "test_counts": {"total": 745, "passed": 737, "failed": 0, "skipped": 8},
+      "duration_ms": 64330,
+      "objective_metrics": {
+        "correctness": "pass",
+        "truthfulness_factual_grounding": "not_measured",
+        "evidence_adherence": "not_measured",
+        "constraint_adherence": "pass",
+        "completeness": "not_measured",
+        "artifact_quality": "not_measured",
+        "failure_rate": 0.0,
+        "partial_degraded_rate": 0.0,
+        "latency_ms": 64330,
+        "token_usage": 0,
+        "cost_usd": 0.0
+      },
+      "human_evaluation": {"status": "not_run", "score": null},
+      "operational_measurements": {
+        "warnings": 62,
+        "provider_called": false,
+        "memory_backend_called": false,
+        "live_failure_classification_fix": "retry_policy_separated_from_budget_exhaustion"
+      },
+      "notes": "Offline regression after the live diagnostic. It validates the narrow semantic and prompt-contract fixes without making another provider call."
     }
   ]
 }

@@ -84,7 +84,10 @@ class PresentationFlow(TextTransformationFlow):
             rendered_artifacts=[artifact.path],
             constraints=constraints,
         )
-        self.state.artifact_data = {
+        # TaskState already declares ``artifact`` as the durable hand-off
+        # field.  CrewAI's runtime state rejects undeclared attributes such as
+        # ``artifact_data`` during a real Flow execution.
+        self.state.artifact = {
             "path": artifact.path,
             "slide_count": artifact.slide_count,
             "quality": quality.model_dump(mode="json"),
@@ -106,7 +109,7 @@ class PresentationFlow(TextTransformationFlow):
             requested_visuals=self._request().metadata.get("ppt_visuals"),
         )
         
-        artifact_data = getattr(self.state, "artifact_data", {})
+        artifact_data = self.state.artifact or {}
         self.state.artifact = {
             **artifact_data,
             "child_plan": [item.model_dump(mode="json") for item in child_plan],

@@ -9,10 +9,15 @@ multi-agent, load, or human-review scenario is complete.
 
 The current Phase 11 checkpoint and route for another developer or agent are
 documented in `phase-11-branch-handoff.md`. The latest post-repair offline
-regression is **729 passed, 8 skipped, 47 warnings**. The final authorized live
+regression is **743 passed, 8 skipped, 62 warnings**. The final authorized live
 G01 presentation attempt reached the real provider but released no artifact;
 Phase 11 remains open until a future explicitly authorized live run proves the
 PPTX artifact path.
+
+With the LLM key disabled, the additive offline artifact preview now proves
+the local file → ingestion → evidence index → deterministic PPTX renderer →
+quality gate → ownership/provenance manifest path. It is explicitly not a
+provider-backed generation result and does not close the live Phase 11 gate.
 
 ## Completed through the memory phase
 
@@ -58,13 +63,18 @@ PPTX artifact path.
 - [x] 36. Trajectory (safe event timeline and parallel lanes)
 - [x] 37. Observability (memory/provider/error visibility with redaction)
 - [x] 38. Telemetry (latency/usage/cost projection with duplicate receipt protection)
-- [x] 39. Full regression (latest merged-main verification: 729 passed, 8 skipped, 47 warnings; Cloud-configured API run remains pending)
+- [x] 39. Full regression (latest verification: 743 passed, 8 skipped, 62 warnings; Cloud-configured API run remains pending)
 - [ ] 40. Golden cases (G01 live recall recovered; quality gate rejected the final draft; replay fixture added)
 - [ ] 41. Holdout cases
 - [ ] 42. External AI baseline
 - [x] 43. Quality metrics (sanitized objective dataset separates measured, unavailable, and human-review fields; live quality remains open)
 - [x] 44. Matplotlib charts (traceable CSV/PNG export and chart manifest; repeated live percentiles remain open)
 - [ ] 45. Final test report
+
+Phase 11 safety gate: the LLM key remains disabled until the operator enables
+`SUDARSHAN_HEALTH_PROBE_MEMORY=true` and confirms `/health` reports
+`memory_probe.status=reachable`. The probe is redacted and bounded; it does not
+change the core ingestion or pipeline flow.
 
 ## Evidence
 
@@ -82,7 +92,7 @@ PPTX artifact path.
 - Observability/telemetry report: `observability-telemetry-testing-report.md`
 - Latest Phase 9 matrix result: **7 passed**; affected regression: **149 passed, 1 warning**
 - First-half audit: `first-half-quality-audit.md`
-- Latest full deterministic local regression on merged `main` (2026-09-20): **729 passed, 8 skipped, 47 warnings in 48.23 seconds**
+- Latest full deterministic local regression after the evidence-binding change (2026-09-20): **743 passed, 8 skipped, 62 warnings in 55.93 seconds**
 - Phase 11 golden/holdout catalogue: `phase-11-golden-and-holdout-cases.md`
 - Agentic performance/cost measurement report: `agentic-system-performance-and-cost-report.md`
 - Live G01 checkpoint: same-case bounded context recovered and other-case
@@ -116,8 +126,22 @@ PPTX artifact path.
   `benchmark-results/benchmark-results.csv`, and `benchmark-results/chart-manifest.json`
 - Merged-main verification (2026-09-20): **729 passed, 8 skipped, 47 warnings
   in 48.23 seconds**; source code and configuration were unchanged.
+- Post-live-fix verification (2026-09-20): **730 passed, 8 skipped, 47
+  warnings in 46.47 seconds**; one focused regression was added for the PPT
+  artifact state hand-off.
+- Offline artifact preview verification (2026-09-20): **1 focused test passed**;
+  the local source → ingestion → deterministic PPTX → manifest path is proven
+  without provider or Cognee calls.
+- Controlled live retry after the PPT fix (`run-g01-presentation-live-main-20260920-03`)
+  reached the memory boundary but Cognee timed out before provider execution;
+  no tokens or artifact were produced. Phase 11 remains open pending a stable
+  memory-backed artifact run.
 - One-run live artifact runbook: `phase-11-live-artifact-runbook.md`; the
   sanitized G01 presentation request contract passed **33 focused tests**.
+- Evidence binding checkpoint (2026-09-20): **24 focused tests passed**;
+  ingestion receipts now expose `evidence_ids`, and later runs can pass those
+  IDs as `evidence_refs` for scoped resolver binding. One live artifact run
+  using this explicit link is still required.
 
 ## Open decisions carried forward
 

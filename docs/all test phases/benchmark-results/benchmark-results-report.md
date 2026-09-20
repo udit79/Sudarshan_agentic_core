@@ -35,7 +35,7 @@ the dataset.
 
 ## INPUT
 
-The dataset contains 17 records, including historical focused checks, live
+The dataset contains 25 records, including historical focused checks, live
 observations, and the current merged-main verification:
 
 - ingestion matrix: 17 passed, 1 skipped, 0 failed, 620 ms;
@@ -43,8 +43,17 @@ observations, and the current merged-main verification:
 - artifact/pipeline focused checks: 131 passed, 0 skipped, 0 failed, 6,300 ms;
 - Phase 11 focused checks: 26 passed, 0 skipped, 0 failed, 20,420 ms;
 - historical full local regression: 703 passed, 8 skipped, 0 failed, 58,100 ms;
-- current merged-main regression: 729 passed, 8 skipped, 0 failed, 48,230 ms;
+- merged-main pre-fix regression: 729 passed, 8 skipped, 0 failed, 48,230 ms;
+- post-fix regression: 730 passed, 8 skipped, 0 failed, 46,470 ms;
+- latest regression after offline artifact preview: 731 passed, 8 skipped,
+  0 failed, 49,050 ms;
+- latest full regression after the redacted memory health probe: 735 passed,
+  8 skipped, 0 failed, 42,280 ms, with 47 dependency warnings;
+- latest full regression after the live diagnostic fixes: 737 passed, 8
+  skipped, 0 failed, 64,330 ms, with 62 dependency warnings;
 - offline G01 replay: 1 objective grounding check passed;
+- offline G01 artifact preview: 1 deterministic ingestion-to-PPTX-to-manifest
+  check passed without provider or Cognee calls;
 - Phase 11 catalogue readiness: 3 checks passed in 60 ms; all 10 golden and
   all 3 holdout cases are present, disjoint, sanitized, and contract-defined;
 - live G01 ingestion recovered successfully with HTTP 201, one evidence item,
@@ -92,6 +101,27 @@ artifacts. Provider-only latency and reconciled cost were unavailable.
 
 This is a useful safety result: the system rejected the bad result instead of
 publishing it. It is not a successful product-quality result.
+
+### Memory reachability safety gate — 2026-09-20
+
+The application now has an opt-in `/health` memory probe. It performs one
+bounded recall using a synthetic health-probe scope and returns only
+`reachable`/`unreachable`, latency, result count, and exception type. It never
+returns recalled memory text. The probe is intentionally disabled by default;
+the LLM key must remain disabled until an operator enables the probe and sees
+`memory_probe.status=reachable`.
+
+### Live G01 presentation diagnostic — 2026-09-20
+
+The controlled run `run-g01-presentation-live-main-20260920-04` reached Cognee,
+the provider, all three PPT agent stages, and the renderer. Provider-reported
+usage was 31,270 input tokens plus 8,440 output tokens, with 27,984 ms of
+provider/Crew wall time. The generated draft was not released: the quality
+review found unresolved evidence labels and a briefing-structure mismatch,
+then the explicit one-attempt retry policy denied a second provider attempt.
+The run therefore produced no retrievable manifest. The follow-up code fix
+separates retry-policy exhaustion from actual token-budget exhaustion and makes
+the legacy PPT quality prompt respect exact slide-count constraints.
 
 ### Current controlled live attempt
 
@@ -183,16 +213,29 @@ provider, database, or Cognee calls.
 
 ### Merged-main verification — 2026-09-20
 
-The fresh read-only regression on merged `main` completed with:
+The fresh read-only regression on merged `main` completed before the PPT
+hand-off fix with:
 
 ```text
 729 passed, 8 skipped, 47 warnings in 48.23s
 ```
 
 No source or configuration files were changed by this verification. The
-benchmark dataset now records this result as
+benchmark dataset records this result as
 `suite-full-regression-merged-main-20260920`. The 47 warnings are dependency
 warnings and remain distinct from test failures.
+
+After the focused PPT fix, the full regression completed with **730 passed,
+8 skipped, 0 failed in 46.47 seconds**. This is recorded separately as
+`suite-full-regression-post-ppt-fix-20260920`.
+
+After adding the offline artifact preview, the full regression completed with
+**731 passed, 8 skipped, 0 failed in 49.05 seconds**. This is recorded as
+`suite-full-regression-after-offline-preview-20260920`.
+
+The next controlled live retry did not reach provider execution: Cognee timed
+out during memory recall. Its latency, token, and cost fields are therefore
+`null` in the dataset, not zero. No artifact or manifest was released.
 
 The Phase 11 catalogue validation result is **3 passed in 0.06 seconds**. It
 proves offline case-set readiness, not live model execution.

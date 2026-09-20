@@ -10,7 +10,11 @@
         "suite-phase11-focused-20260918",
         "suite-full-regression-20260918",
         "suite-full-regression-merged-main-20260920",
-        "suite-gpt5-token-compatibility-20260918"
+        "suite-full-regression-post-ppt-fix-20260920",
+        "suite-full-regression-after-offline-preview-20260920",
+        "suite-gpt5-token-compatibility-20260918",
+        "suite-full-regression-after-memory-health-probe-20260920",
+        "suite-full-regression-after-live-diagnostic-fix-20260920"
       ],
       "data_columns": [
         "test_counts.passed",
@@ -27,7 +31,11 @@
         "suite-phase11-focused-20260918",
         "suite-full-regression-20260918",
         "suite-full-regression-merged-main-20260920",
-        "suite-gpt5-token-compatibility-20260918"
+        "suite-full-regression-post-ppt-fix-20260920",
+        "suite-full-regression-after-offline-preview-20260920",
+        "suite-gpt5-token-compatibility-20260918",
+        "suite-full-regression-after-memory-health-probe-20260920",
+        "suite-full-regression-after-live-diagnostic-fix-20260920"
       ],
       "data_columns": [
         "duration_ms"
