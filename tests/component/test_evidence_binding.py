@@ -8,6 +8,7 @@ from ingestion_pipelines import ingest_file
 from ingestion_pipelines.evidence_index import EvidenceIndex
 from pipelines.common.contracts import AdvisoryRequest
 from integrations.deepseek_harness.application import SudarshanApplication
+from pipelines.orchestrator.graph import _explicit_grounding_pack
 
 
 def _request(*, user_id: str = "user-a", case_id: str = "case-a", task_id: str = "task-run"):
@@ -184,3 +185,27 @@ def test_prepare_persists_explicit_evidence_context_for_later_start(tmp_path) ->
         {"evidence_id": document.evidence_blocks[0].evidence_id}
     ]
     assert "Preparation-visible case evidence" in stored["context_pack"]["context_text"]
+
+
+def test_grounding_reuses_admission_bound_evidence_pack() -> None:
+    pack = {
+        "stage_id": "explicit_evidence",
+        "records": [{"scope_type": "case", "scope_id": "case-a", "content": "CASE-A"}],
+        "context_text": "[evidence-a] CASE-A",
+    }
+
+    selected = _explicit_grounding_pack({"request_context_pack": pack})
+
+    assert selected is pack
+    assert selected["context_text"] == "[evidence-a] CASE-A"
+
+
+def test_grounding_does_not_treat_general_request_pack_as_explicit_evidence() -> None:
+    selected = _explicit_grounding_pack({
+        "request_context_pack": {
+            "stage_id": "understanding",
+            "records": [{"scope_type": "case", "scope_id": "case-a"}],
+        }
+    })
+
+    assert selected is None

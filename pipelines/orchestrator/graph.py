@@ -262,6 +262,26 @@ def _validate_memory_records(records: list[dict[str, Any]], request: AdvisoryReq
     )
 
 
+def _explicit_grounding_pack(state: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Reuse an admission-bound evidence pack for pipeline grounding.
+
+    The admission boundary may authorize exact evidence IDs and persist their
+    scoped ContextPack before a run starts.  Grounding must consume that pack
+    instead of replacing it with a fresh semantic recall, otherwise a valid
+    upload can be admitted but disappear before the provider sees it.
+    """
+
+    pack = state.get("request_context_pack")
+    if not isinstance(pack, Mapping):
+        return None
+    if pack.get("stage_id") != "explicit_evidence":
+        return None
+    records = pack.get("records")
+    if not isinstance(records, list) or not records:
+        return None
+    return pack
+
+
 def build_default_pipeline_registry(
     memory_manager: MemoryManagerLike,
     *,
@@ -1073,15 +1093,17 @@ class PipelineOrchestrator:
                     f" Retrieve the parent artifact {request.parent_artifact_id or request.parent_run_id} "
                     f"and apply this revision instruction: {request.revision_instruction}."
                 )
-            pack = _context_pack(
-                self.memory_manager,
-                query=query,
-                context=request.access_context,
-                run_id=state["run_id"],
-                stage_id="grounding",
-                top_k=min(request.top_k, 16),
-                token_budget=min(request.token_budget, 2600),
-            )
+            pack = _explicit_grounding_pack(state)
+            if pack is None:
+                pack = _context_pack(
+                    self.memory_manager,
+                    query=query,
+                    context=request.access_context,
+                    run_id=state["run_id"],
+                    stage_id="grounding",
+                    top_k=min(request.top_k, 16),
+                    token_budget=min(request.token_budget, 2600),
+                )
             if pack is not None:
                 _validate_context_scope(pack, request)
                 records = list(pack.get("records", []))

@@ -497,3 +497,58 @@ Sanitized terminal evidence:
 This is classified as a **live Cognee availability failure**, not a PPT
 quality result and not a failure of the repaired `artifact` state hand-off.
 The server was stopped after the terminal state. No automatic retry was made.
+
+### Controlled rerun after the validation-listener fix — quality gate rejected draft
+
+Run `run-g01-presentation-live-20260920-06` was admitted with HTTP **202** in
+**112 ms**. The source upload succeeded with `memory_projection_status` set to
+`succeeded`, and the request carried the returned evidence ID and document ID
+through `evidence_refs`. The real provider completed the presentation stages,
+and the renderer created a valid two-slide PPTX.
+
+The repaired validation listener completed normally. The run then ended as
+**failed** because the quality gate found two genuine release blockers:
+
+1. Slide 2 contained six bullets while the current density rule allows five.
+2. The model used `[E2]` and `[E3]` labels without resolving them to named
+   sources in the deck or speaker notes.
+
+The system correctly withheld release. The generated failed draft was checked
+as a PPTX package with two slide XML files and 36,527 bytes:
+
+```text
+artifacts/presentations/task-g01-recovery-01-brief_20260920T115257Z.pptx
+```
+
+This is evidence of renderer execution, not a successful artifact. No
+manifest-backed approved artifact was released and no second paid run was
+started.
+
+Safe measurements:
+
+| Measurement | Value |
+|---|---:|
+| Admission | HTTP 202 / 112 ms |
+| Terminal status | failed |
+| Safe event count | 28 |
+| Provider model | gpt-5.4 |
+| Provider input/output tokens | 32,430 / 9,145 |
+| Cache-read tokens | 21,760 |
+| Provider latency | 26,515 ms |
+| Provider attempts | 1 |
+| Cost | unavailable |
+| Released artifact | 0 |
+
+Classification:
+
+- **PASS:** live ingestion, Cognee projection, explicit evidence hand-off,
+  provider reachability, PPTX rendering, repaired validation-listener path,
+  telemetry capture, and safe quality-gate rejection.
+- **FAIL:** release-quality presentation for G01, because traceability and
+  density requirements were not met.
+- **NOT YET IMPLEMENTED:** a successful provider-backed, manifest-released
+  G01 artifact and reconciled public artifact-count projection.
+- **NEEDS DESIGN DECISION:** whether evidence labels should be resolved by
+  the model into human-readable source descriptions, by the application from
+  the evidence manifest, or by both. The current gate correctly rejects
+  unresolved labels.

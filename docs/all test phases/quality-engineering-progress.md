@@ -9,7 +9,7 @@ multi-agent, load, or human-review scenario is complete.
 
 The current Phase 11 checkpoint and route for another developer or agent are
 documented in `phase-11-branch-handoff.md`. The latest post-repair offline
-regression is **744 passed, 8 skipped, 62 warnings**. The final authorized live
+regression is **746 passed, 8 skipped, 62 warnings**. The final authorized live
 G01 presentation attempt reached the real provider but released no artifact;
 Phase 11 remains open until a future explicitly authorized live run proves the
 PPTX artifact path.
@@ -18,6 +18,16 @@ With the LLM key disabled, the additive offline artifact preview now proves
 the local file → ingestion → evidence index → deterministic PPTX renderer →
 quality gate → ownership/provenance manifest path. It is explicitly not a
 provider-backed generation result and does not close the live Phase 11 gate.
+
+The latest controlled provider run (`run-g01-presentation-live-20260920-06`)
+was executed once after the validation-listener repair. It reached live
+ingestion, Cognee projection, evidence binding, provider execution, and PPTX
+rendering. The quality gate rejected the resulting two-slide draft because
+slide 2 exceeded the bullet-density budget and the deck contained unresolved
+`[E2]`/`[E3]` evidence labels. Provider usage was **32,430 input + 9,145
+output tokens**, cache-read **21,760**, and provider latency **26,515 ms**;
+cost was unavailable. The draft exists for inspection, but no approved
+manifest-backed artifact was released. Phase 11 remains open.
 
 ## Completed through the memory phase
 
@@ -150,6 +160,20 @@ change the core ingestion or pipeline flow.
   **31,925 input + 5,420 output tokens**, cache-read **21,760**, and latency
   **23,629 ms**. Cost was unavailable and no released artifact was produced.
   The defect is fixed offline; another paid run remains separately authorized.
+- Controlled live G01 rerun `run-g01-presentation-live-20260920-06` proved that
+  the validation-listener repair works through the real provider path. It
+  produced a valid 2-slide failed draft, but the quality gate correctly
+  rejected it for six bullets on slide 2 and unresolved `[E2]`/`[E3]` evidence
+  labels. It recorded **32,430 input + 9,145 output tokens**, cache-read
+  **21,760**, and **26,515 ms** provider latency. Cost was unavailable and no
+  approved artifact was released. The next work is offline quality/traceability
+  repair and reconciliation of public artifact-count reporting; no automatic
+  paid retry was made.
+- Offline follow-up after the live evidence gap: grounding now consumes the
+  admission-bound explicit evidence ContextPack when present. Focused evidence
+  and orchestration tests passed **21**, and the full offline regression passed
+  **746 passed, 8 skipped, 62 warnings in 52.26 seconds**. This change is
+  additive and does not claim that a second paid live run has succeeded.
 
 ## Open decisions carried forward
 

@@ -15,7 +15,7 @@ Latest offline regression after the PPT repair, offline artifact preview, and
 redacted memory health-probe safety gate:
 
 ```text
-744 passed, 8 skipped, 62 warnings in 40.52s
+746 passed, 8 skipped, 62 warnings in 52.26s
 ```
 
 The warnings are dependency deprecations/configuration warnings. They are not
@@ -70,6 +70,11 @@ The changes are additive and covered by tests:
   ingestion evidence, then exposed a `PPTIssue.code` versus `issue_code`
   validation-listener defect. The additive fix is covered by the focused PPT
   regression, and the full offline suite now passes **744** tests.
+- The grounding stage now reuses a non-empty admission-bound explicit evidence
+  pack instead of replacing it with a fresh semantic recall. This closes the
+  live-observed gap where `evidence_refs` were authorized but the provider saw
+  an empty grounding context. Two focused tests cover the selection boundary;
+  the full offline suite now passes **746** tests.
 
 The fallback does not add custom-template support. It uses the already existing
 native renderer and preserves the generated slide content.
@@ -87,7 +92,7 @@ native renderer and preserves the generated slide content.
 | Execution safety | Duplicate, concurrency, restart fixtures | PASS deterministic; live process restart remains open |
 | Observability | Status, events, DAG, trajectory, redaction | PASS offline and observed in live run |
 | Telemetry | Latency, usage, cache, cost fields | PASS structurally; live cost unavailable |
-| Phase 11 live artifact | Real G01 presentation attempt | OPEN: no artifact yet |
+| Phase 11 live artifact | Real G01 presentation attempt | OPEN: failed draft produced; no approved artifact released |
 
 The phase-specific documents are in this folder. Start with:
 
@@ -125,6 +130,51 @@ non-default presentation templates require a validated template_contract
 The provider usage was recorded as provider-reported. The cost was not
 available, so reports must keep cost as `null`/unavailable.
 
+### Latest controlled rerun after the validation-listener fix
+
+Run `run-g01-presentation-live-20260920-06` was admitted with HTTP **202**
+in **112 ms**. The sanitized G01 source ingested successfully, Cognee
+projection succeeded, and the explicit ingestion evidence reference was sent
+into the presentation request. The provider completed the presentation
+stages, the PPTX renderer produced a real two-slide file, and the repaired
+validation listener completed without the previous `PPTIssue.issue_code`
+crash.
+
+The run still ended as **failed**, because the quality gate correctly rejected
+the draft. Slide 2 had six bullets against the five-bullet density budget, and
+the generated `[E2]`/`[E3]` evidence labels were unresolved inside the deck.
+The system therefore did not release a quality-approved artifact. A failed
+draft file exists for forensic inspection at:
+
+```text
+artifacts/presentations/task-g01-recovery-01-brief_20260920T115257Z.pptx
+```
+
+The file is a valid 2-slide PPTX (36,527 bytes), but it is not a deliverable.
+The generated text remained conservative and did not invent G01 facts; the
+traceability and density failures are product-quality failures that must be
+fixed before claiming a successful live artifact.
+
+| Measurement | Value |
+|---|---:|
+| HTTP admission | 202 |
+| Admission latency | 112 ms |
+| Terminal status | failed |
+| Safe event count | 28 |
+| Provider model | gpt-5.4 |
+| Provider input tokens | 32,430 |
+| Provider output tokens | 9,145 |
+| Cache-read tokens | 21,760 |
+| Provider latency | 26,515 ms |
+| Provider attempts | 1 |
+| Released artifact count | 0 |
+| Cost | unavailable; do not invent a value |
+
+The terminal summary reported internal artifact records while public telemetry
+reported zero released artifacts. For reporting, the authoritative release
+result is zero because the run failed and no manifest-backed deliverable was
+released.
+
 ## How to verify the current branch offline
 
 This command does not use the LLM key or Cognee Cloud:
@@ -139,7 +189,7 @@ $base = Join-Path $env:TEMP "sudarshan-offline-$runStamp"
   -p no:cacheprovider
 ```
 
-Expected current result: **744 passed, 8 skipped, 62 warnings**.
+Expected current result: **746 passed, 8 skipped, 62 warnings**.
 
 ## Route to complete Phase 11
 
@@ -226,8 +276,8 @@ have stable evidence and artifact measurements.
 | Real memory path | PASS for observed bounded G01 path |
 | Real PPT artifact | NOT YET PROVEN |
 | Live provider cost | NOT MEASURED |
-| Ingestion-to-resolver evidence binding | PASS offline; live use not yet proven |
-| Live evidence binding through provider/PPT render | PASS for reachability; artifact release still open |
+| Ingestion-to-resolver evidence binding | PASS offline and observed in live request |
+| Live evidence binding through provider/PPT render | PASS for request hand-off; release-quality traceability still open |
 | Custom PPT template support | NEEDS DESIGN DECISION |
 | Phase 11 overall | OPEN |
 
