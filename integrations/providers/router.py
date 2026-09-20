@@ -68,6 +68,16 @@ class ProviderRouter:
         "video_script": "OPENAI_VIDEO_SCRIPT_MODEL",
     }
 
+    # Fallback model names used when neither a caller-requested model nor the
+    # corresponding environment variable is set.  Override via env vars listed
+    # in _MODEL_ENV before changing these defaults here.
+    _MODEL_DEFAULTS = {
+        "text": "openai/gpt-4o",
+        "image": "gpt-image-1",
+        "tts": "tts-1",
+        "video_script": "gpt-4o",
+    }
+
     @classmethod
     def configured_model(cls, capability: str, requested: object | None = None) -> object | None:
         """Return an explicit model or the capability-specific environment value.
@@ -103,13 +113,10 @@ class ProviderRouter:
         configured = self.configured_model(capability, requested)
         model = str(configured or "").strip()
         if not model:
-            defaults = {
-                "text": "openai/gpt-5.4",
-                "image": "gpt-image-1",
-                "tts": "tts-1",
-                "video_script": "gpt-5.4",
-            }
-            model = defaults.get(capability, "unknown")
+            # Check for a per-capability default env override first, then fall
+            # back to the hardcoded _MODEL_DEFAULTS table.
+            default_env = f"SUDARSHAN_DEFAULT_MODEL_{capability.upper()}"
+            model = os.getenv(default_env, "").strip() or self._MODEL_DEFAULTS.get(capability, "unknown")
         return ModelRoute(capability=capability, provider="openai", model=model)
 
     def before_call(self, provider: str, capability: str) -> None:

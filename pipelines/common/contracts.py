@@ -170,6 +170,37 @@ class AdvisoryRequest:
             "constraints": constraints,
         }
 
+    def _constraints_instruction(self) -> str:
+        """Return a plain-English instruction string from constraints for CrewAI interpolation.
+
+        The crew task descriptions use ``{constraints}`` as a free-text slot.
+        A human-readable sentence is far more reliable than a raw dict repr.
+        """
+        c = self.constraints
+        if c is None:
+            return "No hard constraints supplied."
+        if hasattr(c, "model_dump"):
+            c = c.model_dump(mode="json")
+        if not isinstance(c, dict):
+            return str(c)
+        parts: list[str] = []
+        slide_count = c.get("slide_count") or c.get("page_count")
+        if slide_count is not None:
+            parts.append(
+                f"TOTAL SLIDE COUNT: exactly {slide_count} slides (this includes every cover, "
+                "agenda, conclusion, and closing slide — do NOT add extra fixed slides on top)."
+            )
+        theme_id = c.get("theme_id")
+        if theme_id:
+            parts.append(f"Theme: {theme_id}.")
+        palette = c.get("color_palette")
+        if palette:
+            parts.append(f"Color palette: {', '.join(str(x) for x in palette)}.")
+        sections = c.get("required_sections")
+        if sections:
+            parts.append(f"Required sections: {', '.join(str(x) for x in sections)}.")
+        return " ".join(parts) if parts else "No hard constraints supplied."
+
 
 @dataclass(frozen=True, slots=True)
 class PipelineResponse:

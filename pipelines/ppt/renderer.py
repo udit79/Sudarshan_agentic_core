@@ -189,6 +189,11 @@ def render_presentation(
 
     theme = theme or resolve_presentation_theme()
 
+    if output is not None and output.total_page_budget is not None:
+        budget = output.total_page_budget
+        if len(output.slides) > budget:
+            output = output.model_copy(update={"slides": output.slides[:budget]})
+
     if output is not None and template_contract is not None:
         if output.template_id != template_contract.template_id:
             raise ValueError("presentation template_id does not match template_contract")

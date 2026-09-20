@@ -12,6 +12,7 @@ from typing import Mapping
 from memory import KnowledgeUnit, MemoryType, ScopeType, Source, SourceType
 from pipelines.common.contracts import AdvisoryRequest, PipelineResponse
 from pipelines.common.memory_tools import MemoryManagerLike, MemoryRuntime, TaskMemoryWriter
+from pipelines.orchestrator.constants import STAGE_RECALL_GROUNDING_TOKENS, truncate_to_token_budget
 from pipelines.video.contracts import VideoPackage
 from pipelines.video.native_generator import NativeVideoGenerator
 from pipelines.video.planner import OpenAIVideoPlanner
@@ -64,7 +65,10 @@ class VideoPipeline:
             if cancel_event is not None and cancel_event.is_set():
                 raise RuntimeError("video generation cancelled cooperatively")
             writer.write("video_generation", "started", "Starting native video generation.")
-            memory_context = str(request.metadata.get("resolved_memory_context", ""))[:30000]
+            memory_context = truncate_to_token_budget(
+                str(request.metadata.get("resolved_memory_context", "")),
+                STAGE_RECALL_GROUNDING_TOKENS,
+            )
             package_data = request.metadata.get("video_package")
             package = VideoPackage.model_validate(package_data) if isinstance(package_data, Mapping) else None
             
@@ -93,9 +97,12 @@ class VideoPipeline:
             )
             if self.client is not None and not native_renderer_requested:
                 provider_options = package.provider_payload() if package is not None else {}
-                script = str(provider_options.pop("video_script", "") or "\n\n".join(
-                    scene.narration for scene in scenes if scene.narration
-                ) or memory_context).strip()[:20000]
+                script = truncate_to_token_budget(
+                    str(provider_options.pop("video_script", "") or "\n\n".join(
+                        scene.narration for scene in scenes if scene.narration
+                    ) or memory_context).strip(),
+                    STAGE_RECALL_GROUNDING_TOKENS,
+                )
                 submit_fingerprint = hashlib.sha256(
                     json.dumps(
                         {"subject": subject, "script": script, "options": provider_options},

@@ -33,6 +33,24 @@ class LineageContext(_SubscriptableModel):
     causal_chain: list[str] = Field(default_factory=list)
     trace_id: str | None = None
 
+    def model_safe(self) -> "LineageContext":
+        """Return a copy with only the fields safe to expose to the model layer.
+
+        The full causal_chain, lineage_depth, and revision_sequence are
+        server-internal and must not be visible to the model, which could use
+        them to infer authorization boundaries or replay attacks.
+        Only run_id / parent reference fields are model-safe.
+        """
+        return LineageContext(
+            root_run_id=self.root_run_id,
+            parent_run_id=self.parent_run_id,
+            parent_node_id=None,   # not needed by model
+            lineage_depth=0,       # strip depth — model must not route based on it
+            revision_sequence=0,   # strip — server-managed
+            causal_chain=[],       # strip — exposes run graph topology
+            trace_id=self.trace_id,
+        )
+
 
 class PreparationResponse(_SubscriptableModel):
     """Typed result of the persisted request-preparation phase."""

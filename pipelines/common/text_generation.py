@@ -353,7 +353,16 @@ class TextTransformationFlow(Flow[TaskState]):
                     )
                     return TextCrewRun(error=self.state.failure)
             captured = True
-            output = self.output_model.model_validate(getattr(tasks["output"].output, "pydantic", None))  # type: ignore[union-attr]
+            raw_output = getattr(tasks["output"].output, "pydantic", None)  # type: ignore[union-attr]
+            try:
+                output = self.output_model.model_validate(raw_output)
+            except Exception:
+                if self.pipeline_name != "presentation":
+                    raise
+                from pipelines.ppt.jev_repair import jev_allows_repair, repair_presentation_json
+                if not jev_allows_repair(raw_output):
+                    raise
+                output = self.output_model.model_validate(repair_presentation_json(raw_output))
             output = self.prepare_quality_output(output)
             quality = self.quality_model.model_validate(getattr(tasks["quality"].output, "pydantic", None))  # type: ignore[union-attr]
             self.state.record(self.pipeline_name, "succeeded", summary="Text-generation crew completed")
@@ -544,8 +553,12 @@ class TextTransformationFlow(Flow[TaskState]):
     def _write_task_failure(self, step: str, error: str) -> None:
         try:
             TaskMemoryWriter(self._runtime()).write(step, "failed", error)
-        except Exception:
-            return
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to write task failure memory for step %r: %s: %s",
+                step, type(exc).__name__, exc,
+            )
 
     @listen(prepare_context)
     def run_crew(self, _: str) -> TextCrewRun:

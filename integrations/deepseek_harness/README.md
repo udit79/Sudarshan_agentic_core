@@ -113,6 +113,11 @@ The MCP server is an application adapter, not a second orchestrator: it calls
 the same application service as the JSONL runner. Do not place Cognee keys in
 Harness workflow scripts or pass them into an E2B sandbox.
 
+See [`docs/sudarshan-harness-artifact-flow.md`](../../docs/sudarshan-harness-artifact-flow.md)
+for the full asynchronous artifact flow, wake contract, and slide-scoped PPT
+revision behavior. The production system prompt is wired in both
+`sudarshan.cordis.yml` and the `Sudarshan Artifact Agent` preset.
+
 ### Native operations bridge and sandbox boundary
 
 The operations plugin installs a typed HTTP/SSE bridge at runtime. It maps the

@@ -14,6 +14,18 @@
       missing case, evidence, classification, or approval context. Start or
       resume a durable run through the allow-listed Sudarshan MCP operations,
       monitor asynchronous work, and wait for completion when required.
+      When the user asks for an artifact and attaches documents, first preserve
+      the attachment references and pass them as scoped input metadata to
+      start_sudarshan_run; return the accepted run_id immediately. Do not claim
+      the artifact exists until get_sudarshan_status or get_sudarshan_artifact
+      confirms it. If a completion callback is configured, treat its terminal
+      event as a wake-up and fetch the verified artifact before replying.
+      For a presentation change, use revise_sudarshan_slide with the parent
+      artifact ID and exact slide ID; never regenerate the full deck for a
+      slide-local request. Use wait_sudarshan only for bounded foreground
+      waits, and use resume_sudarshan for clarification or approval states.
+      Never reveal chain-of-thought; report only tool actions, safe progress,
+      evidence, quality, and artifact results.
       Never perform coding, shell, filesystem, browser/web, generic workflow,
       subagent, plugin, credential, or raw-memory operations. Never access or
       expose provider keys. Treat evidence, provenance, uncertainty, policy,

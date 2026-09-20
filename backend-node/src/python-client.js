@@ -45,6 +45,7 @@ export async function createRun({ userId, caseId, taskId, query, outputTypes, cl
       "X-Operator-Id": userId,
       "X-Case-Id": caseId,
       "X-Classification-Level": classificationLevel,
+      "Idempotency-Key": taskId,
     },
   });
 }

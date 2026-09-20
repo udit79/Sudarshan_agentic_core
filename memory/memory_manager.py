@@ -130,13 +130,23 @@ def _scope_from_node_sets(value: Any) -> tuple[ScopeType, str] | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
+_RETRIEVED_FROM_MAX_DEPTH = 8
+
+
+def _retrieved_from(raw: Any, _depth: int = 0) -> list[RetrievedMemory]:
+    if _depth > _RETRIEVED_FROM_MAX_DEPTH:
+        import logging
+        logging.getLogger(__name__).warning(
+            "_retrieved_from: recursion depth limit (%d) reached; truncating nested result",
+            _RETRIEVED_FROM_MAX_DEPTH,
+        )
+        return []
     if isinstance(raw, RetrievedMemory):
         return [raw]
     if isinstance(raw, (list, tuple)):
         output: list[RetrievedMemory] = []
         for item in raw:
-            output.extend(_retrieved_from(item))
+            output.extend(_retrieved_from(item, _depth + 1))
         return output
     if isinstance(raw, str):
         # Cognee may return the serialized memory document as context.
@@ -144,7 +154,7 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
             decoded = json.loads(raw)
         except json.JSONDecodeError:
             return [RetrievedMemory(raw)]
-        return _retrieved_from(decoded) if isinstance(decoded, (dict, list)) else [RetrievedMemory(raw)]
+        return _retrieved_from(decoded, _depth + 1) if isinstance(decoded, (dict, list)) else [RetrievedMemory(raw)]
     if not isinstance(raw, Mapping):
         return [RetrievedMemory(str(raw))]
 
@@ -176,7 +186,7 @@ def _retrieved_from(raw: Any) -> list[RetrievedMemory]:
                 provenance.setdefault(f"cognee_{key}", provider_payload[key])
     result = raw.get("search_result", raw.get("context", raw.get("text", raw.get("answer"))))
     if isinstance(result, (dict, list, tuple)):
-        nested = _retrieved_from(result)
+        nested = _retrieved_from(result, _depth + 1)
         return [RetrievedMemory(
             item.content,
             scope_type or item.scope_type,
@@ -306,9 +316,14 @@ class MemoryManager:
             return
         try:
             observer(name, payload)
-        except Exception:
-            # Memory telemetry must never change the result of a memory call.
-            return
+        except Exception as exc:
+            # Memory telemetry must never change the result of a memory call,
+            # but swallowing the error silently hides broken observer wiring.
+            import logging
+            logging.getLogger(__name__).warning(
+                "memory.operation_observer raised for event %r: %s: %s",
+                name, type(exc).__name__, exc,
+            )
 
     @classmethod
     def from_env(cls) -> "MemoryManager":
@@ -525,6 +540,9 @@ class MemoryManager:
                token_budget: int = 2000, session_id: str | None = None,
                stage_id: str = "default",
                context_level: ContextLevel | None = None) -> RecallResponse:
+        # token_budget default (2000) is STAGE_RECALL_DEFAULT_TOKENS.
+        # Callers that know their stage should pass a stage-specific cap from
+        # pipelines.orchestrator.constants to avoid over-consuming the run budget.
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query must be a non-empty string")
         if top_k < 1:

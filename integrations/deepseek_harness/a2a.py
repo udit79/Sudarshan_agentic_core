@@ -127,24 +127,16 @@ def agent_card_for_pipeline(pipeline_name: str, base_url: str = "") -> dict[str,
 def submit_task(application: Any, payload: Mapping[str, Any] | A2ATaskEnvelope, *, operator_id: str) -> dict[str, Any]:
     """Admit an A2A task envelope through the unified application boundary."""
 
-    # Keep the original small adapter usable by existing in-process callers;
-    # remote callers use the validated envelope below.
-    if not isinstance(payload, A2ATaskEnvelope):
-        raw_payload = dict(payload)
-        if not all(key in raw_payload for key in ("query", "user_id", "case_id")):
-            result = application.submit(raw_payload, operator_id=operator_id)
-            run_id = str(result.get("run_id") or result.get("task_id") or "")
-            return {
-                "id": run_id,
-                "status": {"state": str(result.get("status", "queued"))},
-                "artifacts": list(result.get("artifact_manifests") or []),
-                "metadata": {"run_id": run_id, "task_id": result.get("task_id")},
-            }
-
     if isinstance(payload, A2ATaskEnvelope):
         envelope = payload
     else:
-        envelope = A2ATaskEnvelope.model_validate(dict(payload))
+        raw_payload = dict(payload)
+        missing = [k for k in ("query", "user_id", "case_id") if k not in raw_payload]
+        if missing:
+            raise ValueError(
+                f"A2A task payload is missing required field(s): {', '.join(missing)}"
+            )
+        envelope = A2ATaskEnvelope.model_validate(raw_payload)
     if str(envelope.user_id).strip() != str(operator_id).strip():
         raise PermissionError("user_id must match the authenticated operator")
 
@@ -163,6 +155,18 @@ def submit_task(application: Any, payload: Mapping[str, Any] | A2ATaskEnvelope, 
         submit_payload["parent_run_id"] = envelope.lineage.parent_run_id
         submit_payload["metadata"]["lineage"] = envelope.lineage.model_dump(mode="json")
     if envelope.evidence_refs:
+        # Validate that each evidence ref belongs to the same case as the envelope
+        # to prevent a caller from referencing evidence from a different case.
+        bad_refs = [
+            ref for ref in envelope.evidence_refs
+            if isinstance(ref, dict)
+            and ref.get("case_id") is not None
+            and str(ref["case_id"]).strip() != str(envelope.case_id).strip()
+        ]
+        if bad_refs:
+            raise PermissionError(
+                f"evidence_refs contain {len(bad_refs)} ref(s) from a different case"
+            )
         submit_payload["metadata"]["evidence_refs"] = list(envelope.evidence_refs)
     if envelope.budget_cap:
         submit_payload["metadata"]["budget_cap"] = dict(envelope.budget_cap)

@@ -109,6 +109,16 @@ def inspect_presentation(
     repairs: list[str] = []
     
     total_slide_count = len(output.slides)  # Every slide is explicit in the output
+
+    if output.total_page_budget is not None and total_slide_count > output.total_page_budget:
+        issues.append(PPTIssue(
+            code="page_budget_exceeded",
+            severity="error",
+            message=f"Rendered {total_slide_count} slides; budget is {output.total_page_budget}",
+            expected=output.total_page_budget,
+            actual=total_slide_count,
+            repairable=True,
+        ))
     
     # 1. Evaluate explicit RequestConstraints
     if normalized_constraints:

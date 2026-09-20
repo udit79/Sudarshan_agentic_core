@@ -31,6 +31,10 @@ mcp = FastMCP(
     "sudarshan-agentic-core",
     instructions=(
         "Use start_sudarshan_run for asynchronous NTRO case operations. Use "
+        "attachment references in scoped metadata and treat its run_id as an "
+        "acceptance receipt, not completion. On a terminal wake event, fetch "
+        "status and the verified artifact manifest. Use revise_sudarshan_slide "
+        "for a slide-local PPT change instead of rebuilding a full deck. "
         "get_sudarshan_status for frontend-safe progress, "
         "get_sudarshan_artifact for verified artifact manifests, "
         "get_sudarshan_dag for execution graph visualization, "
@@ -54,6 +58,7 @@ MCP_TOOL_PROFILES: dict[str, frozenset[str] | None] = {
     "artifact": frozenset(
         {
             "start_sudarshan_run",
+            "revise_sudarshan_slide",
             "get_sudarshan_status",
             "wait_sudarshan",
             "cancel_sudarshan",
@@ -65,6 +70,7 @@ MCP_TOOL_PROFILES: dict[str, frozenset[str] | None] = {
     "specialist": frozenset(
         {
             "start_sudarshan_run",
+            "revise_sudarshan_slide",
             "get_sudarshan_status",
             "wait_sudarshan",
             "cancel_sudarshan",
@@ -78,6 +84,7 @@ MCP_TOOL_PROFILES: dict[str, frozenset[str] | None] = {
     "operator": frozenset(
         {
             "start_sudarshan_run",
+            "revise_sudarshan_slide",
             "get_sudarshan_status",
             "wait_sudarshan",
             "resume_sudarshan",
@@ -87,7 +94,8 @@ MCP_TOOL_PROFILES: dict[str, frozenset[str] | None] = {
             "get_sudarshan_observability",
             "get_sudarshan_trajectory",
             "get_sudarshan_dag",
-            "get_sudarshan_health",
+        "get_sudarshan_health",
+        "get_sudarshan_scheduler",
         }
     ),
     "reviewer": frozenset(
@@ -298,6 +306,7 @@ def start_sudarshan_run(
     metadata: dict[str, Any] | None = None,
     preparation_id: str | None = None,
     idempotency_key: str | None = None,
+    completion_callback_url: str | None = None,
 ) -> StartRunResponse:
     """Validate and enqueue an operation without blocking the Harness call."""
 
@@ -319,12 +328,49 @@ def start_sudarshan_run(
             "metadata": metadata or {},
             "preparation_id": preparation_id,
             "idempotency_key": idempotency_key,
+            "completion_callback_url": completion_callback_url,
         },
         operator_id=user_id,
     )
     if isinstance(raw, StartRunResponse):
-        return raw
-    return StartRunResponse.model_validate(raw)
+        resp = raw
+    else:
+        resp = StartRunResponse.model_validate(raw)
+    # Strip internal lineage fields before returning to the model layer.
+    if resp.lineage is not None:
+        resp = resp.model_copy(update={"lineage": resp.lineage.model_safe()})
+    return resp
+
+
+@mcp.tool(
+    name="revise_sudarshan_slide",
+    description=(
+        "Queue a PPT revision for one slide. Provide the parent artifact ID and a slide ID "
+        "such as slide-4; only the requested slide and its declared dependents are rerendered."
+    ),
+)
+def revise_sudarshan_slide(
+    query: str,
+    user_id: str,
+    case_id: str,
+    task_id: str,
+    parent_artifact_id: str,
+    slide_id: str,
+    revision_instruction: str,
+    idempotency_key: str | None = None,
+) -> StartRunResponse:
+    return start_sudarshan_run(
+        query=query,
+        user_id=user_id,
+        case_id=case_id,
+        task_id=task_id,
+        requested_pipelines=["ppt"],
+        operation="revise",
+        parent_artifact_id=parent_artifact_id,
+        revision_instruction=revision_instruction,
+        revision_scope=[slide_id],
+        idempotency_key=idempotency_key,
+    )
 
 
 @mcp.tool(
@@ -356,6 +402,19 @@ def wait_sudarshan(
 def get_sudarshan_health() -> dict[str, Any]:
     """Operational health check."""
     return _call("health")
+
+
+@mcp.tool(
+    name="get_sudarshan_scheduler",
+    description=(
+        "Read durable scheduler counters and queue state. Use this to diagnose queued, "
+        "running, retrying, failed, or dead-lettered runs; it does not mutate runs."
+    ),
+)
+def get_sudarshan_scheduler() -> dict[str, Any]:
+    """Return bounded scheduler telemetry for operator decisions."""
+    health = _call("health")
+    return {"scheduler": health.get("scheduler", {}), "status": health.get("status", "unknown")}
 
 
 @mcp.tool(
@@ -521,8 +580,12 @@ def start_sudarshan_skill(
         operator_id=user_id,
     )
     if isinstance(raw, StartRunResponse):
-        return raw
-    return StartRunResponse.model_validate(raw)
+        resp = raw
+    else:
+        resp = StartRunResponse.model_validate(raw)
+    if resp.lineage is not None:
+        resp = resp.model_copy(update={"lineage": resp.lineage.model_safe()})
+    return resp
 
 
 @mcp.tool(

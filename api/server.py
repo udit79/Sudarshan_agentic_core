@@ -769,6 +769,21 @@ async def get_run_dag(
     )
 
 
+@app.get("/runs/{run_id}/graph")
+async def get_run_graph(run_id: str, request: Request):
+    """Return the canonical DAG graph projection for a run."""
+    operator_id = request.headers.get("x-operator-id", "").strip()
+    if not operator_id:
+        raise HTTPException(status_code=401, detail="x-operator-id header is required")
+    try:
+        result = await asyncio.to_thread(get_application().dag_graph, run_id, operator_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found in DAG store")
+    return JSONResponse(content=result)
+
+
 
 @app.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str, request: Request):

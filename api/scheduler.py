@@ -13,6 +13,7 @@ import json
 import sqlite3
 import time
 import uuid
+import urllib.request
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
@@ -44,6 +45,10 @@ class NonRetryableSchedulerError(RuntimeError):
 class SchedulerExecutionTimeout(RetryableSchedulerError):
     """The scheduler-side execution deadline elapsed."""
 
+    def __init__(self, message: str, *, retry_safe: bool = True) -> None:
+        super().__init__(message)
+        self.retry_safe = retry_safe
+
 
 class SchedulerCancellationError(NonRetryableSchedulerError):
     """A cooperative cancellation signal interrupted scheduler execution."""
@@ -66,6 +71,7 @@ class LocalRunScheduler:
         max_attempts: int = 1,
         retry_backoff_ms: int = 250,
         execution_timeout_ms: int = 0,
+        cancel_grace_period_ms: int = 2000,
         control_plane: ControlPlane | None = None,
         queue_name: str = "runs",
         queue_reclaim_idle_ms: int | None = None,
@@ -92,6 +98,7 @@ class LocalRunScheduler:
         self.max_attempts = max_attempts
         self.retry_backoff_seconds = retry_backoff_ms / 1000
         self.execution_timeout_seconds = execution_timeout_ms / 1000
+        self.cancel_grace_period_seconds = max(0.0, cancel_grace_period_ms / 1000)
         self.control_plane = control_plane
         self.queue_name = str(queue_name).strip()
         self.queue_reclaim_idle_ms = queue_reclaim_idle_ms or max(1000, lease_ms * 2)
@@ -714,6 +721,8 @@ class LocalRunScheduler:
 
     @staticmethod
     def _is_retryable_exception(exc: Exception) -> bool:
+        if isinstance(exc, SchedulerExecutionTimeout):
+            return exc.retry_safe
         return isinstance(exc, (RetryableSchedulerError, TimeoutError, ConnectionError))
 
     @staticmethod
@@ -774,9 +783,13 @@ class LocalRunScheduler:
                     raise SchedulerCancellationError("execution cancelled cooperatively")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
+                    # Signal cooperative cancellation before declaring a timeout so
+                    # that the in-flight provider/orchestrator call gets a stop hint.
+                    cancel_event.set()
                     future.cancel()
                     raise SchedulerExecutionTimeout(
-                        f"execution exceeded {int(self.execution_timeout_seconds * 1000)}ms"
+                        f"execution exceeded {int(self.execution_timeout_seconds * 1000)}ms",
+                        retry_safe=future.done(),
                     )
                 try:
                     return future.result(timeout=min(0.05, remaining))
@@ -828,6 +841,7 @@ class LocalRunScheduler:
                 lease=lease_holder[0],
                 local_lease_token=row["lease_token"] if "lease_token" in row.keys() else None,
             )
+            self._notify_completion(payload, run_id, status, result)
         except SchedulerCancellationError as exc:
             if not lease_lost.is_set():
                 self._set_terminal(run_id, "cancelled", str(exc)[:2000], lease=lease_holder[0], local_lease_token=row["lease_token"] if "lease_token" in row.keys() else None)
@@ -844,15 +858,38 @@ class LocalRunScheduler:
                     run_id,
                     "failed",
                     error,
-                    dead_letter=retryable,
+                    dead_letter=retryable or isinstance(exc, SchedulerExecutionTimeout),
                     lease=lease_holder[0],
                     local_lease_token=row["lease_token"] if "lease_token" in row.keys() else None,
                 )
+                self._notify_completion(payload, run_id, "failed", {"error": error})
         finally:
             heartbeat_stop.set()
             heartbeat.join(timeout=max(0.1, min(1.0, self.lease_seconds)))
             with self._lock:
                 self._cancel_signals.pop(run_id, None)
+
+    @staticmethod
+    def _notify_completion(payload: Mapping[str, Any], run_id: str, status: str, result: Mapping[str, Any]) -> None:
+        """Best-effort Harness wake-up using an explicitly configured callback base."""
+        callback_url = str(payload.get("metadata", {}).get("completion_callback_url", "")).strip()
+        allowed_base = str(__import__("os").getenv("SUDARSHAN_HARNESS_CALLBACK_BASE_URL", "")).strip()
+        if not callback_url or not allowed_base or not callback_url.startswith(allowed_base):
+            return
+        body = json.dumps({
+            "event_id": f"run.completed:{run_id}:{status}",
+            "event_type": "run.completed" if status in {"succeeded", "completed", "partial"} else "run.failed",
+            "run_id": run_id,
+            "status": status,
+            "artifact_ids": list(result.get("artifact_ids", [])) if isinstance(result.get("artifact_ids"), list) else [],
+            "safe_summary": str(result.get("error") or status)[:2000],
+        }).encode("utf-8")
+        request = urllib.request.Request(callback_url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=5):
+                pass
+        except Exception:
+            return
 
     def metrics(self) -> dict[str, int]:
         """Return queue counts safe to expose through the health endpoint."""

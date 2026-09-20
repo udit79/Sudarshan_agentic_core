@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any
 from uuid import uuid4
 
 from api.control_plane import ControlPlane
+from pipelines.orchestrator.constants import BUDGET_WARNING_FRACTION
 from pipelines.orchestrator.contracts import RunPolicy, UsageRecord
+
+_log = logging.getLogger(__name__)
 
 
 class BudgetExceededError(RuntimeError):
@@ -172,12 +176,21 @@ class BudgetController:
                 cost=cost,
                 concurrency=concurrency,
             )
+            # Compute all new values before any mutation so that an unexpected
+            # exception between assignments cannot leave the ledger in a partial
+            # state.  All five fields are updated together or not at all.
+            new_reserved_model_tokens = state.reserved_model_tokens + model_tokens
+            new_reserved_tool_calls = state.reserved_tool_calls + tool_calls
+            new_reserved_wall_time_ms = state.reserved_wall_time_ms + wall_time_ms
+            new_reserved_cost = state.reserved_cost + cost
+            new_active_concurrency = state.active_concurrency + concurrency
             self._reservations[reservation.reservation_id] = reservation
-            state.reserved_model_tokens += model_tokens
-            state.reserved_tool_calls += tool_calls
-            state.reserved_wall_time_ms += wall_time_ms
-            state.reserved_cost += cost
-            state.active_concurrency += concurrency
+            state.reserved_model_tokens = new_reserved_model_tokens
+            state.reserved_tool_calls = new_reserved_tool_calls
+            state.reserved_wall_time_ms = new_reserved_wall_time_ms
+            state.reserved_cost = new_reserved_cost
+            state.active_concurrency = new_active_concurrency
+            self._warn_if_near_limit(run_id, state)
             return reservation
 
     def commit(self, reservation_id: str, usage: UsageRecord) -> BudgetSnapshot:
@@ -421,6 +434,16 @@ class BudgetController:
             max_parallel_children=int(values.get("max_parallel_children", 0)),
             active_concurrency=int(values.get("active_concurrency", 0)),
         )
+
+    def _warn_if_near_limit(self, run_id: str, state: _BudgetState) -> None:
+        """Emit a WARNING when consumed+reserved tokens cross the warning threshold."""
+        consumed = state.used_model_tokens + state.reserved_model_tokens
+        limit = state.policy.max_model_tokens
+        if limit > 0 and consumed / limit >= BUDGET_WARNING_FRACTION:
+            _log.warning(
+                "run %s is at %.0f%% of its token budget (%d/%d tokens used+reserved)",
+                run_id, consumed / limit * 100, consumed, limit,
+            )
 
     @staticmethod
     def _release_reserved(state: _BudgetState, reservation: BudgetReservation) -> None:

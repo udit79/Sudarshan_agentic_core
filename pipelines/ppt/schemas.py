@@ -330,6 +330,7 @@ class PresentationOutput(BaseModel):
     template_version: str | None = Field(default=None, max_length=40)
     classification_level: str = Field(min_length=1)
     distribution: str = Field(min_length=1)
+    total_page_budget: int | None = Field(default=None, ge=1, le=50)
     slides: list[SlideContent] = Field(min_length=2, max_length=15)
     @field_validator("title")
     @classmethod

@@ -8,12 +8,17 @@ must still be validated against these schemas before the request is routed.
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from typing import Any, Callable, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from pipelines.common.contracts import AdvisoryRequest
+from pipelines.orchestrator.constants import STAGE_RECALL_GROUNDING_TOKENS
+
+_log = logging.getLogger(__name__)
 
 
 SUPPORTED_PIPELINES = frozenset(
@@ -52,7 +57,7 @@ class PromptPlan(BaseModel):
     pipeline: str = Field(min_length=1, max_length=64)
     objective: str = Field(min_length=1, max_length=1000)
     task_instructions: list[str] = Field(default_factory=list, max_length=30)
-    memory_context: str = Field(default="", max_length=50000)
+    memory_context: str = Field(default="", max_length=STAGE_RECALL_GROUNDING_TOKENS * 4)
     output_requirements: list[str] = Field(default_factory=list, max_length=30)
     quality_constraints: list[str] = Field(default_factory=list, max_length=30)
     delivery_constraints: list[str] = Field(default_factory=list, max_length=30)
@@ -128,6 +133,127 @@ def default_intent_resolver(request: AdvisoryRequest) -> str:
     )
 
 
+class JevIntentResolver:
+    """Pipeline router backed by TypeSafe AI's Jev structured-decision model.
+
+    Jev returns a type-safe ``Choice`` (never hallucinates a pipeline name that
+    is not in the ``criteria`` dict) plus a calibrated ``confidence`` score.
+    When confidence is below ``min_confidence``, or when Jev is disabled or
+    unavailable, the call transparently falls back to ``default_intent_resolver``.
+
+    Enable via environment:
+        SUDARSHAN_JEV_ROUTING_ENABLED=true  (default true)
+        SUDARSHAN_JEV_ROUTING_MIN_CONFIDENCE=0.60
+        TYPESAFE_API_KEY=<your key>
+    """
+
+    _PIPELINE_CRITERIA = {
+        "ppt": "Create or edit a PowerPoint presentation or slide deck",
+        "advisory": "Strategic advice, case analysis, intelligence assessment, or recommendations",
+        "video": "Generate a video, voiceover script, or video production",
+        "linkedin_post": "Write a LinkedIn post or professional social media content",
+        "executive_summary": "Produce an executive summary of a brief or report",
+        "infographic": "Create an infographic or visual data summary",
+    }
+
+    # OpenRouter model identifiers for Jev.
+    # Use the pinned version for reproducibility; swap to ~typesafe/jev-latest
+    # if you always want the newest model.
+    _OR_MODEL = "typesafe/jev-1.13"
+    _OR_BASE_URL = "https://openrouter.ai/api/v1"
+
+    def __init__(
+        self,
+        *,
+        min_confidence: float | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        env_enabled = os.getenv("SUDARSHAN_JEV_ROUTING_ENABLED", "true").lower()
+        self._enabled = enabled if enabled is not None else env_enabled not in ("false", "0", "no")
+        env_conf = os.getenv("SUDARSHAN_JEV_ROUTING_MIN_CONFIDENCE", "0.60")
+        try:
+            self._min_confidence = min_confidence if min_confidence is not None else float(env_conf)
+        except ValueError:
+            self._min_confidence = 0.60
+        self._api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+
+    def __call__(self, request: AdvisoryRequest) -> str:
+        """Resolve the pipeline using Jev via OpenRouter, with fallback to regex routing."""
+        if not self._enabled:
+            return default_intent_resolver(request)
+        if not self._api_key:
+            _log.warning("OPENROUTER_API_KEY not set; Jev routing disabled, falling back to regex")
+            return default_intent_resolver(request)
+
+        try:
+            return self._resolve_with_jev(request)
+        except Exception as exc:
+            _log.warning(
+                "Jev routing failed (%s: %s); falling back to regex resolver",
+                type(exc).__name__, exc,
+            )
+            return default_intent_resolver(request)
+
+    def _resolve_with_jev(self, request: AdvisoryRequest) -> str:
+        import urllib.request
+        import json as _json
+
+        payload = _json.dumps({
+            "model": self._OR_MODEL,
+            "state": request.query,
+            "questions": {
+                "pipeline": {
+                    "type": "choice",
+                    "instructions": (
+                        "Which output pipeline best matches this request? "
+                        "Choose the single most appropriate option."
+                    ),
+                    "criteria": self._PIPELINE_CRITERIA,
+                }
+            },
+        }).encode()
+
+        req = urllib.request.Request(
+            f"{self._OR_BASE_URL}/decisions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://sudarshan.local",
+                "X-Title": "Sudarshan Agentic Core",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = _json.loads(resp.read())
+
+        answer = body["answers"]["pipeline"]
+        pipeline: str = answer["choice"]
+        confidence: float = float(answer.get("confidence", 1.0))
+
+        _log.debug(
+            "Jev routing: pipeline=%r confidence=%.2f query_snippet=%r",
+            pipeline, confidence, request.query[:80],
+        )
+
+        if confidence < self._min_confidence:
+            _log.info(
+                "Jev confidence %.2f below threshold %.2f for pipeline %r; "
+                "falling back to regex resolver",
+                confidence, self._min_confidence, pipeline,
+            )
+            return default_intent_resolver(request)
+
+        if pipeline not in SUPPORTED_PIPELINES:
+            _log.warning(
+                "Jev returned unknown pipeline %r; falling back to regex resolver",
+                pipeline,
+            )
+            return default_intent_resolver(request)
+
+        return pipeline
+
+
 def _as_constraints(value: Any) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
@@ -159,15 +285,21 @@ def _image_request(request: AdvisoryRequest, pipeline: str) -> bool | None:
 
 
 class RequestUnderstandingAgent:
-    """Deterministic default request-understanding agent.
+    """Deterministic request-understanding agent.
 
-    It interprets routing and policy metadata without making an LLM call.  This
-    makes routing reproducible and prevents a model from changing the memory
-    scope or delivery classification.  The public ``run`` boundary is suitable
-    for a validated model-backed implementation later.
+    Uses the Jev-backed ``JevIntentResolver`` by default (when
+    ``SUDARSHAN_JEV_ROUTING_ENABLED=true`` and ``TYPESAFE_API_KEY`` is set).
+    Jev falls back automatically to ``default_intent_resolver`` when it is
+    disabled, unavailable, or returns low-confidence results, so the switch is
+    fully transparent to the rest of the orchestrator.
+
+    The ``intent_resolver`` parameter accepts any ``IntentResolver`` callable,
+    keeping this agent testable without network access.
     """
 
-    def __init__(self, intent_resolver: IntentResolver = default_intent_resolver) -> None:
+    def __init__(self, intent_resolver: IntentResolver | None = None) -> None:
+        if intent_resolver is None:
+            intent_resolver = JevIntentResolver()
         self.intent_resolver = intent_resolver
 
     def run(self, request: AdvisoryRequest, *, memory_context: str = "") -> RequestUnderstanding:
@@ -355,6 +487,7 @@ class PromptCrafterAgent:
 
 
 __all__ = [
+    "JevIntentResolver",
     "PromptCrafterAgent",
     "PromptPlan",
     "RequestUnderstanding",

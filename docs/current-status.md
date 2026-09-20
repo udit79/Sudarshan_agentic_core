@@ -7,6 +7,12 @@ separates local capability from
 production readiness so demos, judging material, and engineering work use the
 same claims.
 
+Asynchronous MCP runs return immediately with a durable `run_id`. If
+`completion_callback_url` is supplied and matches
+`SUDARSHAN_HARNESS_CALLBACK_BASE_URL`, the scheduler posts one idempotent
+terminal wake event after completion. PPT revisions use the
+`revise_sudarshan_slide` MCP tool and carry a slide-scoped revision scope.
+
 ## Executive status
 
 | Area | Current state | Honest claim |
@@ -324,3 +330,4 @@ multi-host behavior.
 - [Harness integration](../integrations/deepseek_harness/README.md)
 - [Harness UI composition](harness-ui-plugin.md)
 - [Next execution plan](next-plan.md)
+- Jev is used for routing and post-generation quality gating. Presentation JSON failures now have a fail-closed, bounded repair path: Jev may authorize only wrapper/list/default-layout normalization, followed by Pydantic validation before rendering; missing or contradictory content is retried instead of invented.

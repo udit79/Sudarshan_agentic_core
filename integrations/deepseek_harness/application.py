@@ -81,6 +81,11 @@ class SudarshanApplication:
         control_plane = self._build_control_plane()
         self.control_plane = control_plane
         self.control_plane_mode = "redis" if control_plane is not None else "sqlite"
+        # Resolve the object store mode once here and reuse it below.
+        # Reading SUDARSHAN_OBJECT_STORE_MODE a second time for the evidence
+        # index (line ~143) caused the two paths to diverge when the env var
+        # changed between calls in tests.
+        self._object_store_mode = os.getenv("SUDARSHAN_OBJECT_STORE_MODE", "local").strip().lower()
         configured_object_store = build_object_store_from_env(
             os.getenv("SUDARSHAN_ARTIFACT_ROOT", "artifacts")
         )
@@ -140,8 +145,7 @@ class SudarshanApplication:
             ),
             object_store=(
                 self.object_store
-                if os.getenv("SUDARSHAN_OBJECT_STORE_MODE", "local").strip().lower()
-                in {"durable", "filesystem", "s3"}
+                if self._object_store_mode in {"durable", "filesystem", "s3"}
                 else None
             ),
         )
@@ -182,6 +186,7 @@ class SudarshanApplication:
             max_attempts=int(os.getenv("SUDARSHAN_MAX_ATTEMPTS", "1")),
             retry_backoff_ms=int(os.getenv("SUDARSHAN_RETRY_BACKOFF_MS", "250")),
             execution_timeout_ms=int(os.getenv("SUDARSHAN_EXECUTION_TIMEOUT_MS", "0")),
+            cancel_grace_period_ms=int(os.getenv("SUDARSHAN_CANCEL_GRACE_PERIOD_MS", "2000")),
             control_plane=control_plane,
             queue_name="runs",
             queue_reclaim_idle_ms=int(os.getenv("SUDARSHAN_RUN_QUEUE_RECLAIM_IDLE_MS", "1800000")),
@@ -382,6 +387,8 @@ class SudarshanApplication:
         idempotency_key = str(data.get("idempotency_key", "")).strip()
         if not idempotency_key:
             raise ValueError("idempotency_key is required")
+        if len(idempotency_key) > 256:
+            raise ValueError("idempotency_key must not exceed 256 characters")
 
         try:
             request, run_id = self._prepare_request(data)
@@ -548,7 +555,12 @@ class SudarshanApplication:
                 attempt_id=attempt_id,
                 lease_token=lease_token,
             )
-        except Exception:
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error(
+                "run %s failed with %s: %s",
+                run_id, type(exc).__name__, exc,
+            )
             audit.log_run_complete(
                 operator_id=operator,
                 case_id=request.case_id,
@@ -1393,6 +1405,20 @@ class SudarshanApplication:
             operator_id=operator_id,
             limit=limit,
         )
+        # A reconnecting Harness may replay the same durable event page. Keep
+        # the projection stable by event identity and bounded by the caller's
+        # requested limit; terminal runs do not grow an active trajectory.
+        unique_events = []
+        seen_event_ids: set[str] = set()
+        for event in projection["events"]:
+            event_id = str(event.get("event_id") or "")
+            if event_id and event_id in seen_event_ids:
+                continue
+            if event_id:
+                seen_event_ids.add(event_id)
+            unique_events.append(event)
+        projection["events"] = unique_events[-max(1, min(int(limit), 5000)):]
+        projection["event_count"] = len(projection["events"])
         lane_state: dict[str, dict[str, Any]] = {}
         for event in projection["events"]:
             lane_id = (
@@ -2317,6 +2343,10 @@ class SudarshanApplication:
         if graph is None:
             return {"status": "not_changed"}
         return graph.model_dump(mode="json")
+
+    def dag_graph(self, run_id: str, operator_id: str) -> dict[str, Any]:
+        """Compatibility alias for callers asking for the run graph."""
+        return self.get_dag(run_id, operator_id)
 
 
 _application: SudarshanApplication | None = None

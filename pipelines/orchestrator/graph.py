@@ -41,6 +41,11 @@ from pipelines.orchestrator.types import (
     load_pipeline_plugins,
     response_to_dict,
 )
+from pipelines.orchestrator.constants import (
+    RUN_DEFAULT_TOKEN_BUDGET,
+    STAGE_RECALL_GROUNDING_TOKENS,
+    STAGE_RECALL_UNDERSTANDING_TOKENS,
+)
 from pipelines.orchestrator.understanding import (
     PromptCrafterAgent,
     RequestUnderstandingAgent,
@@ -93,7 +98,7 @@ def _request_from_dict(data: Mapping[str, Any]) -> AdvisoryRequest:
         classification_level=str(data.get("classification_level", "RESTRICTED")),
         distribution=str(data.get("distribution", "Authorized NTRO personnel")),
         top_k=int(data.get("top_k", 12)),
-        token_budget=int(data.get("token_budget", 6000)),
+        token_budget=int(data.get("token_budget", RUN_DEFAULT_TOKEN_BUDGET)),
         requested_pipelines=tuple(data.get("requested_pipelines", ())),
         operation=str(data.get("operation", "create")),
         parent_run_id=data.get("parent_run_id"),
@@ -528,6 +533,7 @@ class PipelineOrchestrator:
             snapshot = self.graph.get_state(config)
             values = dict(snapshot.values)
         except Exception:
+            _log.warning("LangGraph state read failed for run %s; treating as not found", run_id, exc_info=True)
             values = {}
         current_status = values.get("status")
         if not values:
@@ -591,6 +597,7 @@ class PipelineOrchestrator:
             TaskMemoryWriter(runtime).write(step, status, content[:2000])
         except Exception:
             # Audit persistence must not hide a routing or generation failure.
+            _log.warning("Orchestrator task audit write failed at step %r", step, exc_info=True)
             return
 
     def _build_graph(self) -> Any:
@@ -915,7 +922,7 @@ class PipelineOrchestrator:
                 run_id=state["run_id"],
                 stage_id="understanding",
                 top_k=min(request.top_k, 8),
-                token_budget=min(request.token_budget, 1200),
+                token_budget=min(request.token_budget, STAGE_RECALL_UNDERSTANDING_TOKENS),
             )
             if pack is not None:
                 _validate_context_scope(pack, request, allow_missing_task=True)
@@ -926,7 +933,7 @@ class PipelineOrchestrator:
                     query=recall_query,
                     context=request_context,
                     top_k=min(request.top_k, 8),
-                    token_budget=min(request.token_budget, 1200),
+                    token_budget=min(request.token_budget, STAGE_RECALL_UNDERSTANDING_TOKENS),
                     session_id=state["run_id"],
                 )
                 records = _memory_records(recalled)
@@ -1080,7 +1087,7 @@ class PipelineOrchestrator:
                 run_id=state["run_id"],
                 stage_id="grounding",
                 top_k=min(request.top_k, 16),
-                token_budget=min(request.token_budget, 2600),
+                token_budget=min(request.token_budget, STAGE_RECALL_GROUNDING_TOKENS),
             )
             if pack is not None:
                 _validate_context_scope(pack, request)
@@ -1232,6 +1239,38 @@ class PipelineOrchestrator:
                                   message="Waiting for an authorized approval decision", pipeline=pipeline,
                                   requires_action=True)
                 elif response.status == "succeeded":
+                    self._jev_judge(request, payload, pipeline, reporter)
+                    if payload.get("metadata", {}).get("jev_needs_retry"):
+                        # Jev flagged the output — re-run the pipeline once through
+                        # the quality-critic path before returning.  Since Jev never
+                        # hallucinates, a needs_retry flag is a reliable quality signal.
+                        _log.info(
+                            "Jev judge flagged %r output; triggering one quality-critic retry",
+                            pipeline,
+                        )
+                        retry_payload = self._run_one_pipeline(
+                            state, request, pipeline,
+                            state.get("prompt_plans", {}).get(pipeline, state.get("prompt_plan", {})),
+                        )
+                        retry_response = _response_from_dict(retry_payload)
+                        if retry_response is not None and retry_response.status == "succeeded":
+                            # Accept the retry result; clear the jev_needs_retry flag
+                            payload = retry_payload
+                            retry_metadata = dict(payload.get("metadata") or {})
+                            retry_metadata.pop("jev_needs_retry", None)
+                            retry_metadata["jev_retry_applied"] = True
+                            payload["metadata"] = retry_metadata
+                            reporter.emit(
+                                stage="pipeline_result", status="succeeded", progress=90,
+                                message="Jev-triggered retry produced a validated result",
+                                pipeline=pipeline,
+                            )
+                            return {
+                                "response": payload,
+                                "responses": {pipeline: payload},
+                                "stage": "pipeline_result",
+                                "status": "succeeded",
+                            }
                     reporter.emit(stage="pipeline_result", status="succeeded", progress=90,
                                   message="Pipeline produced a validated result", pipeline=pipeline,
                                   usage=usage, usage_id=usage_id,
@@ -1469,6 +1508,122 @@ class PipelineOrchestrator:
                       message="The orchestration run failed", pipeline=state.get("pipeline"),
                       error_code="ORCHESTRATION_FAILED")
         return {"status": "failed", "stage": "failed"}
+
+    def _jev_judge(
+        self,
+        request: AdvisoryRequest,
+        payload: dict[str, Any],
+        pipeline: str,
+        reporter: ProgressReporter,
+    ) -> None:
+        """Run a Jev quality gate on a succeeded pipeline response.
+
+        This is a best-effort check: any failure (import error, network error,
+        SDK error) is logged as a warning and does not block the response.
+        The result is attached to payload["metadata"]["jev_judge"] for
+        observability but does not change the pipeline status.
+
+        Enable via environment:
+            SUDARSHAN_JEV_JUDGE_ENABLED=true   (default true)
+            SUDARSHAN_JEV_JUDGE_RETRY_THRESHOLD=0.80
+        """
+        if os.getenv("SUDARSHAN_JEV_JUDGE_ENABLED", "true").lower() in ("false", "0", "no"):
+            return
+
+        query = request.query
+        output_text = ""
+        if isinstance(payload.get("output"), dict):
+            output_text = str(payload["output"])[:4000]
+        elif isinstance(payload.get("output"), str):
+            output_text = payload["output"][:4000]
+        if not output_text:
+            return
+
+        try:
+            import json as _json
+            import urllib.request as _urllib
+
+            api_key = os.getenv("OPENROUTER_API_KEY", "")
+            if not api_key:
+                return  # silently skip if OpenRouter key not configured
+
+            retry_threshold = float(os.getenv("SUDARSHAN_JEV_JUDGE_RETRY_THRESHOLD", "0.80"))
+            payload_bytes = _json.dumps({
+                "model": "typesafe/jev-1.13",
+                "state": f"ORIGINAL REQUEST:\n{query}\n\nPIPELINE OUTPUT:\n{output_text}",
+                "questions": {
+                    "relevance": {
+                        "type": "score",
+                        "instructions": "How well does the output address the original request",
+                        "criteria": [
+                            "Completely off-topic or missing the point",
+                            "Partially addresses the request",
+                            "Fully and accurately addresses the request",
+                        ],
+                    },
+                    "is_complete": {
+                        "type": "noul",
+                        "instructions": "The output is complete and not truncated mid-sentence",
+                    },
+                    "needs_retry": {
+                        "type": "noul",
+                        "instructions": "The output is clearly wrong, empty, or unhelpful and should be retried",
+                    },
+                },
+            }).encode()
+            req = _urllib.Request(
+                "https://openrouter.ai/api/v1/decisions",
+                data=payload_bytes,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://sudarshan.local",
+                    "X-Title": "Sudarshan Agentic Core",
+                },
+                method="POST",
+            )
+            with _urllib.urlopen(req, timeout=8) as resp:
+                body = _json.loads(resp.read())
+
+            relevance_score: float = float(body["answers"]["relevance"]["score"])
+            is_complete: float = float(body["answers"]["is_complete"]["noul"])
+            needs_retry: float = float(body["answers"]["needs_retry"]["noul"])
+
+            import logging
+            _glog = logging.getLogger(__name__)
+            _glog.info(
+                "Jev judge [%s]: relevance=%.2f is_complete=%.2f needs_retry=%.2f",
+                pipeline, relevance_score, is_complete, needs_retry,
+            )
+
+            flagged = needs_retry >= retry_threshold
+            judge_result = {
+                "relevance_score": relevance_score,
+                "is_complete": is_complete,
+                "needs_retry": needs_retry,
+                "flagged": flagged,
+            }
+            metadata = dict(payload.get("metadata") or {})
+            metadata["jev_judge"] = judge_result
+            if flagged:
+                # Signal the dispatch loop to trigger one quality-critic retry.
+                # The flag is cleared by the caller after a successful retry.
+                metadata["jev_needs_retry"] = True
+
+            payload["metadata"] = metadata
+
+            # Always log all three scores regardless of outcome.
+            import logging as _logging
+            _logging.getLogger(__name__).info(
+                "Jev judge [%s]: relevance=%.2f is_complete=%.2f needs_retry=%.2f forwarded=%s",
+                pipeline, relevance_score, is_complete, needs_retry, not flagged,
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Jev judge failed for pipeline %r (%s: %s); result not affected",
+                pipeline, type(exc).__name__, exc,
+            )
 
 
 def _response_from_dict(data: Any) -> PipelineResponse | None:
